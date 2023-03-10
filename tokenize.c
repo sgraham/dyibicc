@@ -636,6 +636,28 @@ Token *tokenize(File *file) {
   return head.next;
 }
 
+#ifdef _MSC_VER
+
+// Returns the contents of a given file. Doesn't support '-' for reading from
+// stdin.
+static char *read_file(char *path) {
+  FILE* fp = fopen(path, "rb");
+  if (!fp) {
+    return NULL;
+  }
+
+  fseek(fp, 0, SEEK_END);
+  long long size = ftell(fp);
+  rewind(fp);
+  char* buf = malloc(size + 1);
+  long long n = fread(buf, 1, size, fp);
+  fclose(fp);
+  buf[n] = 0;
+  return buf;
+}
+
+#else
+
 // Returns the contents of a given file.
 static char *read_file(char *path) {
   FILE *fp;
@@ -673,6 +695,8 @@ static char *read_file(char *path) {
   fclose(out);
   return buf;
 }
+
+#endif
 
 File **get_input_files(void) {
   return input_files;

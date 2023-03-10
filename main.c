@@ -1,5 +1,105 @@
 #include "chibicc.h"
 
+#ifdef _MSC_VER
+
+// Only .c to .s on Windows, no arguments or driver or much of anything.
+// Full implementation for linux-y systems below.
+
+StringArray include_paths;
+bool opt_fcommon = true;
+bool opt_fpic;
+
+char *base_file;
+static char *output_file;
+
+static void usage(int status) {
+  fprintf(stderr, "chibicc <file>\n");
+  exit(status);
+}
+
+static void add_default_include_paths(char *argv0) {
+  // We expect that chibicc-specific include files are installed
+  // to ./include relative to argv[0].
+  strarray_push(&include_paths, format("%s/include", dirname(strdup(argv0))));
+
+  // Add standard include paths.
+  strarray_push(&include_paths, "/usr/local/include");
+  strarray_push(&include_paths, "/usr/include/x86_64-linux-gnu");
+  strarray_push(&include_paths, "/usr/include");
+}
+
+static FILE *open_file(char *path) {
+  if (!path || strcmp(path, "-") == 0)
+    return stdout;
+
+  FILE *out = fopen(path, "wb");
+  if (!out)
+    error("cannot open output file: %s: %s", path, strerror(errno));
+  return out;
+}
+
+// Replace file extension
+static char *replace_extn(char *tmpl, char *extn) {
+  char *filename = basename(strdup(tmpl));
+  char *dot = strrchr(filename, '.');
+  if (dot)
+    *dot = '\0';
+  return format("%s%s", filename, extn);
+}
+
+static Token *must_tokenize_file(char *path) {
+  Token *tok = tokenize_file(path);
+  if (!tok)
+    error("%s: %s", path, strerror(errno));
+  return tok;
+}
+
+static Token *append_tokens(Token *tok1, Token *tok2) {
+  if (!tok1 || tok1->kind == TK_EOF)
+    return tok2;
+
+  Token *t = tok1;
+  while (t->next->kind != TK_EOF)
+    t = t->next;
+  t->next = tok2;
+  return tok1;
+}
+
+static void cc1(void) {
+  Token *tok = NULL;
+
+  // Tokenize and parse.
+  Token *tok2 = must_tokenize_file(base_file);
+  tok = append_tokens(tok, tok2);
+  tok = preprocess(tok);
+
+  Obj *prog = parse(tok);
+
+  FILE *out = open_file(output_file);
+
+  // Traverse the AST to emit assembly.
+  codegen(prog, out);
+  fclose(out);
+}
+
+int main(int argc, char **argv) {
+  init_macros();
+  add_default_include_paths(argv[0]);
+  if (argc != 2) {
+    usage(1);
+  }
+  base_file = argv[1];
+  output_file = replace_extn(base_file, ".s");
+  cc1();
+  return 0;
+}
+
+#else
+
+#include <glob.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
 typedef enum {
   FILE_NONE, FILE_C, FILE_ASM, FILE_OBJ, FILE_AR, FILE_DSO,
 } FileType;
@@ -512,6 +612,12 @@ static Token *append_tokens(Token *tok1, Token *tok2) {
   return tok1;
 }
 
+// Returns true if a given file exists.
+static bool file_exists(char *path) {
+  struct stat st;
+  return !stat(path, &st);
+}
+
 static void cc1(void) {
   Token *tok = NULL;
 
@@ -568,7 +674,7 @@ static void cc1(void) {
 }
 
 static void assemble(char *input, char *output) {
-  char *cmd[] = {"as", "-c", input, "-o", output, NULL};
+  char *cmd[] = {"nasm", "-Ox", "-felf64", input, "-o", output, NULL};
   run_subprocess(cmd);
 }
 
@@ -580,12 +686,6 @@ static char *find_file(char *pattern) {
     path = strdup(buf.gl_pathv[buf.gl_pathc - 1]);
   globfree(&buf);
   return path;
-}
-
-// Returns true if a given file exists.
-bool file_exists(char *path) {
-  struct stat st;
-  return !stat(path, &st);
 }
 
 static char *find_libpath(void) {
@@ -789,3 +889,5 @@ int main(int argc, char **argv) {
     run_linker(&ld_args, opt_o ? opt_o : "a.out");
   return 0;
 }
+
+#endif

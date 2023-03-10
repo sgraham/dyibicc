@@ -171,10 +171,10 @@ echo "#include \"idirafter\"" | $chibicc -idirafter $tmp/dir1 -I$tmp/dir2 -E -xc
 check -idirafter
 
 # -fcommon
-echo 'int foo;' | $chibicc -S -o- -xc - | grep -q '\.comm foo'
+echo 'int foo;' | $chibicc -S -o- -xc - | grep -q 'common foo'
 check '-fcommon (default)'
 
-echo 'int foo;' | $chibicc -fcommon -S -o- -xc - | grep -q '\.comm foo'
+echo 'int foo;' | $chibicc -fcommon -S -o- -xc - | grep -q 'common foo'
 check '-fcommon'
 
 # -fno-common
@@ -191,8 +191,9 @@ check -include
 # -x
 echo 'int x;' | $chibicc -c -xc -o $tmp/foo.o -
 check -xc
-echo 'x:' | $chibicc -c -x assembler -o $tmp/foo.o -
-check '-x assembler'
+# NASM doesn't support reading from stdin with '-'
+#echo 'x:' | $chibicc -c -x assembler -o $tmp/foo.o -
+#check '-x assembler'
 
 echo 'int x;' > $tmp/foo.c
 $chibicc -c -x assembler -x none -o $tmp/foo.o $tmp/foo.c

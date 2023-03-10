@@ -5,11 +5,21 @@
 
 static FILE *output_file;
 static int depth;
-static char *argreg8[] = {"%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"};
-static char *argreg16[] = {"%di", "%si", "%dx", "%cx", "%r8w", "%r9w"};
-static char *argreg32[] = {"%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"};
-static char *argreg64[] = {"%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"};
+static char *argreg8[] = {"dil", "sil", "dl", "cl", "r8b", "r9b"};
+static char *argreg16[] = {"di", "si", "dx", "cx", "r8w", "r9w"};
+static char *argreg32[] = {"edi", "esi", "edx", "ecx", "r8d", "r9d"};
+static char *argreg64[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
 static Obj *current_fn;
+static int last_file_no;
+static int last_line_no;
+
+#ifdef _MSC_VER
+#define LONG_U "%llu"
+#define LONG_D "%lld"
+#else
+#define LONG_U "%lu"
+#define LONG_D "%ld"
+#endif
 
 static void gen_expr(Node *node);
 static void gen_stmt(Node *node);
@@ -29,7 +39,7 @@ static int count(void) {
 }
 
 static void push(void) {
-  println("  push %%rax");
+  println("  push rax");
   depth++;
 }
 
@@ -39,14 +49,14 @@ static void pop(char *arg) {
 }
 
 static void pushf(void) {
-  println("  sub $8, %%rsp");
-  println("  movsd %%xmm0, (%%rsp)");
+  println("  sub rsp, 8");
+  println("  movsd [rsp], xmm0");
   depth++;
 }
 
 static void popf(int reg) {
-  println("  movsd (%%rsp), %%xmm%d", reg);
-  println("  add $8, %%rsp");
+  println("  movsd xmm%d, [rsp]", reg);
+  println("  add rsp, 8");
   depth--;
 }
 
@@ -58,20 +68,20 @@ int align_to(int n, int align) {
 
 static char *reg_dx(int sz) {
   switch (sz) {
-  case 1: return "%dl";
-  case 2: return "%dx";
-  case 4: return "%edx";
-  case 8: return "%rdx";
+  case 1: return "dl";
+  case 2: return "dx";
+  case 4: return "edx";
+  case 8: return "rdx";
   }
   unreachable();
 }
 
 static char *reg_ax(int sz) {
   switch (sz) {
-  case 1: return "%al";
-  case 2: return "%ax";
-  case 4: return "%eax";
-  case 8: return "%rax";
+  case 1: return "al";
+  case 2: return "ax";
+  case 4: return "eax";
+  case 8: return "rax";
   }
   unreachable();
 }
@@ -83,13 +93,13 @@ static void gen_addr(Node *node) {
   case ND_VAR:
     // Variable-length array, which is always local.
     if (node->var->ty->kind == TY_VLA) {
-      println("  mov %d(%%rbp), %%rax", node->var->offset);
+      println("  mov rax, [rbp+%d]", node->var->offset);
       return;
     }
 
     // Local variable
     if (node->var->is_local) {
-      println("  lea %d(%%rbp), %%rax", node->var->offset);
+      println("  lea rax, [rbp+%d]", node->var->offset);
       return;
     }
 
@@ -104,14 +114,14 @@ static void gen_addr(Node *node) {
       }
 
       // Function or global variable
-      println("  mov %s@GOTPCREL(%%rip), %%rax", node->var->name);
+      println("  mov rax, [rel %s wrt ..got]", node->var->name);
       return;
     }
 
     // Thread-local variable
     if (node->var->is_tls) {
-      println("  mov %%fs:0, %%rax");
-      println("  add $%s@tpoff, %%rax", node->var->name);
+      println("  mov rax, fs:0");
+      println("  add rax, [rel %s wrt ..gottpoff]", node->var->name);
       return;
     }
 
@@ -141,14 +151,14 @@ static void gen_addr(Node *node) {
     // Function
     if (node->ty->kind == TY_FUNC) {
       if (node->var->is_definition)
-        println("  lea %s(%%rip), %%rax", node->var->name);
+        println("  lea rax, [rel %s]", node->var->name);
       else
-        println("  mov %s@GOTPCREL(%%rip), %%rax", node->var->name);
+        println("  mov rax, [rel %s wrt ..got]", node->var->name);
       return;
     }
 
     // Global variable
-    println("  lea %s(%%rip), %%rax", node->var->name);
+    println("  lea rax, [rel %s]", node->var->name);
     return;
   case ND_DEREF:
     gen_expr(node->lhs);
@@ -159,7 +169,7 @@ static void gen_addr(Node *node) {
     return;
   case ND_MEMBER:
     gen_addr(node->lhs);
-    println("  add $%d, %%rax", node->member->offset);
+    println("  add rax, %d", node->member->offset);
     return;
   case ND_FUNCALL:
     if (node->ret_buffer) {
@@ -175,7 +185,7 @@ static void gen_addr(Node *node) {
     }
     break;
   case ND_VLA_PTR:
-    println("  lea %d(%%rbp), %%rax", node->var->offset);
+    println("  lea rax, [rbp+%d]", node->var->offset);
     return;
   }
 
@@ -198,13 +208,13 @@ static void load(Type *ty) {
     // the first element of the array in C" occurs.
     return;
   case TY_FLOAT:
-    println("  movss (%%rax), %%xmm0");
+    println("  movss xmm0, [rax]");
     return;
   case TY_DOUBLE:
-    println("  movsd (%%rax), %%xmm0");
+    println("  movsd xmm0, [rax]");
     return;
   case TY_LDOUBLE:
-    println("  fldt (%%rax)");
+    println("  fld tword [rax]");
     return;
   }
 
@@ -216,69 +226,69 @@ static void load(Type *ty) {
   // register for char, short and int may contain garbage. When we load
   // a long value to a register, it simply occupies the entire register.
   if (ty->size == 1)
-    println("  %sbl (%%rax), %%eax", insn);
+    println("  %sx eax, byte [rax]", insn);
   else if (ty->size == 2)
-    println("  %swl (%%rax), %%eax", insn);
+    println("  %sx eax, word [rax]", insn);
   else if (ty->size == 4)
-    println("  movsxd (%%rax), %%rax");
+    println("  movsx rax, dword [rax]");
   else
-    println("  mov (%%rax), %%rax");
+    println("  mov rax, qword [rax]");
 }
 
 // Store %rax to an address that the stack top is pointing to.
 static void store(Type *ty) {
-  pop("%rdi");
+  pop("rdi");
 
   switch (ty->kind) {
   case TY_STRUCT:
   case TY_UNION:
     for (int i = 0; i < ty->size; i++) {
-      println("  mov %d(%%rax), %%r8b", i);
-      println("  mov %%r8b, %d(%%rdi)", i);
+      println("  mov r8b, [rax+%d]", i);
+      println("  mov [rdi+%d], r8b", i);
     }
     return;
   case TY_FLOAT:
-    println("  movss %%xmm0, (%%rdi)");
+    println("  movss [rdi], xmm0");
     return;
   case TY_DOUBLE:
-    println("  movsd %%xmm0, (%%rdi)");
+    println("  movsd [rdi], xmm0");
     return;
   case TY_LDOUBLE:
-    println("  fstpt (%%rdi)");
+    println("  fstp tword [rdi]");
     return;
   }
 
   if (ty->size == 1)
-    println("  mov %%al, (%%rdi)");
+    println("  mov [rdi], al");
   else if (ty->size == 2)
-    println("  mov %%ax, (%%rdi)");
+    println("  mov [rdi], ax");
   else if (ty->size == 4)
-    println("  mov %%eax, (%%rdi)");
+    println("  mov [rdi], eax");
   else
-    println("  mov %%rax, (%%rdi)");
+    println("  mov [rdi], rax");
 }
 
 static void cmp_zero(Type *ty) {
   switch (ty->kind) {
   case TY_FLOAT:
-    println("  xorps %%xmm1, %%xmm1");
-    println("  ucomiss %%xmm1, %%xmm0");
+    println("  xorps xmm1, xmm1");
+    println("  ucomiss xmm0, xmm1");
     return;
   case TY_DOUBLE:
-    println("  xorpd %%xmm1, %%xmm1");
-    println("  ucomisd %%xmm1, %%xmm0");
+    println("  xorpd xmm1, xmm1");
+    println("  ucomisd xmm0, xmm1");
     return;
   case TY_LDOUBLE:
     println("  fldz");
     println("  fucomip");
-    println("  fstp %%st(0)");
+    println("  fstp st(0)");
     return;
   }
 
   if (is_integer(ty) && ty->size <= 4)
-    println("  cmp $0, %%eax");
+    println("  cmp eax, 0");
   else
-    println("  cmp $0, %%rax");
+    println("  cmp rax, 0");
 }
 
 enum { I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, F80 };
@@ -304,71 +314,84 @@ static int getTypeId(Type *ty) {
 }
 
 // The table for type casts
-static char i32i8[] = "movsbl %al, %eax";
-static char i32u8[] = "movzbl %al, %eax";
-static char i32i16[] = "movswl %ax, %eax";
-static char i32u16[] = "movzwl %ax, %eax";
-static char i32f32[] = "cvtsi2ssl %eax, %xmm0";
-static char i32i64[] = "movsxd %eax, %rax";
-static char i32f64[] = "cvtsi2sdl %eax, %xmm0";
-static char i32f80[] = "mov %eax, -4(%rsp); fildl -4(%rsp)";
+static char i32i8[] = "movsx eax, al";
+static char i32u8[] = "movzx eax, al";
+static char i32i16[] = "movsx eax, ax";
+static char i32u16[] = "movzx eax, ax";
+static char i32f32[] = "cvtsi2ss xmm0, eax";
+static char i32i64[] = "movsx rax, eax";
+static char i32f64[] = "cvtsi2sd xmm0, eax";
+static char i32f80[] = "mov [rsp-4], eax\n fild dword [rsp-4]";
 
-static char u32f32[] = "mov %eax, %eax; cvtsi2ssq %rax, %xmm0";
-static char u32i64[] = "mov %eax, %eax";
-static char u32f64[] = "mov %eax, %eax; cvtsi2sdq %rax, %xmm0";
-static char u32f80[] = "mov %eax, %eax; mov %rax, -8(%rsp); fildll -8(%rsp)";
+static char u32f32[] = "mov eax, eax\n cvtsi2ss xmm0, rax";
+static char u32i64[] = "mov eax, eax";
+static char u32f64[] = "mov eax, eax\n cvtsi2sd xmm0, rax";
+static char u32f80[] = "mov eax, eax\n mov [rsp-8], rax; fild qword [rsp-8]";
 
-static char i64f32[] = "cvtsi2ssq %rax, %xmm0";
-static char i64f64[] = "cvtsi2sdq %rax, %xmm0";
-static char i64f80[] = "movq %rax, -8(%rsp); fildll -8(%rsp)";
+static char i64f32[] = "cvtsi2ss xmm0, rax";
+static char i64f64[] = "cvtsi2sd xmm0, rax";
+static char i64f80[] = "movq [rsp-8], rax\n  fild qword [rsp-8]";
 
-static char u64f32[] = "cvtsi2ssq %rax, %xmm0";
+static char u64f32[] = "cvtsi2ss xmm0, rax";
 static char u64f64[] =
-  "test %rax,%rax; js 1f; pxor %xmm0,%xmm0; cvtsi2sd %rax,%xmm0; jmp 2f; "
-  "1: mov %rax,%rdi; and $1,%eax; pxor %xmm0,%xmm0; shr %rdi; "
-  "or %rax,%rdi; cvtsi2sd %rdi,%xmm0; addsd %xmm0,%xmm0; 2:";
+    "%push\n"
+    "test rax,rax\n"
+    "js %$loc1\n"
+    "pxor xmm0,xmm0\n"
+    "cvtsi2sd xmm0,rax\n"
+    "jmp %$loc2\n"
+    "%$loc1:\n"
+    "mov rdi,rax\n"
+    "and eax,1\n"
+    "pxor xmm0,xmm0\n"
+    "shr rdi, 1\n"
+    "or rdi,rax\n"
+    "cvtsi2sd xmm0,rdi\n"
+    "addsd xmm0,xmm0\n"
+    "%$loc2:\n"
+    "%pop\n";
 static char u64f80[] =
-  "mov %rax, -8(%rsp); fildq -8(%rsp); test %rax, %rax; jns 1f;"
-  "mov $1602224128, %eax; mov %eax, -4(%rsp); fadds -4(%rsp); 1:";
+  "mov [rsp-8], rax\n fild qword [rsp-8]\n test rax, rax\n jns 1f;"
+  "mov eax, 1602224128\n mov [rsp-4], eax\n fadds [rsp-4]\n 1:";
 
-static char f32i8[] = "cvttss2sil %xmm0, %eax; movsbl %al, %eax";
-static char f32u8[] = "cvttss2sil %xmm0, %eax; movzbl %al, %eax";
-static char f32i16[] = "cvttss2sil %xmm0, %eax; movswl %ax, %eax";
-static char f32u16[] = "cvttss2sil %xmm0, %eax; movzwl %ax, %eax";
-static char f32i32[] = "cvttss2sil %xmm0, %eax";
-static char f32u32[] = "cvttss2siq %xmm0, %rax";
-static char f32i64[] = "cvttss2siq %xmm0, %rax";
-static char f32u64[] = "cvttss2siq %xmm0, %rax";
-static char f32f64[] = "cvtss2sd %xmm0, %xmm0";
-static char f32f80[] = "movss %xmm0, -4(%rsp); flds -4(%rsp)";
+static char f32i8[] = "cvttss2si eax, xmm0\n movsx eax, al";
+static char f32u8[] = "cvttss2si eax, xmm0\n movzx eax, al";
+static char f32i16[] = "cvttss2si eax, xmm0\n movsx eax, ax";
+static char f32u16[] = "cvttss2si eax, xmm0\n movzx eax, ax";
+static char f32i32[] = "cvttss2si eax, xmm0";
+static char f32u32[] = "cvttss2si rax, xmm0";
+static char f32i64[] = "cvttss2si rax, xmm0";
+static char f32u64[] = "cvttss2si rax, xmm0";
+static char f32f64[] = "cvtss2sd xmm0, xmm0";
+static char f32f80[] = "movss [rsp-4], xmm0\n flds [rsp-4]";
 
-static char f64i8[] = "cvttsd2sil %xmm0, %eax; movsbl %al, %eax";
-static char f64u8[] = "cvttsd2sil %xmm0, %eax; movzbl %al, %eax";
-static char f64i16[] = "cvttsd2sil %xmm0, %eax; movswl %ax, %eax";
-static char f64u16[] = "cvttsd2sil %xmm0, %eax; movzwl %ax, %eax";
-static char f64i32[] = "cvttsd2sil %xmm0, %eax";
-static char f64u32[] = "cvttsd2siq %xmm0, %rax";
-static char f64i64[] = "cvttsd2siq %xmm0, %rax";
-static char f64u64[] = "cvttsd2siq %xmm0, %rax";
-static char f64f32[] = "cvtsd2ss %xmm0, %xmm0";
-static char f64f80[] = "movsd %xmm0, -8(%rsp); fldl -8(%rsp)";
+static char f64i8[] = "cvttsd2si eax, xmm0\n movsx eax, al";
+static char f64u8[] = "cvttsd2si eax, xmm0\n movzx eax, al";
+static char f64i16[] = "cvttsd2si eax, xmm0\n movsx eax, ax";
+static char f64u16[] = "cvttsd2si eax, xmm0\n movzx eax, ax";
+static char f64i32[] = "cvttsd2si eax, xmm0";
+static char f64u32[] = "cvttsd2si rax, xmm0";
+static char f64i64[] = "cvttsd2si rax, xmm0";
+static char f64u64[] = "cvttsd2si rax, xmm0";
+static char f64f32[] = "cvtsd2ss xmm0, xmm0";
+static char f64f80[] = "movsd [rsp-8],xmm0\n fld qword [rsp-8]";
 
 #define FROM_F80_1                                           \
-  "fnstcw -10(%rsp); movzwl -10(%rsp), %eax; or $12, %ah; " \
-  "mov %ax, -12(%rsp); fldcw -12(%rsp); "
+  "fnstcw [rsp-10]\n movzx eax, word [rsp-10]\n or ah, 12\n " \
+  "mov [rsp-12], ax\n fldcw [rsp-12]\n "
 
-#define FROM_F80_2 " -24(%rsp); fldcw -10(%rsp); "
+#define FROM_F80_2 " [rsp-24]\n fldcw [rsp-10]\n "
 
-static char f80i8[] = FROM_F80_1 "fistps" FROM_F80_2 "movsbl -24(%rsp), %eax";
-static char f80u8[] = FROM_F80_1 "fistps" FROM_F80_2 "movzbl -24(%rsp), %eax";
-static char f80i16[] = FROM_F80_1 "fistps" FROM_F80_2 "movzbl -24(%rsp), %eax";
-static char f80u16[] = FROM_F80_1 "fistpl" FROM_F80_2 "movswl -24(%rsp), %eax";
-static char f80i32[] = FROM_F80_1 "fistpl" FROM_F80_2 "mov -24(%rsp), %eax";
-static char f80u32[] = FROM_F80_1 "fistpl" FROM_F80_2 "mov -24(%rsp), %eax";
-static char f80i64[] = FROM_F80_1 "fistpq" FROM_F80_2 "mov -24(%rsp), %rax";
-static char f80u64[] = FROM_F80_1 "fistpq" FROM_F80_2 "mov -24(%rsp), %rax";
-static char f80f32[] = "fstps -8(%rsp); movss -8(%rsp), %xmm0";
-static char f80f64[] = "fstpl -8(%rsp); movsd -8(%rsp), %xmm0";
+static char f80i8[] = FROM_F80_1 "fistps" FROM_F80_2 "movsx eax, [rsp-24]";
+static char f80u8[] = FROM_F80_1 "fistps" FROM_F80_2 "movzx eax, [rsp-24]";
+static char f80i16[] = FROM_F80_1 "fistps" FROM_F80_2 "movzx eax, [rsp-24]";
+static char f80u16[] = FROM_F80_1 "fistp dword" FROM_F80_2 "movsx eax, [rsp-24]";
+static char f80i32[] = FROM_F80_1 "fistp dword" FROM_F80_2 "mov eax, [rsp-24]";
+static char f80u32[] = FROM_F80_1 "fistp dword" FROM_F80_2 "mov eax, [rsp-24]";
+static char f80i64[] = FROM_F80_1 "fistp qword" FROM_F80_2 "mov rax, [rsp-24]";
+static char f80u64[] = FROM_F80_1 "fistp qword" FROM_F80_2 "mov rax, [rsp-24]";
+static char f80f32[] = "fstps [rsp-8]\n movss xmm0, [rsp-8]";
+static char f80f64[] = "fstp qword [rsp-8]\n movsd xmm0, [rsp-8]";
 
 static char *cast_table[][11] = {
   // i8   i16     i32     i64     u8     u16     u32     u64     f32     f64     f80
@@ -393,8 +416,8 @@ static void cast(Type *from, Type *to) {
 
   if (to->kind == TY_BOOL) {
     cmp_zero(from);
-    println("  setne %%al");
-    println("  movzx %%al, %%eax");
+    println("  setne al");
+    println("  movzx eax, al");
     return;
   }
 
@@ -444,12 +467,12 @@ static bool has_flonum2(Type *ty) {
 
 static void push_struct(Type *ty) {
   int sz = align_to(ty->size, 8);
-  println("  sub $%d, %%rsp", sz);
+  println("  sub rsp, %d", sz);
   depth += sz / 8;
 
   for (int i = 0; i < ty->size; i++) {
-    println("  mov %d(%%rax), %%r10b", i);
-    println("  mov %%r10b, %d(%%rsp)", i);
+    println("  mov r10b, [rax+%d]", i);
+    println("  mov [rsp+%d], r10b", i);
   }
 }
 
@@ -473,8 +496,8 @@ static void push_args2(Node *args, bool first_pass) {
     pushf();
     break;
   case TY_LDOUBLE:
-    println("  sub $16, %%rsp");
-    println("  fstpt (%%rsp)");
+    println("  sub rsp, 16");
+    println("  fstp tword [rsp]");
     depth += 2;
     break;
   default:
@@ -552,7 +575,7 @@ static int push_args(Node *node) {
   }
 
   if ((depth + stack) % 2 == 1) {
-    println("  sub $8, %%rsp");
+    println("  sub rsp, 8");
     depth++;
     stack++;
   }
@@ -563,7 +586,7 @@ static int push_args(Node *node) {
   // If the return type is a large struct/union, the caller passes
   // a pointer to a buffer as if it were the first argument.
   if (node->ret_buffer && node->ty->size > 16) {
-    println("  lea %d(%%rbp), %%rax", node->ret_buffer->offset);
+    println("  lea rax, [rbp+%d]", node->ret_buffer->offset);
     push();
   }
 
@@ -577,14 +600,14 @@ static void copy_ret_buffer(Obj *var) {
   if (has_flonum1(ty)) {
     assert(ty->size == 4 || 8 <= ty->size);
     if (ty->size == 4)
-      println("  movss %%xmm0, %d(%%rbp)", var->offset);
+      println("  movss [rbp+%d], xmm0", var->offset);
     else
-      println("  movsd %%xmm0, %d(%%rbp)", var->offset);
+      println("  movsd [rbp+%d], xmm0", var->offset);
     fp++;
   } else {
     for (int i = 0; i < MIN(8, ty->size); i++) {
-      println("  mov %%al, %d(%%rbp)", var->offset + i);
-      println("  shr $8, %%rax");
+      println("  mov [rbp+%d], al", var->offset + i);
+      println("  shr rax, 8");
     }
     gp++;
   }
@@ -593,15 +616,15 @@ static void copy_ret_buffer(Obj *var) {
     if (has_flonum2(ty)) {
       assert(ty->size == 12 || ty->size == 16);
       if (ty->size == 12)
-        println("  movss %%xmm%d, %d(%%rbp)", fp, var->offset + 8);
+        println("  movss [rbp+%d], xmm%d", var->offset + 8, fp);
       else
-        println("  movsd %%xmm%d, %d(%%rbp)", fp, var->offset + 8);
+        println("  movsd [rbp+%d], xmm%d", var->offset + 8, fp);
     } else {
-      char *reg1 = (gp == 0) ? "%al" : "%dl";
-      char *reg2 = (gp == 0) ? "%rax" : "%rdx";
+      char *reg1 = (gp == 0) ? "al" : "dl";
+      char *reg2 = (gp == 0) ? "rax" : "rdx";
       for (int i = 8; i < MIN(16, ty->size); i++) {
-        println("  mov %s, %d(%%rbp)", reg1, var->offset + i);
-        println("  shr $8, %s", reg2);
+        println("  mov [rbp+%d], %s", var->offset + i, reg1);
+        println("  shr %s, 8", reg2);
       }
     }
   }
@@ -611,20 +634,20 @@ static void copy_struct_reg(void) {
   Type *ty = current_fn->ty->return_ty;
   int gp = 0, fp = 0;
 
-  println("  mov %%rax, %%rdi");
+  println("  mov rdi, rax");
 
   if (has_flonum(ty, 0, 8, 0)) {
     assert(ty->size == 4 || 8 <= ty->size);
     if (ty->size == 4)
-      println("  movss (%%rdi), %%xmm0");
+      println("  movss xmm0, [rdi]");
     else
-      println("  movsd (%%rdi), %%xmm0");
+      println("  movsd xmm0, [rdi]");
     fp++;
   } else {
-    println("  mov $0, %%rax");
+    println("  mov rax, 0");
     for (int i = MIN(8, ty->size) - 1; i >= 0; i--) {
-      println("  shl $8, %%rax");
-      println("  mov %d(%%rdi), %%al", i);
+      println("  shl rax, 8");
+      println("  mov ax, [rdi+%d]", i);
     }
     gp++;
   }
@@ -633,16 +656,16 @@ static void copy_struct_reg(void) {
     if (has_flonum(ty, 8, 16, 0)) {
       assert(ty->size == 12 || ty->size == 16);
       if (ty->size == 4)
-        println("  movss 8(%%rdi), %%xmm%d", fp);
+        println("  movss xmm%d, [rdi+8]", fp);
       else
-        println("  movsd 8(%%rdi), %%xmm%d", fp);
+        println("  movsd xmm%d, [rdi+8]", fp);
     } else {
-      char *reg1 = (gp == 0) ? "%al" : "%dl";
-      char *reg2 = (gp == 0) ? "%rax" : "%rdx";
-      println("  mov $0, %s", reg2);
+      char *reg1 = (gp == 0) ? "al" : "dl";
+      char *reg2 = (gp == 0) ? "rax" : "rdx";
+      println("  mov %s, 0", reg2);
       for (int i = MIN(16, ty->size) - 1; i >= 8; i--) {
-        println("  shl $8, %s", reg2);
-        println("  mov %d(%%rdi), %s", i, reg1);
+        println("  shl %s, 8", reg2);
+        println("  mov %s, [rdi+%d]", reg1, i);
       }
     }
   }
@@ -652,45 +675,60 @@ static void copy_struct_mem(void) {
   Type *ty = current_fn->ty->return_ty;
   Obj *var = current_fn->params;
 
-  println("  mov %d(%%rbp), %%rdi", var->offset);
+  println("  mov rdi, [rbp+%d]", var->offset);
 
   for (int i = 0; i < ty->size; i++) {
-    println("  mov %d(%%rax), %%dl", i);
-    println("  mov %%dl, %d(%%rdi)", i);
+    println("  mov dl, [rax+%d]", i);
+    println("  mov [rdi+%d], dl", i);
   }
 }
 
 static void builtin_alloca(void) {
   // Align size to 16 bytes.
-  println("  add $15, %%rdi");
-  println("  and $0xfffffff0, %%edi");
+  println("  add rdi, 15");
+  println("  and edi, 0xfffffff0");
 
   // Shift the temporary area by %rdi.
-  println("  mov %d(%%rbp), %%rcx", current_fn->alloca_bottom->offset);
-  println("  sub %%rsp, %%rcx");
-  println("  mov %%rsp, %%rax");
-  println("  sub %%rdi, %%rsp");
-  println("  mov %%rsp, %%rdx");
-  println("1:");
-  println("  cmp $0, %%rcx");
-  println("  je 2f");
-  println("  mov (%%rax), %%r8b");
-  println("  mov %%r8b, (%%rdx)");
-  println("  inc %%rdx");
-  println("  inc %%rax");
-  println("  dec %%rcx");
-  println("  jmp 1b");
-  println("2:");
+  println("  %%push");
+  println("  mov rcx, [rbp+%d]", current_fn->alloca_bottom->offset);
+  println("  sub rcx, rsp");
+  println("  mov rax, rsp");
+  println("  sub rsp, rdi");
+  println("  mov rdx, rsp");
+  println("%%$loc1:");
+  println("  cmp rcx, 0");
+  println("  je %%$loc2");
+  println("  mov r8b, [rax]");
+  println("  mov [rdx], r8b");
+  println("  inc rdx");
+  println("  inc rax");
+  println("  dec rcx");
+  println("  jmp %%$loc1");
+  println("%%$loc2:");
+  println("  %%pop");
 
   // Move alloca_bottom pointer.
-  println("  mov %d(%%rbp), %%rax", current_fn->alloca_bottom->offset);
-  println("  sub %%rdi, %%rax");
-  println("  mov %%rax, %d(%%rbp)", current_fn->alloca_bottom->offset);
+  println("  mov rax, [rbp+%d]", current_fn->alloca_bottom->offset);
+  println("  sub rax, rdi");
+  println("  mov [rbp+%d], rax", current_fn->alloca_bottom->offset);
+}
+
+static void update_line_loc(Node* node) {
+  if (node->tok->file->file_no != last_file_no ||
+      node->tok->line_no != last_line_no) {
+    File** files = get_input_files();
+    assert(files[node->tok->file->file_no - 1]->file_no ==
+           node->tok->file->file_no);
+    //println(" %%line %d \"%s\"", node->tok->line_no,
+            //files[node->tok->file->file_no - 1]->name);
+    last_line_no = node->tok->line_no;
+    last_file_no = node->tok->file->file_no;
+  }
 }
 
 // Generate code for a given node.
 static void gen_expr(Node *node) {
-  println("  .loc %d %d", node->tok->file->file_no, node->tok->line_no);
+  update_line_loc(node);
 
   switch (node->kind) {
   case ND_NULL_EXPR:
@@ -699,30 +737,30 @@ static void gen_expr(Node *node) {
     switch (node->ty->kind) {
     case TY_FLOAT: {
       union { float f32; uint32_t u32; } u = { node->fval };
-      println("  mov $%u, %%eax  # float %Lf", u.u32, node->fval);
-      println("  movq %%rax, %%xmm0");
+      println("  mov eax, %u  ; float %Lf", u.u32, node->fval);
+      println("  movq xmm0, rax");
       return;
     }
     case TY_DOUBLE: {
       union { double f64; uint64_t u64; } u = { node->fval };
-      println("  mov $%lu, %%rax  # double %Lf", u.u64, node->fval);
-      println("  movq %%rax, %%xmm0");
+      println("  mov rax, " LONG_U "  ; double %Lf", u.u64, node->fval);
+      println("  movq xmm0, rax");
       return;
     }
     case TY_LDOUBLE: {
       union { long double f80; uint64_t u64[2]; } u;
       memset(&u, 0, sizeof(u));
       u.f80 = node->fval;
-      println("  mov $%lu, %%rax  # long double %Lf", u.u64[0], node->fval);
-      println("  mov %%rax, -16(%%rsp)");
-      println("  mov $%lu, %%rax", u.u64[1]);
-      println("  mov %%rax, -8(%%rsp)");
-      println("  fldt -16(%%rsp)");
+      println("  mov rax, " LONG_U "  ; long double %Lf", u.u64[0], node->fval);
+      println("  mov [rsp-16], rax");
+      println("  mov rax, " LONG_U, u.u64[1]);
+      println("  mov [rsp-8], rax");
+      println("  fld [rsp-16]");
       return;
     }
     }
 
-    println("  mov $%ld, %%rax", node->val);
+    println("  mov rax, %ld", node->val);
     return;
   }
   case ND_NEG:
@@ -730,23 +768,23 @@ static void gen_expr(Node *node) {
 
     switch (node->ty->kind) {
     case TY_FLOAT:
-      println("  mov $1, %%rax");
-      println("  shl $31, %%rax");
-      println("  movq %%rax, %%xmm1");
-      println("  xorps %%xmm1, %%xmm0");
+      println("  mov rax, 1");
+      println("  shl rax, 31");
+      println("  movq xmm1, rax");
+      println("  xorps xmm0, xmm1");
       return;
     case TY_DOUBLE:
-      println("  mov $1, %%rax");
-      println("  shl $63, %%rax");
-      println("  movq %%rax, %%xmm1");
-      println("  xorpd %%xmm1, %%xmm0");
+      println("  mov rax, 1");
+      println("  shl rax, 63");
+      println("  movq xmm1, rax");
+      println("  xorpd xmm0, xmm1");
       return;
     case TY_LDOUBLE:
       println("  fchs");
       return;
     }
 
-    println("  neg %%rax");
+    println("  neg rax");
     return;
   case ND_VAR:
     gen_addr(node);
@@ -758,11 +796,11 @@ static void gen_expr(Node *node) {
 
     Member *mem = node->member;
     if (mem->is_bitfield) {
-      println("  shl $%d, %%rax", 64 - mem->bit_width - mem->bit_offset);
+      println("  shl rax, %d", 64 - mem->bit_width - mem->bit_offset);
       if (mem->ty->is_unsigned)
-        println("  shr $%d, %%rax", 64 - mem->bit_width);
+        println("  shr rax, %d", 64 - mem->bit_width);
       else
-        println("  sar $%d, %%rax", 64 - mem->bit_width);
+        println("  sar rax, %d", 64 - mem->bit_width);
     }
     return;
   }
@@ -779,24 +817,24 @@ static void gen_expr(Node *node) {
     gen_expr(node->rhs);
 
     if (node->lhs->kind == ND_MEMBER && node->lhs->member->is_bitfield) {
-      println("  mov %%rax, %%r8");
+      println("  mov r8, rax");
 
       // If the lhs is a bitfield, we need to read the current value
       // from memory and merge it with a new value.
       Member *mem = node->lhs->member;
-      println("  mov %%rax, %%rdi");
-      println("  and $%ld, %%rdi", (1L << mem->bit_width) - 1);
-      println("  shl $%d, %%rdi", mem->bit_offset);
+      println("  mov rdi, rax");
+      println("  and rdi, $%ld", (1L << mem->bit_width) - 1);
+      println("  shl rdi, %d", mem->bit_offset);
 
-      println("  mov (%%rsp), %%rax");
+      println("  mov rax, [rsp]");
       load(mem->ty);
 
       long mask = ((1L << mem->bit_width) - 1) << mem->bit_offset;
-      println("  mov $%ld, %%r9", ~mask);
-      println("  and %%r9, %%rax");
-      println("  or %%rdi, %%rax");
+      println("  mov r9, %ld", ~mask);
+      println("  and rax, r9");
+      println("  or rax, rdi");
       store(node->ty);
-      println("  mov %%r8, %%rax");
+      println("  mov rax, r8");
       return;
     }
 
@@ -816,67 +854,67 @@ static void gen_expr(Node *node) {
     return;
   case ND_MEMZERO:
     // `rep stosb` is equivalent to `memset(%rdi, %al, %rcx)`.
-    println("  mov $%d, %%rcx", node->var->ty->size);
-    println("  lea %d(%%rbp), %%rdi", node->var->offset);
-    println("  mov $0, %%al");
+    println("  mov rcx, %d", node->var->ty->size);
+    println("  lea rdi, [rbp+%d]", node->var->offset);
+    println("  mov al, 0");
     println("  rep stosb");
     return;
   case ND_COND: {
     int c = count();
     gen_expr(node->cond);
     cmp_zero(node->cond->ty);
-    println("  je .L.else.%d", c);
+    println("  je L.else.%d", c);
     gen_expr(node->then);
-    println("  jmp .L.end.%d", c);
-    println(".L.else.%d:", c);
+    println("  jmp L.end.%d", c);
+    println("L.else.%d:", c);
     gen_expr(node->els);
-    println(".L.end.%d:", c);
+    println("L.end.%d:", c);
     return;
   }
   case ND_NOT:
     gen_expr(node->lhs);
     cmp_zero(node->lhs->ty);
-    println("  sete %%al");
-    println("  movzx %%al, %%rax");
+    println("  sete al");
+    println("  movzx rax, al");
     return;
   case ND_BITNOT:
     gen_expr(node->lhs);
-    println("  not %%rax");
+    println("  not rax");
     return;
   case ND_LOGAND: {
     int c = count();
     gen_expr(node->lhs);
     cmp_zero(node->lhs->ty);
-    println("  je .L.false.%d", c);
+    println("  je L.false.%d", c);
     gen_expr(node->rhs);
     cmp_zero(node->rhs->ty);
-    println("  je .L.false.%d", c);
-    println("  mov $1, %%rax");
-    println("  jmp .L.end.%d", c);
-    println(".L.false.%d:", c);
-    println("  mov $0, %%rax");
-    println(".L.end.%d:", c);
+    println("  je L.false.%d", c);
+    println("  mov rax, 1");
+    println("  jmp L.end.%d", c);
+    println("L.false.%d:", c);
+    println("  mov rax, 0");
+    println("L.end.%d:", c);
     return;
   }
   case ND_LOGOR: {
     int c = count();
     gen_expr(node->lhs);
     cmp_zero(node->lhs->ty);
-    println("  jne .L.true.%d", c);
+    println("  jne L.true.%d", c);
     gen_expr(node->rhs);
     cmp_zero(node->rhs->ty);
-    println("  jne .L.true.%d", c);
-    println("  mov $0, %%rax");
-    println("  jmp .L.end.%d", c);
-    println(".L.true.%d:", c);
-    println("  mov $1, %%rax");
-    println(".L.end.%d:", c);
+    println("  jne L.true.%d", c);
+    println("  mov rax, 0");
+    println("  jmp L.end.%d", c);
+    println("L.true.%d:", c);
+    println("  mov rax, 1");
+    println("L.end.%d:", c);
     return;
   }
   case ND_FUNCALL: {
     if (node->lhs->kind == ND_VAR && !strcmp(node->lhs->var->name, "alloca")) {
       gen_expr(node->args);
-      println("  mov %%rax, %%rdi");
+      println("  mov rdi, rax");
       builtin_alloca();
       return;
     }
@@ -930,10 +968,10 @@ static void gen_expr(Node *node) {
       }
     }
 
-    println("  mov %%rax, %%r10");
-    println("  mov $%d, %%rax", fp);
-    println("  call *%%r10");
-    println("  add $%d, %%rsp", stack_args * 8);
+    println("  mov r10, rax");
+    println("  mov rax, %d", fp);
+    println("  call r10");
+    println("  add rsp, %d", stack_args * 8);
 
     depth -= stack_args;
 
@@ -942,19 +980,19 @@ static void gen_expr(Node *node) {
     // respectively. We clear the upper bits here.
     switch (node->ty->kind) {
     case TY_BOOL:
-      println("  movzx %%al, %%eax");
+      println("  movzx eax, al");
       return;
     case TY_CHAR:
       if (node->ty->is_unsigned)
-        println("  movzbl %%al, %%eax");
+        println("  movzx eax, al");
       else
-        println("  movsbl %%al, %%eax");
+        println("  movsx eax, al");
       return;
     case TY_SHORT:
       if (node->ty->is_unsigned)
-        println("  movzwl %%ax, %%eax");
+        println("  movzx eax, ax");
       else
-        println("  movswl %%ax, %%eax");
+        println("  movsx eax, ax");
       return;
     }
 
@@ -962,13 +1000,13 @@ static void gen_expr(Node *node) {
     // using up to two registers.
     if (node->ret_buffer && node->ty->size <= 16) {
       copy_ret_buffer(node->ret_buffer);
-      println("  lea %d(%%rbp), %%rax", node->ret_buffer->offset);
+      println("  lea rax, [rbp+%d]", node->ret_buffer->offset);
     }
 
     return;
   }
   case ND_LABEL_VAL:
-    println("  lea %s(%%rip), %%rax", node->unique_label);
+    println("  lea rax, [rel %s]", node->unique_label);
     return;
   case ND_CAS: {
     gen_expr(node->cas_addr);
@@ -976,28 +1014,30 @@ static void gen_expr(Node *node) {
     gen_expr(node->cas_new);
     push();
     gen_expr(node->cas_old);
-    println("  mov %%rax, %%r8");
+    println("  mov r8, rax");
     load(node->cas_old->ty->base);
-    pop("%rdx"); // new
-    pop("%rdi"); // addr
+    pop("rdx"); // new
+    pop("rdi"); // addr
 
     int sz = node->cas_addr->ty->base->size;
-    println("  lock cmpxchg %s, (%%rdi)", reg_dx(sz));
-    println("  sete %%cl");
-    println("  je 1f");
-    println("  mov %s, (%%r8)", reg_ax(sz));
-    println("1:");
-    println("  movzbl %%cl, %%eax");
+    println("  %%push");
+    println("  lock cmpxchg [rdi], %s", reg_dx(sz));
+    println("  sete cl");
+    println("  je %%$loc1");
+    println("  mov [r8], %s", reg_ax(sz));
+    println("%%$loc1:");
+    println("  movzx eax, cl");
+    println("  %%pop");
     return;
   }
   case ND_EXCH: {
     gen_expr(node->lhs);
     push();
     gen_expr(node->rhs);
-    pop("%rdi");
+    pop("rdi");
 
     int sz = node->lhs->ty->base->size;
-    println("  xchg %s, (%%rdi)", reg_ax(sz));
+    println("  xchg [rdi], %s", reg_ax(sz));
     return;
   }
   }
@@ -1014,39 +1054,39 @@ static void gen_expr(Node *node) {
 
     switch (node->kind) {
     case ND_ADD:
-      println("  add%s %%xmm1, %%xmm0", sz);
+      println("  add%s xmm0, xmm1", sz);
       return;
     case ND_SUB:
-      println("  sub%s %%xmm1, %%xmm0", sz);
+      println("  sub%s xmm0, xmm1", sz);
       return;
     case ND_MUL:
-      println("  mul%s %%xmm1, %%xmm0", sz);
+      println("  mul%s xmm0, xmm1", sz);
       return;
     case ND_DIV:
-      println("  div%s %%xmm1, %%xmm0", sz);
+      println("  div%s xmm0, xmm1", sz);
       return;
     case ND_EQ:
     case ND_NE:
     case ND_LT:
     case ND_LE:
-      println("  ucomi%s %%xmm0, %%xmm1", sz);
+      println("  ucomi%s xmm1, xmm0", sz);
 
       if (node->kind == ND_EQ) {
-        println("  sete %%al");
-        println("  setnp %%dl");
-        println("  and %%dl, %%al");
+        println("  sete al");
+        println("  setnp dl");
+        println("  and al, dl");
       } else if (node->kind == ND_NE) {
-        println("  setne %%al");
-        println("  setp %%dl");
-        println("  or %%dl, %%al");
+        println("  setne al");
+        println("  setp dl");
+        println("  or al, dl");
       } else if (node->kind == ND_LT) {
-        println("  seta %%al");
+        println("  seta al");
       } else {
-        println("  setae %%al");
+        println("  setae al");
       }
 
-      println("  and $1, %%al");
-      println("  movzb %%al, %%rax");
+      println("  and al, 1");
+      println("  movzx rax, al");
       return;
     }
 
@@ -1074,18 +1114,18 @@ static void gen_expr(Node *node) {
     case ND_LT:
     case ND_LE:
       println("  fcomip");
-      println("  fstp %%st(0)");
+      println("  fstp st0");
 
       if (node->kind == ND_EQ)
-        println("  sete %%al");
+        println("  sete al");
       else if (node->kind == ND_NE)
-        println("  setne %%al");
+        println("  setne al");
       else if (node->kind == ND_LT)
-        println("  seta %%al");
+        println("  seta al");
       else
-        println("  setae %%al");
+        println("  setae al");
 
-      println("  movzb %%al, %%rax");
+      println("  movzx rax, al");
       return;
     }
 
@@ -1096,34 +1136,34 @@ static void gen_expr(Node *node) {
   gen_expr(node->rhs);
   push();
   gen_expr(node->lhs);
-  pop("%rdi");
+  pop("rdi");
 
   char *ax, *di, *dx;
 
   if (node->lhs->ty->kind == TY_LONG || node->lhs->ty->base) {
-    ax = "%rax";
-    di = "%rdi";
-    dx = "%rdx";
+    ax = "rax";
+    di = "rdi";
+    dx = "rdx";
   } else {
-    ax = "%eax";
-    di = "%edi";
-    dx = "%edx";
+    ax = "eax";
+    di = "edi";
+    dx = "edx";
   }
 
   switch (node->kind) {
   case ND_ADD:
-    println("  add %s, %s", di, ax);
+    println("  add %s, %s", ax, di);
     return;
   case ND_SUB:
-    println("  sub %s, %s", di, ax);
+    println("  sub %s, %s", ax, di);
     return;
   case ND_MUL:
-    println("  imul %s, %s", di, ax);
+    println("  imul %s, %s", ax, di);
     return;
   case ND_DIV:
   case ND_MOD:
     if (node->ty->is_unsigned) {
-      println("  mov $0, %s", dx);
+      println("  mov %s, 0", dx);
       println("  div %s", di);
     } else {
       if (node->lhs->ty->size == 8)
@@ -1134,51 +1174,51 @@ static void gen_expr(Node *node) {
     }
 
     if (node->kind == ND_MOD)
-      println("  mov %%rdx, %%rax");
+      println("  mov rax, rdx");
     return;
   case ND_BITAND:
-    println("  and %s, %s", di, ax);
+    println("  and %s, %s", ax, di);
     return;
   case ND_BITOR:
-    println("  or %s, %s", di, ax);
+    println("  or %s, %s", ax, di);
     return;
   case ND_BITXOR:
-    println("  xor %s, %s", di, ax);
+    println("  xor %s, %s", ax, di);
     return;
   case ND_EQ:
   case ND_NE:
   case ND_LT:
   case ND_LE:
-    println("  cmp %s, %s", di, ax);
+    println("  cmp %s, %s", ax, di);
 
     if (node->kind == ND_EQ) {
-      println("  sete %%al");
+      println("  sete al");
     } else if (node->kind == ND_NE) {
-      println("  setne %%al");
+      println("  setne al");
     } else if (node->kind == ND_LT) {
       if (node->lhs->ty->is_unsigned)
-        println("  setb %%al");
+        println("  setb al");
       else
-        println("  setl %%al");
+        println("  setl al");
     } else if (node->kind == ND_LE) {
       if (node->lhs->ty->is_unsigned)
-        println("  setbe %%al");
+        println("  setbe al");
       else
-        println("  setle %%al");
+        println("  setle al");
     }
 
-    println("  movzb %%al, %%rax");
+    println("  movzx rax, al");
     return;
   case ND_SHL:
-    println("  mov %%rdi, %%rcx");
-    println("  shl %%cl, %s", ax);
+    println("  mov rcx, rdi");
+    println("  shl %s, cl", ax);
     return;
   case ND_SHR:
-    println("  mov %%rdi, %%rcx");
+    println("  mov rcx, rdi");
     if (node->lhs->ty->is_unsigned)
-      println("  shr %%cl, %s", ax);
+      println("  shr %s, cl", ax);
     else
-      println("  sar %%cl, %s", ax);
+      println("  sar %s, cl", ax);
     return;
   }
 
@@ -1186,27 +1226,27 @@ static void gen_expr(Node *node) {
 }
 
 static void gen_stmt(Node *node) {
-  println("  .loc %d %d", node->tok->file->file_no, node->tok->line_no);
+  update_line_loc(node);
 
   switch (node->kind) {
   case ND_IF: {
     int c = count();
     gen_expr(node->cond);
     cmp_zero(node->cond->ty);
-    println("  je  .L.else.%d", c);
+    println("  je  L.else.%d", c);
     gen_stmt(node->then);
-    println("  jmp .L.end.%d", c);
-    println(".L.else.%d:", c);
+    println("  jmp L.end.%d", c);
+    println("L.else.%d:", c);
     if (node->els)
       gen_stmt(node->els);
-    println(".L.end.%d:", c);
+    println("L.end.%d:", c);
     return;
   }
   case ND_FOR: {
     int c = count();
     if (node->init)
       gen_stmt(node->init);
-    println(".L.begin.%d:", c);
+    println("L.begin.%d:", c);
     if (node->cond) {
       gen_expr(node->cond);
       cmp_zero(node->cond->ty);
@@ -1216,18 +1256,18 @@ static void gen_stmt(Node *node) {
     println("%s:", node->cont_label);
     if (node->inc)
       gen_expr(node->inc);
-    println("  jmp .L.begin.%d", c);
+    println("  jmp L.begin.%d", c);
     println("%s:", node->brk_label);
     return;
   }
   case ND_DO: {
     int c = count();
-    println(".L.begin.%d:", c);
+    println("L.begin.%d:", c);
     gen_stmt(node->then);
     println("%s:", node->cont_label);
     gen_expr(node->cond);
     cmp_zero(node->cond->ty);
-    println("  jne .L.begin.%d", c);
+    println("  jne L.begin.%d", c);
     println("%s:", node->brk_label);
     return;
   }
@@ -1235,19 +1275,19 @@ static void gen_stmt(Node *node) {
     gen_expr(node->cond);
 
     for (Node *n = node->case_next; n; n = n->case_next) {
-      char *ax = (node->cond->ty->size == 8) ? "%rax" : "%eax";
-      char *di = (node->cond->ty->size == 8) ? "%rdi" : "%edi";
+      char *ax = (node->cond->ty->size == 8) ? "rax" : "eax";
+      char *di = (node->cond->ty->size == 8) ? "rdi" : "edi";
 
       if (n->begin == n->end) {
-        println("  cmp $%ld, %s", n->begin, ax);
+        println("  cmp %s, " LONG_D, ax, n->begin);
         println("  je %s", n->label);
         continue;
       }
 
       // [GNU] Case ranges
-      println("  mov %s, %s", ax, di);
-      println("  sub $%ld, %s", n->begin, di);
-      println("  cmp $%ld, %s", n->end - n->begin, di);
+      println("  mov %s, %s", di, ax);
+      println("  sub %s, " LONG_D, di, n->begin);
+      println("  cmp %s, " LONG_D, di, n->end - n->begin);
       println("  jbe %s", n->label);
     }
 
@@ -1271,7 +1311,7 @@ static void gen_stmt(Node *node) {
     return;
   case ND_GOTO_EXPR:
     gen_expr(node->lhs);
-    println("  jmp *%%rax");
+    println("  jmp rax");
     return;
   case ND_LABEL:
     println("%s:", node->unique_label);
@@ -1293,7 +1333,7 @@ static void gen_stmt(Node *node) {
       }
     }
 
-    println("  jmp .L.return.%s", current_fn->name);
+    println("  jmp L.return.%s", current_fn->name);
     return;
   case ND_EXPR_STMT:
     gen_expr(node->lhs);
@@ -1377,44 +1417,52 @@ static void assign_lvar_offsets(Obj *prog) {
 
 static void emit_data(Obj *prog) {
   for (Obj *var = prog; var; var = var->next) {
-    if (var->is_function || !var->is_definition)
+    if (var->is_function)
       continue;
 
-    if (var->is_static)
-      println("  .local %s", var->name);
-    else
-      println("  .globl %s", var->name);
+    if (!var->is_definition) {
+      println("  extern %s:data", var->name);
+      continue;
+    }
+
+    if (!(opt_fcommon && var->is_tentative)) {
+      if (var->is_static)
+        println("  static %s:data", var->name);
+      else
+        println("  global %s:data", var->name);
+    }
 
     int align = (var->ty->kind == TY_ARRAY && var->ty->size >= 16)
       ? MAX(16, var->align) : var->align;
 
     // Common symbol
     if (opt_fcommon && var->is_tentative) {
-      println("  .comm %s, %d, %d", var->name, var->ty->size, align);
+      println("  common %s %d:%d", var->name, var->ty->size, align);
       continue;
     }
 
     // .data or .tdata
     if (var->init_data) {
       if (var->is_tls)
-        println("  .section .tdata,\"awT\",@progbits");
+        println("  section .tdata"); // TODO: ,\"awT\",@progbits");
       else
-        println("  .data");
+        println("  section .data");
 
-      println("  .type %s, @object", var->name);
-      println("  .size %s, %d", var->name, var->ty->size);
-      println("  .align %d", align);
+      //TODO: necessary?
+      //println("  .type %s, @object", var->name);
+      //println("  .size %s, %d", var->name, var->ty->size);
+      println("  align %d", align);
       println("%s:", var->name);
 
       Relocation *rel = var->rel;
       int pos = 0;
       while (pos < var->ty->size) {
         if (rel && rel->offset == pos) {
-          println("  .quad %s%+ld", *rel->label, rel->addend);
+          println("  dq %s%+ld", *rel->label, rel->addend);
           rel = rel->next;
           pos += 8;
         } else {
-          println("  .byte %d", var->init_data[pos++]);
+          println("  db %d", var->init_data[pos++]);
         }
       }
       continue;
@@ -1422,23 +1470,23 @@ static void emit_data(Obj *prog) {
 
     // .bss or .tbss
     if (var->is_tls)
-      println("  .section .tbss,\"awT\",@nobits");
+      println("  section .tbss");  // TODO: ,\"awT\",@nobits");
     else
-      println("  .bss");
+      println("  section .bss");
 
-    println("  .align %d", align);
+    println("  align %d", align);
     println("%s:", var->name);
-    println("  .zero %d", var->ty->size);
+    println("  resb %d", var->ty->size);
   }
 }
 
 static void store_fp(int r, int offset, int sz) {
   switch (sz) {
   case 4:
-    println("  movss %%xmm%d, %d(%%rbp)", r, offset);
+    println("  movss [rbp+%d], xmm%d", offset, r);
     return;
   case 8:
-    println("  movsd %%xmm%d, %d(%%rbp)", r, offset);
+    println("  movsd [rbp+%d], xmm%d", offset, r);
     return;
   }
   unreachable();
@@ -1447,21 +1495,21 @@ static void store_fp(int r, int offset, int sz) {
 static void store_gp(int r, int offset, int sz) {
   switch (sz) {
   case 1:
-    println("  mov %s, %d(%%rbp)", argreg8[r], offset);
+    println("  mov [rbp+%d], %s", offset, argreg8[r]);
     return;
   case 2:
-    println("  mov %s, %d(%%rbp)", argreg16[r], offset);
+    println("  mov [rbp+%d], %s", offset,  argreg16[r]);
     return;
   case 4:
-    println("  mov %s, %d(%%rbp)", argreg32[r], offset);
+    println("  mov [rbp+%d], %s", offset, argreg32[r]);
     return;
   case 8:
-    println("  mov %s, %d(%%rbp)", argreg64[r], offset);
+    println("  mov [rbp+%d], %s", offset, argreg64[r]);
     return;
   default:
     for (int i = 0; i < sz; i++) {
-      println("  mov %s, %d(%%rbp)", argreg8[r], offset + i);
-      println("  shr $8, %s", argreg64[r]);
+      println("  mov [rbp+%d], %s", offset + 1, argreg8[r]);
+      println("  shr %s, 8", argreg64[r]);
     }
     return;
   }
@@ -1469,8 +1517,13 @@ static void store_gp(int r, int offset, int sz) {
 
 static void emit_text(Obj *prog) {
   for (Obj *fn = prog; fn; fn = fn->next) {
-    if (!fn->is_function || !fn->is_definition)
+    if (!fn->is_function)
       continue;
+
+    if (!fn->is_definition) {
+      println("  extern %s:function", fn->name);
+      continue;
+    }
 
     // No code is emitted for "static inline" functions
     // if no one is referencing them.
@@ -1478,20 +1531,21 @@ static void emit_text(Obj *prog) {
       continue;
 
     if (fn->is_static)
-      println("  .local %s", fn->name);
+      println("  static %s:function", fn->name);
     else
-      println("  .globl %s", fn->name);
+      println("  global %s:function", fn->name);
 
-    println("  .text");
-    println("  .type %s, @function", fn->name);
+    println("  section .text");
+    //TODO: necessary?
+    //println("  .type %s, @function", fn->name);
     println("%s:", fn->name);
     current_fn = fn;
 
     // Prologue
-    println("  push %%rbp");
-    println("  mov %%rsp, %%rbp");
-    println("  sub $%d, %%rsp", fn->stack_size);
-    println("  mov %%rsp, %d(%%rbp)", fn->alloca_bottom->offset);
+    println("  push rbp");
+    println("  mov rbp, rsp");
+    println("  sub rsp, %d", fn->stack_size);
+    println("  mov [rbp+%d], rsp", fn->alloca_bottom->offset);
 
     // Save arg registers if function is variadic
     if (fn->va_area) {
@@ -1506,28 +1560,28 @@ static void emit_text(Obj *prog) {
       int off = fn->va_area->offset;
 
       // va_elem
-      println("  movl $%d, %d(%%rbp)", gp * 8, off);          // gp_offset
-      println("  movl $%d, %d(%%rbp)", fp * 8 + 48, off + 4); // fp_offset
-      println("  movq %%rbp, %d(%%rbp)", off + 8);            // overflow_arg_area
-      println("  addq $16, %d(%%rbp)", off + 8);
-      println("  movq %%rbp, %d(%%rbp)", off + 16);           // reg_save_area
-      println("  addq $%d, %d(%%rbp)", off + 24, off + 16);
+      println("  mov dword [rbp+%d], %d", off, gp * 8);            // gp_offset
+      println("  mov dword [rbp+%d], %d", off + 4, fp * 8 + 48);   // fp_offset
+      println("  mov [rbp+%d], rbp", off + 8);  // overflow_arg_area
+      println("  add qword [rbp+%d], 16", off + 8);
+      println("  mov [rbp+%d], rbp", off + 16);  // reg_save_area
+      println("  add qword [rbp+%d], %d", off + 16, off + 24);
 
       // __reg_save_area__
-      println("  movq %%rdi, %d(%%rbp)", off + 24);
-      println("  movq %%rsi, %d(%%rbp)", off + 32);
-      println("  movq %%rdx, %d(%%rbp)", off + 40);
-      println("  movq %%rcx, %d(%%rbp)", off + 48);
-      println("  movq %%r8, %d(%%rbp)", off + 56);
-      println("  movq %%r9, %d(%%rbp)", off + 64);
-      println("  movsd %%xmm0, %d(%%rbp)", off + 72);
-      println("  movsd %%xmm1, %d(%%rbp)", off + 80);
-      println("  movsd %%xmm2, %d(%%rbp)", off + 88);
-      println("  movsd %%xmm3, %d(%%rbp)", off + 96);
-      println("  movsd %%xmm4, %d(%%rbp)", off + 104);
-      println("  movsd %%xmm5, %d(%%rbp)", off + 112);
-      println("  movsd %%xmm6, %d(%%rbp)", off + 120);
-      println("  movsd %%xmm7, %d(%%rbp)", off + 128);
+      println("  mov [rbp+%d], rdi", off + 24);
+      println("  mov [rbp+%d], rsi", off + 32);
+      println("  mov [rbp+%d], rdx", off + 40);
+      println("  mov [rbp+%d], rcx", off + 48);
+      println("  mov [rbp+%d], r8", off + 56);
+      println("  mov [rbp+%d], r9", off + 64);
+      println("  movsd [rbp+%d], xmm0", off + 72);
+      println("  movsd [rbp+%d], xmm1", off + 80);
+      println("  movsd [rbp+%d], xmm2", off + 88);
+      println("  movsd [rbp+%d], xmm3", off + 96);
+      println("  movsd [rbp+%d], xmm4", off + 104);
+      println("  movsd [rbp+%d], xmm5", off + 112);
+      println("  movsd [rbp+%d], xmm6", off + 120);
+      println("  movsd [rbp+%d], xmm7", off + 128);
     }
 
     // Save passed-by-register arguments to the stack
@@ -1572,22 +1626,23 @@ static void emit_text(Obj *prog) {
     // main function is equivalent to returning 0, even though the
     // behavior is undefined for the other functions.
     if (strcmp(fn->name, "main") == 0)
-      println("  mov $0, %%rax");
+      println("  mov rax, 0");
 
     // Epilogue
-    println(".L.return.%s:", fn->name);
-    println("  mov %%rbp, %%rsp");
-    println("  pop %%rbp");
+    println("L.return.%s:", fn->name);
+    println("  mov rsp, rbp");
+    println("  pop rbp");
     println("  ret");
   }
 }
 
 void codegen(Obj *prog, FILE *out) {
   output_file = out;
+  last_file_no = 0;
+  last_line_no = 0;
 
-  File **files = get_input_files();
-  for (int i = 0; files[i]; i++)
-    println("  .file %d \"%s\"", files[i]->file_no, files[i]->name);
+  // TODO
+  println("extern _GLOBAL_OFFSET_TABLE_");
 
   assign_lvar_offsets(prog);
   emit_data(prog);

@@ -625,6 +625,11 @@ static Token *subst(Token *tok, MacroArg *args) {
   return head.next;
 }
 
+static bool file_exists(char *path) {
+  struct stat st;
+  return !stat(path, &st);
+}
+
 // If tok is a macro, expand it and return true.
 // Otherwise, do nothing and return false.
 static bool expand_macro(Token **rest, Token *tok) {
@@ -1028,6 +1033,8 @@ static Token *counter_macro(Token *tmpl) {
 // modification time of the current file. E.g.
 // "Fri Jul 24 01:32:50 2020"
 static Token *timestamp_macro(Token *tmpl) {
+  return new_str_token("Mon May 02 01:23:45 1977", tmpl);
+#if 0
   struct stat st;
   if (stat(tmpl->file->name, &st) != 0)
     return new_str_token("??? ??? ?? ??:??:?? ????", tmpl);
@@ -1036,6 +1043,7 @@ static Token *timestamp_macro(Token *tmpl) {
   ctime_r(&st.st_mtime, buf);
   buf[24] = '\0';
   return new_str_token(buf, tmpl);
+#endif
 }
 
 static Token *base_file_macro(Token *tmpl) {
@@ -1044,17 +1052,23 @@ static Token *base_file_macro(Token *tmpl) {
 
 // __DATE__ is expanded to the current date, e.g. "May 17 2020".
 static char *format_date(struct tm *tm) {
+  return "\"May 02 1977\"";
+#if 0
   static char mon[][4] = {
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
   };
 
   return format("\"%s %2d %d\"", mon[tm->tm_mon], tm->tm_mday, tm->tm_year + 1900);
+#endif
 }
 
 // __TIME__ is expanded to the current time, e.g. "13:34:03".
 static char *format_time(struct tm *tm) {
+  return "\"01:23:45\"";
+#if 0
   return format("\"%02d:%02d:%02d\"", tm->tm_hour, tm->tm_min, tm->tm_sec);
+#endif
 }
 
 void init_macros(void) {
