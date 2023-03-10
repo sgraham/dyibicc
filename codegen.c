@@ -390,7 +390,7 @@ static char f80i32[] = FROM_F80_1 "fistp dword" FROM_F80_2 "mov eax, [rsp-24]";
 static char f80u32[] = FROM_F80_1 "fistp dword" FROM_F80_2 "mov eax, [rsp-24]";
 static char f80i64[] = FROM_F80_1 "fistp qword" FROM_F80_2 "mov rax, [rsp-24]";
 static char f80u64[] = FROM_F80_1 "fistp qword" FROM_F80_2 "mov rax, [rsp-24]";
-static char f80f32[] = "fstps [rsp-8]\n movss xmm0, [rsp-8]";
+static char f80f32[] = "fstp dword [rsp-8]\n movss xmm0, [rsp-8]";
 static char f80f64[] = "fstp qword [rsp-8]\n movsd xmm0, [rsp-8]";
 
 static char *cast_table[][11] = {
@@ -1425,18 +1425,17 @@ static void emit_data(Obj *prog) {
       continue;
     }
 
-    if (!(opt_fcommon && var->is_tentative)) {
-      if (var->is_static)
-        println("  static %s:data", var->name);
-      else
-        println("  global %s:data", var->name);
-    }
+    if (var->is_static)
+      println("  static %s:data", var->name);
+    else if (!(opt_fcommon && var->is_tentative))
+      println("  global %s:data", var->name);
 
     int align = (var->ty->kind == TY_ARRAY && var->ty->size >= 16)
-      ? MAX(16, var->align) : var->align;
+                    ? MAX(16, var->align)
+                    : var->align;
 
     // Common symbol
-    if (opt_fcommon && var->is_tentative) {
+    if (opt_fcommon && var->is_tentative && !var->is_static) {
       println("  common %s %d:%d", var->name, var->ty->size, align);
       continue;
     }
@@ -1444,17 +1443,17 @@ static void emit_data(Obj *prog) {
     // .data or .tdata
     if (var->init_data) {
       if (var->is_tls)
-        println("  section .tdata"); // TODO: ,\"awT\",@progbits");
+        println("  section .tdata");  // TODO: ,\"awT\",@progbits");
       else
-        println("  section .data");
+        println("  section .data align=%d", align);
 
-      //TODO: necessary?
-      //println("  .type %s, @object", var->name);
-      //println("  .size %s, %d", var->name, var->ty->size);
-      println("  align %d", align);
+      // TODO: necessary?
+      // println("  .type %s, @object", var->name);
+      // println("  .size %s, %d", var->name, var->ty->size);
+      // println("  align %d", align);
       println("%s:", var->name);
 
-      Relocation *rel = var->rel;
+      Relocation* rel = var->rel;
       int pos = 0;
       while (pos < var->ty->size) {
         if (rel && rel->offset == pos) {
@@ -1472,9 +1471,9 @@ static void emit_data(Obj *prog) {
     if (var->is_tls)
       println("  section .tbss");  // TODO: ,\"awT\",@nobits");
     else
-      println("  section .bss");
+      println("  section .bss align=%d", align);
 
-    println("  align %d", align);
+    // println("  align %d", align);
     println("%s:", var->name);
     println("  resb %d", var->ty->size);
   }
@@ -1498,7 +1497,7 @@ static void store_gp(int r, int offset, int sz) {
     println("  mov [rbp+%d], %s", offset, argreg8[r]);
     return;
   case 2:
-    println("  mov [rbp+%d], %s", offset,  argreg16[r]);
+    println("  mov [rbp+%d], %s", offset, argreg16[r]);
     return;
   case 4:
     println("  mov [rbp+%d], %s", offset, argreg32[r]);
@@ -1516,7 +1515,7 @@ static void store_gp(int r, int offset, int sz) {
 }
 
 static void emit_text(Obj *prog) {
-  for (Obj *fn = prog; fn; fn = fn->next) {
+  for (Obj* fn = prog; fn; fn = fn->next) {
     if (!fn->is_function)
       continue;
 
@@ -1536,8 +1535,8 @@ static void emit_text(Obj *prog) {
       println("  global %s:function", fn->name);
 
     println("  section .text");
-    //TODO: necessary?
-    //println("  .type %s, @function", fn->name);
+    // TODO: necessary?
+    // println("  .type %s, @function", fn->name);
     println("%s:", fn->name);
     current_fn = fn;
 
@@ -1550,7 +1549,7 @@ static void emit_text(Obj *prog) {
     // Save arg registers if function is variadic
     if (fn->va_area) {
       int gp = 0, fp = 0;
-      for (Obj *var = fn->params; var; var = var->next) {
+      for (Obj* var = fn->params; var; var = var->next) {
         if (is_flonum(var->ty))
           fp++;
         else
@@ -1560,8 +1559,8 @@ static void emit_text(Obj *prog) {
       int off = fn->va_area->offset;
 
       // va_elem
-      println("  mov dword [rbp+%d], %d", off, gp * 8);            // gp_offset
-      println("  mov dword [rbp+%d], %d", off + 4, fp * 8 + 48);   // fp_offset
+      println("  mov dword [rbp+%d], %d", off, gp * 8);           // gp_offset
+      println("  mov dword [rbp+%d], %d", off + 4, fp * 8 + 48);  // fp_offset
       println("  mov [rbp+%d], rbp", off + 8);  // overflow_arg_area
       println("  add qword [rbp+%d], 16", off + 8);
       println("  mov [rbp+%d], rbp", off + 16);  // reg_save_area

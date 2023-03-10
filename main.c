@@ -100,6 +100,9 @@ int main(int argc, char **argv) {
 #include <sys/wait.h>
 #include <unistd.h>
 
+// Workaround for nasm issue referring to "wait".
+pid_t MYwait(int *wstatus);
+
 typedef enum {
   FILE_NONE, FILE_C, FILE_ASM, FILE_OBJ, FILE_AR, FILE_DSO,
 } FileType;
@@ -506,7 +509,7 @@ static void run_subprocess(char **argv) {
 
   // Wait for the child process to finish.
   int status;
-  while (wait(&status) > 0);
+  while (MYwait(&status) > 0);
   if (status != 0)
     exit(1);
 }

@@ -1,6 +1,6 @@
 CFLAGS=-std=c11 -g -fno-common -Wall -Wno-switch
 
-SRCS=$(wildcard *.c)
+SRCS=codegen.c hashmap.c main.c parse.c preprocess.c strings.c tokenize.c type.c unicode.c
 OBJS=$(SRCS:.c=.o)
 
 TEST_SRCS=$(wildcard test/*.c)
@@ -9,13 +9,13 @@ TESTS=$(TEST_SRCS:.c=.exe)
 # Stage 1
 
 chibicc: $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	$(CC) $(CFLAGS) -o $@ $^ wait_hack.c $(LDFLAGS)
 
 $(OBJS): chibicc.h
 
 test/%.exe: chibicc test/%.c
 	./chibicc -Iinclude -Itest -c -o test/$*.o test/$*.c
-	$(CC) -pthread -o $@ test/$*.o -xc test/common
+	$(CC) -pthread -o $@ test/$*.o wait_hack.c -xc test/common
 
 test: $(TESTS)
 	for i in $^; do echo $$i; ./$$i || exit 1; echo; done
@@ -26,7 +26,7 @@ test-all: test test-stage2
 # Stage 2
 
 stage2/chibicc: $(OBJS:%=stage2/%)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	$(CC) $(CFLAGS) -o $@ wait_hack.c $^ $(LDFLAGS)
 
 stage2/%.o: chibicc %.c
 	mkdir -p stage2/test
