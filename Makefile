@@ -1,50 +1,81 @@
-CFLAGS=-std=c11 -g -fno-common -Wall -Wno-switch
+CFLAGS=-std=c11 -g -fno-common -Wall -Werror -Wno-switch -pthread
 
-SRCS=codegen.c hashmap.c main.c parse.c preprocess.c strings.c tokenize.c type.c unicode.c
+SRCS=codegen.c hashmap.c main.c parse.c preprocess.c strings.c tokenize.c type.c unicode.c alloc.c dyo.c link.c
 OBJS=$(SRCS:.c=.o)
 
-TEST_SRCS=$(wildcard test/*.c)
-TESTS=$(TEST_SRCS:.c=.exe)
-
-# Stage 1
+# XXX:
+# test/asm.c
+#   chibicc passes asm() blocks directly through to the system assembler, so now
+#   that we're not using that, there's no assembler available.
+#
+# test/tls.c
+#   TLS not implemented
+#
+# test/commonsym.c
+#   currently passes, but I thought I disabled support, so need to investigate.
+#
+TEST_SRCS=\
+test/alignof.c \
+test/alloca.c \
+test/arith.c \
+test/atomic.c \
+test/attribute.c \
+test/bitfield.c \
+test/builtin.c \
+test/cast.c \
+test/commonsym.c \
+test/compat.c \
+test/complit.c \
+test/const.c \
+test/constexpr.c \
+test/control.c \
+test/decl.c \
+test/enum.c \
+test/extern.c \
+test/float.c \
+test/function.c \
+test/generic.c \
+test/initializer.c \
+test/line.c \
+test/literal.c \
+test/macro.c \
+test/offsetof.c \
+test/pointer.c \
+test/pragma-once.c \
+test/sizeof.c \
+test/stdhdr.c \
+test/string.c \
+test/struct.c \
+test/typedef.c \
+test/typeof.c \
+test/usualconv.c \
+test/unicode.c \
+test/union.c \
+test/varargs.c \
+test/variable.c \
+test/vla.c
 
 chibicc: $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $^ wait_hack.c $(LDFLAGS)
+	$(CC) $(CFLAGS) -o $@ $^ wait_hack.c -ldl $(LDFLAGS)
+
+dumpdyo: dumpdyo.o dyo.o hashmap.o alloc.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 $(OBJS): chibicc.h
 
-test/%.exe: chibicc test/%.c
-	./chibicc -Iinclude -Itest -c -o test/$*.o test/$*.c
-	$(CC) -pthread -o $@ test/$*.o wait_hack.c -xc test/common
+minilua: dynasm/minilua.c
+	$(CC) $(CFLAGS) -o $@ $^ -lm
 
-test: $(TESTS)
-	for i in $^; do echo $$i; ./$$i || exit 1; echo; done
-	test/driver.sh ./chibicc
+codegen.c: codegen.in.c minilua
+	./minilua dynasm/dynasm.lua -o $@ codegen.in.c
 
-test-all: test test-stage2
-
-# Stage 2
-
-stage2/chibicc: $(OBJS:%=stage2/%)
-	$(CC) $(CFLAGS) -o $@ wait_hack.c $^ $(LDFLAGS)
-
-stage2/%.o: chibicc %.c
-	mkdir -p stage2/test
-	./chibicc -c -o $(@D)/$*.o $*.c
-
-stage2/test/%.exe: stage2/chibicc test/%.c
-	mkdir -p stage2/test
-	./stage2/chibicc -Iinclude -Itest -c -o stage2/test/$*.o test/$*.c
-	$(CC) -pthread -o $@ stage2/test/$*.o -xc test/common
-
-test-stage2: $(TESTS:test/%=stage2/test/%)
-	for i in $^; do echo $$i; ./$$i || exit 1; echo; done
-	test/driver.sh ./stage2/chibicc
+test: $(TEST_SRCS) chibicc
+	for i in $(filter-out chibicc,$^); do echo $$i; ./chibicc -Itest test/common $$i || exit 1; echo; done
 
 # Misc.
 
 clean:
-	rm -rf chibicc tmp* $(TESTS) test/*.s test/*.exe stage2
+	rm -rf chibicc codegen.c tmp* test/*.s test/*.exe minilua *.dyo
 	find * -type f '(' -name '*~' -o -name '*.o' ')' -exec rm {} ';'
 
-.PHONY: test clean test-stage2
+.PHONY: test clean test-stage2 dumpdyo

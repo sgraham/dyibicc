@@ -1,4 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
+#define _DEFAULT_SOURCE
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
@@ -73,6 +74,12 @@ static inline char* basename(char* s) {
 #define strdup _strdup
 #endif
 
+// Round up `n` to the nearest multiple of `align`. For instance,
+// align_to(5, 8) returns 8 and align_to(11, 8) returns 16.
+static inline int align_to(int n, int align) {
+  return (n + align - 1) / align * align;
+}
+
 // --------------
 // --------------
 // --------------
@@ -93,7 +100,38 @@ typedef struct {
   int len;
 } StringArray;
 
+typedef struct StringInt {
+  char* str;
+  int i;
+} StringInt;
+
+typedef struct StringIntArray {
+  StringInt *data;
+  int capacity;
+  int len;
+} StringIntArray;
+
+typedef struct ByteArray {
+  char* data;
+  int capacity;
+  int len;
+} ByteArray;
+
+typedef struct IntInt {
+  int a;
+  int b;
+} IntInt;
+
+typedef struct IntIntArray {
+  IntInt* data;
+  int capacity;
+  int len;
+} IntIntArray;
+
 void strarray_push(StringArray *arr, char *s);
+void strintarray_push(StringIntArray *arr, StringInt item);
+void bytearray_push(ByteArray *arr, char b);
+void intintarray_push(IntIntArray *arr, IntInt item);
 char *format(char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 //
@@ -113,7 +151,6 @@ typedef enum {
 
 typedef struct {
   char *name;
-  int file_no;
   char *contents;
 
   // For #line directive
@@ -151,8 +188,7 @@ bool equal(Token *tok, char *op);
 Token *skip(Token *tok, char *op);
 bool consume(Token **rest, Token *tok, char *str);
 void convert_pp_tokens(Token *tok);
-File **get_input_files(void);
-File *new_file(char *name, int file_no, char *contents);
+File *new_file(char *name, char *contents);
 Token *tokenize_string_literal(Token *tok, Type *basety);
 Token *tokenize(File *file);
 Token *tokenize_file(char *filename);
@@ -179,6 +215,7 @@ typedef struct Obj Obj;
 struct Obj {
   Obj *next;
   char *name;    // Variable name
+  //int pcname;    // Label used during codegen
   Type *ty;      // Type
   Token *tok;    // representative token
   bool is_local; // local or global/function
@@ -191,6 +228,8 @@ struct Obj {
   bool is_function;
   bool is_definition;
   bool is_static;
+  int dasm_entry_label;
+  int dasm_return_label;
 
   // Global variable
   bool is_tentative;
@@ -220,7 +259,8 @@ typedef struct Relocation Relocation;
 struct Relocation {
   Relocation *next;
   int offset;
-  char **label;
+  char** data_label;
+  int* code_label;
   long addend;
 };
 
@@ -296,6 +336,8 @@ struct Node {
   // "break" and "continue" labels
   char *brk_label;
   char *cont_label;
+  int brk_pc_label;
+  int cont_pc_label;
 
   // Block or statement expression
   Node *body;
@@ -312,6 +354,8 @@ struct Node {
   // Goto or labeled statement, or labels-as-values
   char *label;
   char *unique_label;
+  int pc_label;
+  int unique_pc_label;
   Node *goto_next;
 
   // Switch
@@ -460,8 +504,10 @@ void add_type(Node *node);
 // codegen.c
 //
 
-void codegen(Obj *prog, FILE *out);
-int align_to(int n, int align);
+void codegen_init(void);
+void codegen(Obj *prog, FILE *out, FILE* dyo_out);
+int codegen_pclabel(void);
+
 
 //
 // unicode.c
@@ -498,10 +544,73 @@ void hashmap_delete2(HashMap *map, char *key, int keylen);
 void hashmap_test(void);
 
 //
+// alloc.c
+//
+void* allocate_writable_memory(size_t size);
+bool make_memory_executable(void* m, size_t size);
+void free_executable_memory(void* p, size_t size);
+void bumpcalloc_init(void);
+void* bumpcalloc(size_t num, size_t size);
+void* bumplamerealloc(void* old, size_t old_size, size_t new_size);
+void* aligned_allocate(size_t size, size_t alignment);
+
+//
+// dyo.c
+//
+
+typedef enum DyoRecordType {
+  kTypeString = 0x01000000,
+  kTypeImport = 0x02000000,
+  kTypeFunctionExport = 0x03000000,
+  kTypeCodeReferenceToGlobal = 0x04000000,
+  kTypeInitializedData = 0x05000000,
+  kTypeInitializerEnd = 0x06000000,
+  kTypeInitializerBytes = 0x07000000,
+  kTypeInitializerDataRelocation = 0x08000000,
+  kTypeInitializerCodeRelocation = 0x09000000,
+  kTypeX64Code = 0x64000000,
+  kTypeEntryPoint = 0x65000000,
+} DyoRecordType;
+
+// Writing.
+bool write_dyo_begin(FILE* f);
+bool write_dyo_import(FILE* f, char* name, unsigned int loc);
+bool write_dyo_function_export(FILE* f, char* name, unsigned int loc);
+bool write_dyo_code_reference_to_global(FILE* f, char* name, unsigned int offset);
+bool write_dyo_initialized_data(FILE* f, int size, int align, int is_static, char* name);
+bool write_dyo_initializer_end(FILE* f);
+bool write_dyo_initializer_bytes(FILE* f, char* data, int len);
+bool write_dyo_initializer_data_relocation(FILE* f, char* data, int addend);
+bool write_dyo_initializer_code_relocation(FILE* f, int pclabel, int addend, int* patch_loc);
+bool patch_dyo_initializer_code_relocation(FILE* f, int file_loc, int final_code_offset);
+bool write_dyo_code(FILE* f, void* data, size_t size);
+bool write_dyo_entrypoint(FILE* f, unsigned int loc);
+
+// Reading.
+bool ensure_dyo_header(FILE* f);
+bool read_dyo_record(FILE* f,
+                     int* record_index,
+                     char* buf,
+                     unsigned int buf_size,
+                     unsigned int* type,
+                     unsigned int* size);
+bool dump_dyo_file(FILE* f);
+
+//
+// link.cc
+//
+void* link_dyos(FILE** dyo_files);
+
+//
 // main.c
 //
 
 extern StringArray include_paths;
-extern bool opt_fpic;
-extern bool opt_fcommon;
 extern char *base_file;
+
+
+void parse_reset(void);
+void preprocess_reset(void);
+void tokenize_reset(void);
+void codegen_reset(void);
+void bumpcalloc_reset(void);

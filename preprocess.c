@@ -69,6 +69,9 @@ static HashMap macros;
 static CondIncl *cond_incl;
 static HashMap pragma_once;
 static int include_next_idx;
+static HashMap include_path_cache;
+static HashMap include_guards;
+static int counter_macro_i = 0;
 
 static Token *preprocess2(Token *tok);
 static Macro *find_macro(Token *tok);
@@ -89,7 +92,7 @@ static Token *skip_line(Token *tok) {
 }
 
 static Token *copy_token(Token *tok) {
-  Token *t = calloc(1, sizeof(Token));
+  Token *t = bumpcalloc(1, sizeof(Token));
   *t = *tok;
   t->next = NULL;
   return t;
@@ -103,7 +106,7 @@ static Token *new_eof(Token *tok) {
 }
 
 static Hideset *new_hideset(char *name) {
-  Hideset *hs = calloc(1, sizeof(Hideset));
+  Hideset *hs = bumpcalloc(1, sizeof(Hideset));
   hs->name = name;
   return hs;
 }
@@ -205,7 +208,7 @@ static char *quote_string(char *str) {
     bufsize++;
   }
 
-  char *buf = calloc(1, bufsize);
+  char *buf = bumpcalloc(1, bufsize);
   char *p = buf;
   *p++ = '"';
   for (int i = 0; str[i]; i++) {
@@ -220,7 +223,7 @@ static char *quote_string(char *str) {
 
 static Token *new_str_token(char *str, Token *tmpl) {
   char *buf = quote_string(str);
-  return tokenize(new_file(tmpl->file->name, tmpl->file->file_no, buf));
+  return tokenize(new_file(tmpl->file->name, buf));
 }
 
 // Copy all tokens until the next newline, terminate them with
@@ -240,7 +243,7 @@ static Token *copy_line(Token **rest, Token *tok) {
 
 static Token *new_num_token(int val, Token *tmpl) {
   char *buf = format("%d\n", val);
-  return tokenize(new_file(tmpl->file->name, tmpl->file->file_no, buf));
+  return tokenize(new_file(tmpl->file->name, buf));
 }
 
 static Token *read_const_expr(Token **rest, Token *tok) {
@@ -308,7 +311,7 @@ static long eval_const_expr(Token **rest, Token *tok) {
 }
 
 static CondIncl *push_cond_incl(Token *tok, bool included) {
-  CondIncl *ci = calloc(1, sizeof(CondIncl));
+  CondIncl *ci = bumpcalloc(1, sizeof(CondIncl));
   ci->next = cond_incl;
   ci->ctx = IN_THEN;
   ci->tok = tok;
@@ -324,7 +327,7 @@ static Macro *find_macro(Token *tok) {
 }
 
 static Macro *add_macro(char *name, bool is_objlike, Token *body) {
-  Macro *m = calloc(1, sizeof(Macro));
+  Macro *m = bumpcalloc(1, sizeof(Macro));
   m->name = name;
   m->is_objlike = is_objlike;
   m->body = body;
@@ -355,7 +358,7 @@ static MacroParam *read_macro_params(Token **rest, Token *tok, char **va_args_na
       return head.next;
     }
 
-    MacroParam *m = calloc(1, sizeof(MacroParam));
+    MacroParam *m = bumpcalloc(1, sizeof(MacroParam));
     m->name = strndup(tok->loc, tok->len);
     cur = cur->next = m;
     tok = tok->next;
@@ -410,7 +413,7 @@ static MacroArg *read_macro_arg_one(Token **rest, Token *tok, bool read_rest) {
 
   cur->next = new_eof(tok);
 
-  MacroArg *arg = calloc(1, sizeof(MacroArg));
+  MacroArg *arg = bumpcalloc(1, sizeof(MacroArg));
   arg->tok = head.next;
   *rest = tok;
   return arg;
@@ -435,7 +438,7 @@ read_macro_args(Token **rest, Token *tok, MacroParam *params, char *va_args_name
   if (va_args_name) {
     MacroArg *arg;
     if (equal(tok, ")")) {
-      arg = calloc(1, sizeof(MacroArg));
+      arg = bumpcalloc(1, sizeof(MacroArg));
       arg->tok = new_eof(tok);
     } else {
       if (pp != params)
@@ -471,7 +474,7 @@ static char *join_tokens(Token *tok, Token *end) {
     len += t->len;
   }
 
-  char *buf = calloc(1, len);
+  char *buf = bumpcalloc(1, len);
 
   // Copy token texts.
   int pos = 0;
@@ -501,7 +504,7 @@ static Token *paste(Token *lhs, Token *rhs) {
   char *buf = format("%.*s%.*s", lhs->len, lhs->loc, rhs->len, rhs->loc);
 
   // Tokenize the resulting string.
-  Token *tok = tokenize(new_file(lhs->file->name, lhs->file->file_no, buf));
+  Token *tok = tokenize(new_file(lhs->file->name, buf));
   if (tok->next->kind != TK_EOF)
     error_tok(lhs, "pasting forms '%s', an invalid token", buf);
   return tok;
@@ -691,8 +694,7 @@ char *search_include_paths(char *filename) {
   if (filename[0] == '/')
     return filename;
 
-  static HashMap cache;
-  char *cached = hashmap_get(&cache, filename);
+  char *cached = hashmap_get(&include_path_cache, filename);
   if (cached)
     return cached;
 
@@ -701,7 +703,7 @@ char *search_include_paths(char *filename) {
     char *path = format("%s/%s", include_paths.data[i], filename);
     if (!file_exists(path))
       continue;
-    hashmap_put(&cache, filename, path);
+    hashmap_put(&include_path_cache, filename, path);
     include_next_idx = i + 1;
     return path;
   }
@@ -805,7 +807,6 @@ static Token *include_file(Token *tok, char *path, Token *filename_tok) {
   // If we read the same file before, and if the file was guarded
   // by the usual #ifndef ... #endif pattern, we may be able to
   // skip the file without opening it.
-  static HashMap include_guards;
   char *guard_name = hashmap_get(&include_guards, path);
   if (guard_name && hashmap_get(&macros, guard_name))
     return tok;
@@ -996,7 +997,7 @@ static Token *preprocess2(Token *tok) {
 }
 
 void define_macro(char *name, char *buf) {
-  Token *tok = tokenize(new_file("<built-in>", 1, buf));
+  Token *tok = tokenize(new_file("<built-in>", buf));
   add_macro(name, true, tok);
 }
 
@@ -1025,8 +1026,7 @@ static Token *line_macro(Token *tmpl) {
 
 // __COUNTER__ is expanded to serial values starting from 0.
 static Token *counter_macro(Token *tmpl) {
-  static int i = 0;
-  return new_num_token(i++, tmpl);
+  return new_num_token(counter_macro_i++, tmpl);
 }
 
 // __TIMESTAMP__ is expanded to a string describing the last
@@ -1075,7 +1075,6 @@ void init_macros(void) {
   // Define predefined macros
   define_macro("_LP64", "1");
   define_macro("__C99_MACRO_WITH_VA_ARGS", "1");
-  define_macro("__ELF__", "1");
   define_macro("__LP64__", "1");
   define_macro("__SIZEOF_DOUBLE__", "8");
   define_macro("__SIZEOF_FLOAT__", "4");
@@ -1111,8 +1110,14 @@ void init_macros(void) {
   define_macro("__volatile__", "volatile");
   define_macro("__x86_64", "1");
   define_macro("__x86_64__", "1");
+#ifdef _MSC_VER
+  define_macro("_M_X64", "1");
+  define_macro("__cdecl", "");
+#else
+  define_macro("__ELF__", "1");
   define_macro("linux", "1");
   define_macro("unix", "1");
+#endif
 
   add_builtin("__FILE__", file_macro);
   add_builtin("__LINE__", line_macro);
@@ -1192,7 +1197,7 @@ static void join_adjacent_string_literals(Token *tok) {
     for (Token *t = tok1->next; t != tok2; t = t->next)
       len = len + t->ty->array_len - 1;
 
-    char *buf = calloc(tok1->ty->base->size, len);
+    char *buf = bumpcalloc(tok1->ty->base->size, len);
 
     int i = 0;
     for (Token *t = tok1; t != tok2; t = t->next) {
@@ -1219,4 +1224,14 @@ Token *preprocess(Token *tok) {
   for (Token *t = tok; t; t = t->next)
     t->line_no += t->line_delta;
   return tok;
+}
+
+void preprocess_reset(void) {
+  macros = (HashMap){NULL, 0, 0};
+  cond_incl = NULL;
+  pragma_once = (HashMap){NULL, 0, 0};
+  include_next_idx = 0;
+  include_path_cache = (HashMap){NULL, 0, 0};
+  include_guards = (HashMap){NULL, 0, 0};
+  counter_macro_i = 0;
 }

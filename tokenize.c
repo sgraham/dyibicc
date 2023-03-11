@@ -3,14 +3,13 @@
 // Input file
 static File *current_file;
 
-// A list of all input files.
-static File **input_files;
-
 // True if the current position is at the beginning of a line
 static bool at_bol;
 
 // True if the current position follows a space character
 static bool has_space;
+
+static HashMap keyword_map;
 
 // Reports an error and exit.
 void error(char *fmt, ...) {
@@ -98,7 +97,7 @@ bool consume(Token **rest, Token *tok, char *str) {
 
 // Create a new token.
 static Token *new_token(TokenKind kind, char *start, char *end) {
-  Token *tok = calloc(1, sizeof(Token));
+  Token *tok = bumpcalloc(1, sizeof(Token));
   tok->kind = kind;
   tok->loc = start;
   tok->len = end - start;
@@ -156,9 +155,7 @@ static int read_punct(char *p) {
 }
 
 static bool is_keyword(Token *tok) {
-  static HashMap map;
-
-  if (map.capacity == 0) {
+  if (keyword_map.capacity == 0) {
     static char *kw[] = {
       "return", "if", "else", "for", "while", "int", "sizeof", "char",
       "struct", "union", "short", "long", "void", "typedef", "_Bool",
@@ -171,10 +168,10 @@ static bool is_keyword(Token *tok) {
     };
 
     for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
-      hashmap_put(&map, kw[i], (void *)1);
+      hashmap_put(&keyword_map, kw[i], (void *)1);
   }
 
-  return hashmap_get2(&map, tok->loc, tok->len);
+  return hashmap_get2(&keyword_map, tok->loc, tok->len);
 }
 
 static int read_escaped_char(char **new_pos, char *p) {
@@ -244,7 +241,7 @@ static char *string_literal_end(char *p) {
 
 static Token *read_string_literal(char *start, char *quote) {
   char *end = string_literal_end(quote + 1);
-  char *buf = calloc(1, end - quote);
+  char *buf = bumpcalloc(1, end - quote);
   int len = 0;
 
   for (char *p = quote + 1; p < end;) {
@@ -269,7 +266,7 @@ static Token *read_string_literal(char *start, char *quote) {
 // is called a "surrogate pair".
 static Token *read_utf16_string_literal(char *start, char *quote) {
   char *end = string_literal_end(quote + 1);
-  uint16_t *buf = calloc(2, end - start);
+  uint16_t *buf = bumpcalloc(2, end - start);
   int len = 0;
 
   for (char *p = quote + 1; p < end;) {
@@ -302,7 +299,7 @@ static Token *read_utf16_string_literal(char *start, char *quote) {
 // encoded in 4 bytes.
 static Token *read_utf32_string_literal(char *start, char *quote, Type *ty) {
   char *end = string_literal_end(quote + 1);
-  uint32_t *buf = calloc(4, end - quote);
+  uint32_t *buf = bumpcalloc(4, end - quote);
   int len = 0;
 
   for (char *p = quote + 1; p < end;) {
@@ -698,15 +695,10 @@ static char *read_file(char *path) {
 
 #endif
 
-File **get_input_files(void) {
-  return input_files;
-}
-
-File *new_file(char *name, int file_no, char *contents) {
-  File *file = calloc(1, sizeof(File));
+File *new_file(char *name, char *contents) {
+  File *file = bumpcalloc(1, sizeof(File));
   file->name = name;
   file->display_name = name;
-  file->file_no = file_no;
   file->contents = contents;
   return file;
 }
@@ -815,15 +807,13 @@ Token *tokenize_file(char *path) {
   remove_backslash_newline(p);
   convert_universal_chars(p);
 
-  // Save the filename for assembler .file directive.
-  static int file_no;
-  File *file = new_file(path, file_no + 1, p);
-
-  // Save the filename for assembler .file directive.
-  input_files = realloc(input_files, sizeof(char *) * (file_no + 2));
-  input_files[file_no] = file;
-  input_files[file_no + 1] = NULL;
-  file_no++;
-
+  File *file = new_file(path, p);
   return tokenize(file);
+}
+
+void tokenize_reset(void) {
+  current_file = NULL;
+  at_bol = false;
+  has_space = false;
+  keyword_map = (HashMap){NULL, 0, 0};
 }

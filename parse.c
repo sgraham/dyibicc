@@ -99,12 +99,18 @@ static Node *labels;
 // Current "goto" and "continue" jump targets.
 static char *brk_label;
 static char *cont_label;
+static int brk_pc_label;
+static int cont_pc_label;
 
 // Points to a node representing a switch if we are parsing
 // a switch statement. Otherwise, NULL.
 static Node *current_switch;
 
 static Obj *builtin_alloca;
+
+static int unique_name_id;
+
+static HashMap typename_map;
 
 static bool is_typename(Token *tok);
 static Type *declspec(Token **rest, Token *tok, VarAttr *attr);
@@ -125,9 +131,9 @@ static Node *stmt(Token **rest, Token *tok);
 static Node *expr_stmt(Token **rest, Token *tok);
 static Node *expr(Token **rest, Token *tok);
 static int64_t eval(Node *node);
-static int64_t eval2(Node *node, char ***label);
-static int64_t eval_rval(Node *node, char ***label);
-static bool is_const_expr(Node *node);
+static int64_t eval2(Node* node, char*** label, int** pclabel);
+static int64_t eval_rval(Node* node, char*** label, int** pclabel);
+static bool is_const_expr(Node* node);
 static Node *assign(Token **rest, Token *tok);
 static Node *logor(Token **rest, Token *tok);
 static double eval_double(Node *node);
@@ -161,7 +167,7 @@ static int align_down(int n, int align) {
 }
 
 static void enter_scope(void) {
-  Scope *sc = calloc(1, sizeof(Scope));
+  Scope *sc = bumpcalloc(1, sizeof(Scope));
   sc->next = scope;
   scope = sc;
 }
@@ -190,7 +196,7 @@ static Type *find_tag(Token *tok) {
 }
 
 static Node *new_node(NodeKind kind, Token *tok) {
-  Node *node = calloc(1, sizeof(Node));
+  Node *node = bumpcalloc(1, sizeof(Node));
   node->kind = kind;
   node->tok = tok;
   return node;
@@ -244,7 +250,7 @@ static Node *new_vla_ptr(Obj *var, Token *tok) {
 Node *new_cast(Node *expr, Type *ty) {
   add_type(expr);
 
-  Node *node = calloc(1, sizeof(Node));
+  Node *node = bumpcalloc(1, sizeof(Node));
   node->kind = ND_CAST;
   node->tok = expr->tok;
   node->lhs = expr;
@@ -253,13 +259,13 @@ Node *new_cast(Node *expr, Type *ty) {
 }
 
 static VarScope *push_scope(char *name) {
-  VarScope *sc = calloc(1, sizeof(VarScope));
+  VarScope *sc = bumpcalloc(1, sizeof(VarScope));
   hashmap_put(&scope->vars, name, sc);
   return sc;
 }
 
 static Initializer *new_initializer(Type *ty, bool is_flexible) {
-  Initializer *init = calloc(1, sizeof(Initializer));
+  Initializer *init = bumpcalloc(1, sizeof(Initializer));
   init->ty = ty;
 
   if (ty->kind == TY_ARRAY) {
@@ -268,7 +274,7 @@ static Initializer *new_initializer(Type *ty, bool is_flexible) {
       return init;
     }
 
-    init->children = calloc(ty->array_len, sizeof(Initializer *));
+    init->children = bumpcalloc(ty->array_len, sizeof(Initializer *));
     for (int i = 0; i < ty->array_len; i++)
       init->children[i] = new_initializer(ty->base, false);
     return init;
@@ -280,11 +286,11 @@ static Initializer *new_initializer(Type *ty, bool is_flexible) {
     for (Member *mem = ty->members; mem; mem = mem->next)
       len++;
 
-    init->children = calloc(len, sizeof(Initializer *));
+    init->children = bumpcalloc(len, sizeof(Initializer *));
 
     for (Member *mem = ty->members; mem; mem = mem->next) {
       if (is_flexible && ty->is_flexible && !mem->next) {
-        Initializer *child = calloc(1, sizeof(Initializer));
+        Initializer *child = bumpcalloc(1, sizeof(Initializer));
         child->ty = mem->ty;
         child->is_flexible = true;
         init->children[mem->idx] = child;
@@ -299,8 +305,9 @@ static Initializer *new_initializer(Type *ty, bool is_flexible) {
 }
 
 static Obj *new_var(char *name, Type *ty) {
-  Obj *var = calloc(1, sizeof(Obj));
+  Obj *var = bumpcalloc(1, sizeof(Obj));
   var->name = name;
+  // XXX var->pcname = codegen_pclabel();
   var->ty = ty;
   var->align = ty->align;
   push_scope(name)->var = var;
@@ -325,8 +332,7 @@ static Obj *new_gvar(char *name, Type *ty) {
 }
 
 static char *new_unique_name(void) {
-  static int id = 0;
-  return format("L..%d", id++);
+  return format("L..%d", unique_name_id++);
 }
 
 static Obj *new_anon_gvar(Type *ty) {
@@ -1283,7 +1289,7 @@ static Type *copy_struct_type(Type *ty) {
   Member head = {};
   Member *cur = &head;
   for (Member *mem = ty->members; mem; mem = mem->next) {
-    Member *m = calloc(1, sizeof(Member));
+    Member *m = bumpcalloc(1, sizeof(Member));
     *m = *mem;
     cur = cur->next = m;
   }
@@ -1464,16 +1470,19 @@ write_gvar_data(Relocation *cur, Initializer *init, Type *ty, char *buf, int off
   }
 
   char **label = NULL;
-  uint64_t val = eval2(init->expr, &label);
+  int* pc_label = NULL;
+  uint64_t val = eval2(init->expr, &label, &pc_label);
 
-  if (!label) {
+  if (!label && !pc_label) {
     write_buf(buf + offset, val, ty->size);
     return cur;
   }
 
-  Relocation *rel = calloc(1, sizeof(Relocation));
+  Relocation *rel = bumpcalloc(1, sizeof(Relocation));
+  assert(!(label && pc_label));  // Both shouldn't be set.
   rel->offset = offset;
-  rel->label = label;
+  rel->data_label = label;
+  rel->code_label = pc_label;
   rel->addend = val;
   cur->next = rel;
   return cur->next;
@@ -1487,7 +1496,7 @@ static void gvar_initializer(Token **rest, Token *tok, Obj *var) {
   Initializer *init = initializer(rest, tok, var->ty, &var->ty);
 
   Relocation head = {};
-  char *buf = calloc(1, var->ty->size);
+  char *buf = bumpcalloc(1, var->ty->size);
   write_gvar_data(&head, init, var->ty, buf, 0);
   var->init_data = buf;
   var->rel = head.next;
@@ -1495,9 +1504,7 @@ static void gvar_initializer(Token **rest, Token *tok, Obj *var) {
 
 // Returns true if a given token represents a type.
 static bool is_typename(Token *tok) {
-  static HashMap map;
-
-  if (map.capacity == 0) {
+  if (typename_map.capacity == 0) {
     static char *kw[] = {
       "void", "_Bool", "char", "short", "int", "long", "struct", "union",
       "typedef", "enum", "static", "extern", "_Alignas", "signed", "unsigned",
@@ -1507,10 +1514,10 @@ static bool is_typename(Token *tok) {
     };
 
     for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
-      hashmap_put(&map, kw[i], (void *)1);
+      hashmap_put(&typename_map, kw[i], (void *)1);
   }
 
-  return hashmap_get2(&map, tok->loc, tok->len) || find_typedef(tok);
+  return hashmap_get2(&typename_map, tok->loc, tok->len) || find_typedef(tok);
 }
 
 // asm-stmt = "asm" ("volatile" | "inline")* "(" string-literal ")"
@@ -1586,10 +1593,18 @@ static Node *stmt(Token **rest, Token *tok) {
     char *brk = brk_label;
     brk_label = node->brk_label = new_unique_name();
 
+    // dynasm
+    int brk_pc = brk_pc_label;
+    brk_pc_label = node->brk_pc_label = codegen_pclabel();
+
     node->then = stmt(rest, tok);
 
     current_switch = sw;
     brk_label = brk;
+
+    // dynasm
+    brk_pc_label = brk_pc;
+
     return node;
   }
 
@@ -1612,6 +1627,7 @@ static Node *stmt(Token **rest, Token *tok) {
 
     tok = skip(tok, ":");
     node->label = new_unique_name();
+    node->pc_label = codegen_pclabel();
     node->lhs = stmt(rest, tok);
     node->begin = begin;
     node->end = end;
@@ -1627,6 +1643,7 @@ static Node *stmt(Token **rest, Token *tok) {
     Node *node = new_node(ND_CASE, tok);
     tok = skip(tok->next, ":");
     node->label = new_unique_name();
+    node->pc_label = codegen_pclabel();
     node->lhs = stmt(rest, tok);
     current_switch->default_case = node;
     return node;
@@ -1642,6 +1659,12 @@ static Node *stmt(Token **rest, Token *tok) {
     char *cont = cont_label;
     brk_label = node->brk_label = new_unique_name();
     cont_label = node->cont_label = new_unique_name();
+
+    // dynasm
+    int brk_pc = brk_pc_label;
+    int cont_pc = cont_pc_label;
+    brk_pc_label = node->brk_pc_label = codegen_pclabel();
+    cont_pc_label = node->cont_pc_label = codegen_pclabel();
 
     if (is_typename(tok)) {
       Type *basety = declspec(&tok, tok, NULL);
@@ -1663,6 +1686,11 @@ static Node *stmt(Token **rest, Token *tok) {
     leave_scope();
     brk_label = brk;
     cont_label = cont;
+
+    // dynasm
+    brk_pc_label = brk_pc;
+    cont_pc_label = cont_pc;
+
     return node;
   }
 
@@ -1677,10 +1705,20 @@ static Node *stmt(Token **rest, Token *tok) {
     brk_label = node->brk_label = new_unique_name();
     cont_label = node->cont_label = new_unique_name();
 
+    // dynasm
+    int brk_pc = brk_pc_label;
+    int cont_pc = cont_pc_label;
+    brk_pc_label = node->brk_pc_label = codegen_pclabel();
+    cont_pc_label = node->cont_pc_label = codegen_pclabel();
+
     node->then = stmt(rest, tok);
 
     brk_label = brk;
     cont_label = cont;
+
+    // dynasm
+    brk_pc_label = brk_pc;
+    cont_pc_label = cont_pc;
     return node;
   }
 
@@ -1692,10 +1730,20 @@ static Node *stmt(Token **rest, Token *tok) {
     brk_label = node->brk_label = new_unique_name();
     cont_label = node->cont_label = new_unique_name();
 
+    // dynasm
+    int brk_pc = brk_pc_label;
+    int cont_pc = cont_pc_label;
+    brk_pc_label = node->brk_pc_label = codegen_pclabel();
+    cont_pc_label = node->cont_pc_label = codegen_pclabel();
+
     node->then = stmt(&tok, tok->next);
 
     brk_label = brk;
     cont_label = cont;
+
+    // dynasm
+    brk_pc_label = brk_pc;
+    cont_pc_label = cont_pc;
 
     tok = skip(tok, "while");
     tok = skip(tok, "(");
@@ -1728,8 +1776,11 @@ static Node *stmt(Token **rest, Token *tok) {
   if (equal(tok, "break")) {
     if (!brk_label)
       error_tok(tok, "stray break");
+    if (!brk_pc_label)
+      error_tok(tok, "stray break");
     Node *node = new_node(ND_GOTO, tok);
     node->unique_label = brk_label;
+    node->unique_pc_label = brk_pc_label;  // dynasm
     *rest = skip(tok->next, ";");
     return node;
   }
@@ -1737,8 +1788,11 @@ static Node *stmt(Token **rest, Token *tok) {
   if (equal(tok, "continue")) {
     if (!cont_label)
       error_tok(tok, "stray continue");
+    if (!cont_pc_label)
+      error_tok(tok, "stray continue");
     Node *node = new_node(ND_GOTO, tok);
     node->unique_label = cont_label;
+    node->unique_pc_label = cont_pc_label;  // dynasm
     *rest = skip(tok->next, ";");
     return node;
   }
@@ -1747,6 +1801,7 @@ static Node *stmt(Token **rest, Token *tok) {
     Node *node = new_node(ND_LABEL, tok);
     node->label = strndup(tok->loc, tok->len);
     node->unique_label = new_unique_name();
+    node->unique_pc_label = codegen_pclabel();  // dynasm
     node->lhs = stmt(rest, tok->next->next);
     node->goto_next = labels;
     labels = node;
@@ -1826,7 +1881,7 @@ static Node *expr(Token **rest, Token *tok) {
 }
 
 static int64_t eval(Node *node) {
-  return eval2(node, NULL);
+  return eval2(node, NULL, NULL);
 }
 
 // Evaluate a given node as a constant expression.
@@ -1835,7 +1890,7 @@ static int64_t eval(Node *node) {
 // is a pointer to a global variable and n is a postiive/negative
 // number. The latter form is accepted only as an initialization
 // expression for a global variable.
-static int64_t eval2(Node *node, char ***label) {
+static int64_t eval2(Node* node, char*** label, int** pclabel) {
   add_type(node);
 
   if (is_flonum(node->ty))
@@ -1843,9 +1898,9 @@ static int64_t eval2(Node *node, char ***label) {
 
   switch (node->kind) {
   case ND_ADD:
-    return eval2(node->lhs, label) + eval(node->rhs);
+    return eval2(node->lhs, label, pclabel) + eval(node->rhs);
   case ND_SUB:
-    return eval2(node->lhs, label) - eval(node->rhs);
+    return eval2(node->lhs, label, pclabel) - eval(node->rhs);
   case ND_MUL:
     return eval(node->lhs) * eval(node->rhs);
   case ND_DIV:
@@ -1883,9 +1938,9 @@ static int64_t eval2(Node *node, char ***label) {
       return (uint64_t)eval(node->lhs) <= eval(node->rhs);
     return eval(node->lhs) <= eval(node->rhs);
   case ND_COND:
-    return eval(node->cond) ? eval2(node->then, label) : eval2(node->els, label);
+    return eval(node->cond) ? eval2(node->then, label, pclabel) : eval2(node->els, label, pclabel);
   case ND_COMMA:
-    return eval2(node->rhs, label);
+    return eval2(node->rhs, label, pclabel);
   case ND_NOT:
     return !eval(node->lhs);
   case ND_BITNOT:
@@ -1895,7 +1950,7 @@ static int64_t eval2(Node *node, char ***label) {
   case ND_LOGOR:
     return eval(node->lhs) || eval(node->rhs);
   case ND_CAST: {
-    int64_t val = eval2(node->lhs, label);
+    int64_t val = eval2(node->lhs, label, pclabel);
     if (is_integer(node->ty)) {
       switch (node->ty->size) {
       case 1: return node->ty->is_unsigned ? (uint8_t)val : (int8_t)val;
@@ -1906,19 +1961,21 @@ static int64_t eval2(Node *node, char ***label) {
     return val;
   }
   case ND_ADDR:
-    return eval_rval(node->lhs, label);
+    return eval_rval(node->lhs, label, pclabel);
   case ND_LABEL_VAL:
-    *label = &node->unique_label;
+    *pclabel = &node->unique_pc_label;  // dynasm
     return 0;
   case ND_MEMBER:
     if (!label)
       error_tok(node->tok, "not a compile-time constant");
     if (node->ty->kind != TY_ARRAY)
       error_tok(node->tok, "invalid initializer");
-    return eval_rval(node->lhs, label) + node->member->offset;
+    return eval_rval(node->lhs, label, pclabel) + node->member->offset;
   case ND_VAR:
     if (!label)
       error_tok(node->tok, "not a compile-time constant");
+    if (!pclabel)
+      error_tok(node->tok, "not a compile-time constant (dynasm)");
     if (node->var->ty->kind != TY_ARRAY && node->var->ty->kind != TY_FUNC)
       error_tok(node->tok, "invalid initializer");
     *label = &node->var->name;
@@ -1930,7 +1987,7 @@ static int64_t eval2(Node *node, char ***label) {
   error_tok(node->tok, "not a compile-time constant");
 }
 
-static int64_t eval_rval(Node *node, char ***label) {
+static int64_t eval_rval(Node *node, char ***label, int** pclabel) {
   switch (node->kind) {
   case ND_VAR:
     if (node->var->is_local)
@@ -1938,9 +1995,9 @@ static int64_t eval_rval(Node *node, char ***label) {
     *label = &node->var->name;
     return 0;
   case ND_DEREF:
-    return eval2(node->lhs, label);
+    return eval2(node->lhs, label, pclabel);
   case ND_MEMBER:
-    return eval_rval(node->lhs, label) + node->member->offset;
+    return eval_rval(node->lhs, label, pclabel) + node->member->offset;
   }
 
   error_tok(node->tok, "invalid initializer");
@@ -2554,7 +2611,7 @@ static void struct_members(Token **rest, Token *tok, Type *ty) {
     // Anonymous struct member
     if ((basety->kind == TY_STRUCT || basety->kind == TY_UNION) &&
         consume(&tok, tok, ";")) {
-      Member *mem = calloc(1, sizeof(Member));
+      Member *mem = bumpcalloc(1, sizeof(Member));
       mem->ty = basety;
       mem->idx = idx++;
       mem->align = attr.align ? attr.align : mem->ty->align;
@@ -2568,7 +2625,7 @@ static void struct_members(Token **rest, Token *tok, Type *ty) {
         tok = skip(tok, ",");
       first = false;
 
-      Member *mem = calloc(1, sizeof(Member));
+      Member *mem = bumpcalloc(1, sizeof(Member));
       mem->ty = declarator(&tok, tok, basety);
       mem->name = mem->ty->name;
       mem->idx = idx++;
@@ -3162,12 +3219,15 @@ static void resolve_goto_labels(void) {
     for (Node *y = labels; y; y = y->goto_next) {
       if (!strcmp(x->label, y->label)) {
         x->unique_label = y->unique_label;
+        x->unique_pc_label = y->unique_pc_label;  // dynasm
         break;
       }
     }
 
     if (x->unique_label == NULL)
       error_tok(x->tok->next, "use of undeclared label");
+    if (x->unique_pc_label == 0)
+      error_tok(x->tok->next, "use of undeclared label (dynasm)");
   }
 
   gotos = labels = NULL;
@@ -3247,12 +3307,14 @@ static Token *function(Token *tok, Type *basety, VarAttr *attr) {
   // [https://www.sigbus.info/n1570#6.4.2.2p1] "__func__" is
   // automatically defined as a local variable containing the
   // current function name.
+#if 1
   push_scope("__func__")->var =
     new_string_literal(fn->name, array_of(ty_char, strlen(fn->name) + 1));
 
   // [GNU] __FUNCTION__ is yet another name of __func__.
   push_scope("__FUNCTION__")->var =
     new_string_literal(fn->name, array_of(ty_char, strlen(fn->name) + 1));
+#endif
 
   fn->body = compound_stmt(&tok, tok);
   fn->locals = locals;
@@ -3365,4 +3427,23 @@ Obj *parse(Token *tok) {
   // Remove redundant tentative definitions.
   scan_globals();
   return globals;
+}
+
+void parse_reset(void) {
+  locals = NULL;
+  globals = NULL;
+  scope->next = NULL;
+  scope->vars = (HashMap){NULL, 0, 0};
+  scope->tags = (HashMap){NULL, 0, 0};
+  current_fn = NULL;
+  gotos = NULL;
+  labels = NULL;
+  brk_label = NULL;
+  cont_label = NULL;
+  brk_pc_label = 0;
+  cont_pc_label = 0;
+  current_switch = NULL;
+  builtin_alloca = NULL;
+  unique_name_id = 0;
+  typename_map = (HashMap){NULL, 0, 0};
 }
