@@ -1,4 +1,4 @@
-#include "chibicc.h"
+#include "dyibicc.h"
 
 #ifdef _MSC_VER
 #include <windows.h>
@@ -9,7 +9,7 @@
 static void* allmem;
 static void* current_alloc_pointer;
 
-#define HEAP_SIZE (256<<20)
+#define HEAP_SIZE (256 << 20)
 
 void bumpcalloc_init(void) {
   allmem = allocate_writable_memory(HEAP_SIZE);
@@ -53,16 +53,14 @@ void* aligned_allocate(size_t size, size_t alignment) {
 // on a page boundary so it's suitable for calling mprotect.
 void* allocate_writable_memory(size_t size) {
 #ifdef _MSC_VER
-  void* p =
-      VirtualAlloc(0, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+  void* p = VirtualAlloc(0, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
   if (!p) {
     fprintf(stderr, "VirtualAlloc failed");
     return NULL;
   }
   return p;
 #else
-  void* ptr =
-      mmap(0, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  void* ptr = mmap(0, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (ptr == (void*)-1) {
     perror("mmap");
     return NULL;

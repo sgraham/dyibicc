@@ -1,11 +1,11 @@
-CFLAGS=-std=c11 -g -fno-common -Wall -Werror -Wno-switch -pthread
+CFLAGS=-std=c11 -g -fno-common -Wall -Werror -Wno-switch -pthread -Wunreachable-code -Wmisleading-indentation
 
 SRCS=codegen.c hashmap.c main.c parse.c preprocess.c strings.c tokenize.c type.c unicode.c alloc.c dyo.c link.c
 OBJS=$(SRCS:.c=.o)
 
 # XXX:
 # test/asm.c
-#   chibicc passes asm() blocks directly through to the system assembler, so now
+#   dyibicc passes asm() blocks directly through to the system assembler, so now
 #   that we're not using that, there's no assembler available.
 #
 # test/tls.c
@@ -55,13 +55,13 @@ test/varargs.c \
 test/variable.c \
 test/vla.c
 
-chibicc: $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $^ wait_hack.c -ldl $(LDFLAGS)
+dyibicc: $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $^ -ldl $(LDFLAGS)
 
 dumpdyo: dumpdyo.o dyo.o hashmap.o alloc.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-$(OBJS): chibicc.h
+$(OBJS): dyibicc.h
 
 minilua: dynasm/minilua.c
 	$(CC) $(CFLAGS) -o $@ $^ -lm
@@ -69,13 +69,14 @@ minilua: dynasm/minilua.c
 codegen.c: codegen.in.c minilua
 	./minilua dynasm/dynasm.lua -o $@ codegen.in.c
 
-test: $(TEST_SRCS) chibicc
-	for i in $(filter-out chibicc,$^); do echo $$i; ./chibicc -Itest test/common $$i || exit 1; echo; done
+test: $(TEST_SRCS) dyibicc
+	for i in $(filter-out dyibicc,$^); do echo $$i; ./dyibicc -Itest test/common.c $$i || exit 1; echo; done
 
 # Misc.
 
 clean:
-	rm -rf chibicc codegen.c tmp* test/*.s test/*.exe minilua *.dyo
+	rm -rf dyibicc dumpdyo codegen.c tmp* test/*.s test/*.exe minilua minilua.exe *.dyo *.exe *.pdb *.ilk
 	find * -type f '(' -name '*~' -o -name '*.o' ')' -exec rm {} ';'
+	clang-format -i *.c *.h
 
 .PHONY: test clean test-stage2 dumpdyo

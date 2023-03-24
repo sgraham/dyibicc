@@ -1,4 +1,4 @@
-#include "chibicc.h"
+#include "dyibicc.h"
 
 /*
 # dyibicc obj v1\n
@@ -23,7 +23,7 @@ type 4: code reference to global (# 8)
 
 type 5: initialized data (# 12)
 <size><alignment><string record index containing name>
- 4     4          4     
+ 4     4          4
 if <name> == 0, not exported
 at least one type 6-9 must immediately follow type 5
 
@@ -49,11 +49,6 @@ it must be the last entry in the file
 
 type 101: entry point (# 4)
 <offset into code>
-
-
----
-
-
 
 */
 
@@ -198,7 +193,7 @@ bool write_dyo_initializer_bytes(FILE* f, char* data, int len) {
   if (fwrite(data, len, 1, f) < 0)
     return false;
 
-  // XXX realign to 4
+  // TODO: need realign to 4 and make reader do the same
 
   return true;
 }
@@ -311,7 +306,7 @@ bool read_dyo_record(FILE* f,
     fprintf(stderr, "read error");
     return false;
   }
-  
+
   return true;
 }
 

@@ -39,6 +39,55 @@ int main() {
 
   ASSERT(-2147483648, (double)(unsigned long)(long)-1);
 
+  ASSERT(14, (signed char)(long double)14);
+  ASSERT(14, (unsigned char)(long double)14);
+
+  ASSERT(14, (signed short)(long double)14);
+  ASSERT(14, (unsigned short)(long double)14);
+  ASSERT(414, (signed short)(long double)414);
+  ASSERT(414, (unsigned short)(long double)414);
+
+  ASSERT(14, (signed int)(long double)14);
+  ASSERT(14, (unsigned int)(long double)14);
+  ASSERT(414, (signed int)(long double)414);
+  ASSERT(414, (unsigned int)(long double)414);
+  ASSERT(555414, (signed int)(long double)555414);
+  ASSERT(555414, (unsigned int)(long double)555414);
+
+  ASSERT(14, (signed long long)(long double)14);
+  ASSERT(14, (unsigned long long)(long double)14);
+  ASSERT(414, (signed long long)(long double)414);
+  ASSERT(414, (unsigned long long)(long double)414);
+  ASSERT(555414, (signed long long)(long double)555414);
+  ASSERT(555414, (unsigned long long)(long double)555414);
+  ASSERT(123456789555414ull, (signed long long)(long double)123456789555414);
+  ASSERT(123456789555414ull, (unsigned long long)(long double)123456789555414);
+
+  ASSERT(-13, (signed char)(long double)-13);
+  ASSERT(243, (unsigned char)(long double)-13);
+
+  ASSERT(-13, (signed short)(long double)-13);
+  ASSERT(65523, (unsigned short)(long double)-13);
+  ASSERT(-413, (signed short)(long double)-413);
+  ASSERT(65123, (unsigned short)(long double)-413);
+
+  ASSERT(-13, (signed int)(long double)-13);
+  ASSERT((unsigned int)-13, (unsigned int)(long double)-13);
+  ASSERT(-413, (signed int)(long double)-413);
+  ASSERT((unsigned int)-413, (unsigned int)(long double)-413);
+  ASSERT(-555413, (signed int)(long double)-555413);
+  ASSERT((unsigned int)-555413, (unsigned int)(long double)-555413);
+
+  ASSERT(-13, (signed long long)(long double)-13);
+  ASSERT((unsigned long long)-13, (unsigned long long)(long double)-13);
+  ASSERT(-413, (signed long long)(long double)-413);
+  ASSERT((unsigned long long)-413, (unsigned long long)(long double)-413);
+  ASSERT(-555413, (signed long long)(long double)-555413);
+  ASSERT((unsigned long long)-555413, (unsigned long long)(long double)-555413);
+  ASSERT(-123456789555413ull, (signed long long)(long double)-123456789555413);
+  ASSERT((unsigned long long)-123456789555413ull,
+         (unsigned long long)(long double)-123456789555413);
+
   ASSERT(1, 2e3==2e3);
   ASSERT(0, 2e3==2e5);
   ASSERT(1, 2.0==2);

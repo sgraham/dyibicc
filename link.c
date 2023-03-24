@@ -1,4 +1,4 @@
-#include "chibicc.h"
+#include "dyibicc.h"
 
 #ifdef _MSC_VER
 #include <windows.h>
@@ -18,9 +18,15 @@ static void* symbol_lookup(char* name) {
 }
 
 void* link_dyos(FILE** dyo_files) {
-  char buf[1 << 20];
+  char buf[1 << 16];
 
+#ifdef _MSC_VER
+  SYSTEM_INFO system_info;
+  GetSystemInfo(&system_info);
+  unsigned int page_size = system_info.dwPageSize;
+#else
   unsigned int page_size = sysconf(_SC_PAGESIZE);
+#endif
 
   void* base_address[MAX_DYOS];
   size_t code_size[MAX_DYOS];
@@ -205,8 +211,8 @@ void* link_dyos(FILE** dyo_files) {
             }
           }
           *((uintptr_t*)fixup_address) = (uintptr_t)target_address;
-          //printf("fixed up data %p to point at %p (%s)\n", fixup_address, target_address,
-                 //strings.data[string_record_index]);
+          // printf("fixed up data %p to point at %p (%s)\n", fixup_address, target_address,
+          // strings.data[string_record_index]);
         } else if (type == kTypeInitializerEnd) {
           assert(current_data_base);
           current_data_base = current_data_pointer = current_data_end = NULL;
@@ -236,8 +242,8 @@ void* link_dyos(FILE** dyo_files) {
             }
           }
           *((uintptr_t*)current_data_pointer) = (uintptr_t)target_address + addend;
-          //printf("fixed up data reloc %p to point at %p (%s)\n", current_data_pointer, target_address,
-                 //strings.data[name_index]);
+          // printf("fixed up data reloc %p to point at %p (%s)\n", current_data_pointer,
+          // target_address, strings.data[name_index]);
           current_data_pointer += 8;
         } else if (type == kTypeInitializerCodeRelocation) {
           assert(current_data_base);
@@ -250,8 +256,8 @@ void* link_dyos(FILE** dyo_files) {
 
           void* target_address = base_address[num_dyos] + offset + addend;
           *((uintptr_t*)current_data_pointer) = (uintptr_t)target_address + addend;
-          //printf("fixed up code reloc %p to point at %p\n", current_data_pointer,
-                 //target_address);
+          // printf("fixed up code reloc %p to point at %p\n", current_data_pointer,
+          // target_address);
           current_data_pointer += 8;
         } else if (type == kTypeX64Code) {
           ++num_dyos;
