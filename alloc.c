@@ -1,15 +1,24 @@
 #include "dyibicc.h"
 
-#ifdef _MSC_VER
+#if X64WIN
 #include <windows.h>
 #else
 #include <sys/mman.h>
 #endif
 
-static void* allmem;
-static void* current_alloc_pointer;
+static char* allmem;
+static char* current_alloc_pointer;
 
 #define HEAP_SIZE (256 << 20)
+
+// Reports an error and exit.
+void error(char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vfprintf(stderr, fmt, ap);
+  fprintf(stderr, "\n");
+  exit(1);
+}
 
 void bumpcalloc_init(void) {
   allmem = allocate_writable_memory(HEAP_SIZE);
@@ -17,12 +26,11 @@ void bumpcalloc_init(void) {
 }
 
 void* bumpcalloc(size_t num, size_t size) {
-  size_t toalloc = align_to(num * size, 8);
-  void* ret = current_alloc_pointer;
+  size_t toalloc = align_to((int)(num * size), 8);
+  char* ret = current_alloc_pointer;
   current_alloc_pointer += toalloc;
   if (current_alloc_pointer > allmem + HEAP_SIZE) {
-    fprintf(stderr, "heap exhausted");
-    abort();
+    error("heap exhausted");
   }
   memset(ret, 0, toalloc);
   return ret;
@@ -41,7 +49,7 @@ void bumpcalloc_reset(void) {
 }
 
 void* aligned_allocate(size_t size, size_t alignment) {
-#ifdef _MSC_VER
+#if X64WIN
   return _aligned_malloc(size, alignment);
 #else
   return aligned_alloc(alignment, size);
@@ -52,11 +60,10 @@ void* aligned_allocate(size_t size, size_t alignment) {
 // prints out the error and returns NULL. Unlike malloc, the memory is allocated
 // on a page boundary so it's suitable for calling mprotect.
 void* allocate_writable_memory(size_t size) {
-#ifdef _MSC_VER
+#if X64WIN
   void* p = VirtualAlloc(0, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
   if (!p) {
-    fprintf(stderr, "VirtualAlloc failed");
-    return NULL;
+    error("VirtualAlloc failed: 0x%x\n", GetLastError());
   }
   return p;
 #else
@@ -72,7 +79,9 @@ void* allocate_writable_memory(size_t size) {
 // Sets a RX permission on the given memory, which must be page-aligned. Returns
 // 0 on success. On failure, prints out the error and returns -1.
 bool make_memory_executable(void* m, size_t size) {
-#ifdef _MSC_VER
+#if X64WIN
+  (void)m;
+  (void)size;
   // TODO: alloc as non-execute
   return true;
 #else
@@ -85,7 +94,7 @@ bool make_memory_executable(void* m, size_t size) {
 }
 
 void free_executable_memory(void* p, size_t size) {
-#ifdef _MSC_VER
+#if X64WIN
   VirtualFree(p, size, MEM_RELEASE);
 #else
   munmap(p, size);

@@ -51,7 +51,7 @@ int main() {
   ASSERT(7, ({ int x; int y; char z; char *a=&y; char *b=&z; b-a; }));
   ASSERT(1, ({ int x; char y; int z; char *a=&y; char *b=&z; b-a; }));
 
-  ASSERT(8, ({ long x; sizeof(x); }));
+  ASSERT(__SIZEOF_LONG__, ({ long x; sizeof(x); }));
   ASSERT(2, ({ short x; sizeof(x); }));
 
   ASSERT(24, ({ char *x[3]; sizeof(x); }));

@@ -1,3 +1,81 @@
+// Notes and todos
+// ---------------
+//
+// Windows x64 .pdata generation:
+//
+//   Need to RtlAddFunctionTable() so that even minimal stackwalking in
+//   Disassembly view is correct in VS. Required for SEH too. cl /Fa emits
+//   without using any helper macros for samples.
+//
+// Parsing windows.h:
+//
+//   We make it through CRT, but windows.h will have lots more wild stuff.
+//   __declspecs and packing pragmas are currently ignored and will be necessary
+//   for passing structures to winapi.
+//
+// Debugger:
+//
+//   Picking either ELF/DWARF or PE/COFF (and dropping .dyo) would probably be
+//   the more practical way to get a better debugging experience, but then,
+//   clang-win would also be a lot better. Tomorrow Corp demo for inspiration of
+//   what needs to be implemented/included. Possibly still go with debug adapter
+//   json thing (with extension messages?) so that an existing well-written UI
+//   can be used.
+//
+// Improved codegen:
+//
+//   Bit of a black hole of effort and probably doesn't matter for a dev-focused
+//   tool. But it would be easier to trace through asm if the data flow was less
+//   hidden. Possibly basic use of otherwise-unused gp registers, possibly some
+//   peephole, or higher level amalgamated instructions for codegen to use that
+//   avoid the common cases of load/push, push/something/pop.
+//
+// Various "C+" language extensions:
+//
+//   Some possibilities:
+//     - an import instead of #include that can be used when not touching system
+//     stuff
+//     - string type with syntax integration
+//     - basic polymophic containers (dict, list, slice, sizedarray)
+//     - range-based for loop (to go with containers)
+//     - range notation
+//
+// Don't emit __func__, __FUNCTION__ unless used:
+//
+//   Doesn't affect anything other than dyo size, but it bothers me seeing them
+//   in there.
+//
+// Improve dumpdyo:
+//
+//   - Cross-reference the name to which fixups will be bound in disasm
+//   - include dump as string for initializer bytes
+//
+// Implement TLS:
+//
+//   If needed.
+//
+// Implement inline ASM:
+//
+//   If needed.
+//
+// .dyo cache:
+//
+//   Based on compiler binary, "environment", and the contents of the .c file,
+//   make a hash-based cache of dyos so that recompile can only build the
+//   required files and relink while passing the whole module/program still.
+//   Since there's no -D or other flags, "enviroment" could either be a hash of
+//   all the files in the include search path, or alternatively hash after
+//   preprocessing, or probably track all files include and include all of the
+//   includes in the hash. Not overly important if total compile/link times
+//   remain fast.
+//
+// In-memory dyo:
+//
+//   Alternatively to caching, maybe just save to a memory structure. Might be a
+//   little faster for direct use, could still have a dump-dyo-from-mem for
+//   debugging purposes. Goes more with an always-live compiler host hooked to
+//   target.
+//
 #include "dyibicc.h"
 
 StringArray include_paths;
@@ -5,20 +83,22 @@ StringArray include_paths;
 char* base_file;
 
 static StringArray input_paths;
+static bool opt_E = false;
 
 static void add_default_include_paths(char* argv0) {
-  // We expect that dyibicc-specific include files are installed
-  // to ./include relative to argv[0].
-  strarray_push(&include_paths, format("%s/include", dirname(strdup(argv0))));
+#if X64WIN
+  strarray_push(&include_paths, format("%s/include/win", dirname(strdup(argv0))));
+  strarray_push(&include_paths, format("%s/include/all", dirname(strdup(argv0))));
 
-#ifdef _MSC_VER
-  // Can't easily use
-  // "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.19041.0\\ucrt"
-  // or
-  // "C:\\Program Files\\Microsoft Visual
-  // Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.34.31933\\include" because things like va_arg
-  // assumes Windows ABI.
+  strarray_push(&include_paths,
+                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.19041.0\\ucrt");
+  strarray_push(&include_paths,
+                "C:\\Program Files\\Microsoft Visual "
+                "Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.34.31933\\include");
 #else
+  strarray_push(&include_paths, format("%s/include/linux", dirname(strdup(argv0))));
+  strarray_push(&include_paths, format("%s/include/all", dirname(strdup(argv0))));
+
   // Add standard include paths.
   strarray_push(&include_paths, "/usr/local/include");
   strarray_push(&include_paths, "/usr/include/x86_64-linux-gnu");
@@ -27,7 +107,7 @@ static void add_default_include_paths(char* argv0) {
 }
 
 static void usage(int status) {
-  fprintf(stderr, "dyibicc [-I <path>] <file0> [<file1>...]\n");
+  fprintf(stderr, "dyibicc [-E] [-I <path>] <file0> [<file1>...]\n");
   exit(status);
 }
 
@@ -54,6 +134,11 @@ static void parse_args(int argc, char** argv) {
       continue;
     }
 
+    if (!strcmp(argv[i], "-E")) {
+      opt_E = true;
+      continue;
+    }
+
     if (!strcmp(argv[i], "--help"))
       usage(0);
 
@@ -72,13 +157,15 @@ static void parse_args(int argc, char** argv) {
 // All previously allocated pointers become invalidated. Command line arguments
 // are reparsed because of this, and will be identical to the last time.
 void purge_and_reset_all(int argc, char* argv[]) {
-  tokenize_reset();
-  preprocess_reset();
-  parse_reset();
-  codegen_reset();
   bumpcalloc_reset();
+  codegen_reset();
+  link_reset();
+  parse_reset();
+  preprocess_reset();
+  tokenize_reset();
   input_paths = (StringArray){NULL, 0, 0};
   include_paths = (StringArray){NULL, 0, 0};
+  opt_E = false;
   base_file = NULL;
 
   bumpcalloc_init();
@@ -114,6 +201,19 @@ static char* replace_extn(char* tmpl, char* extn) {
   return format("%s%s", filename, extn);
 }
 
+static void print_tokens(Token* tok) {
+  int line = 1;
+  for (; tok->kind != TK_EOF; tok = tok->next) {
+    if (line > 1 && tok->at_bol)
+      fprintf(stdout, "\n");
+    if (tok->has_space && !tok->at_bol)
+      fprintf(stdout, " ");
+    fprintf(stdout, "%.*s", tok->len, tok->loc);
+    line++;
+  }
+  fprintf(stdout, "\n");
+}
+
 int main(int argc, char** argv) {
   bumpcalloc_init();
   parse_args(argc, argv);
@@ -130,6 +230,12 @@ int main(int argc, char** argv) {
     Token* tok = must_tokenize_file(base_file);
     tok = preprocess(tok);
 
+    // If -E is given, print out preprocessed C code as a result.
+    if (opt_E) {
+      print_tokens(tok);
+      continue;
+    }
+
     codegen_init();  // Initializes dynasm so that parse() can assign labels.
 
     Obj* prog = parse(tok);
@@ -141,6 +247,9 @@ int main(int argc, char** argv) {
     dyo_files[num_dyo_files++] = fopen(dyo_output_file, "rb");
   }
 
+  if (opt_E)
+    return 0;
+
   void* entry_point = link_dyos(dyo_files);
   if (entry_point) {
     int (*p)() = (int (*)())entry_point;
@@ -148,7 +257,7 @@ int main(int argc, char** argv) {
     printf("main returned: %d\n", result);
     return result;
   } else {
-    fprintf(stderr, "no entry point found\n");
+    fprintf(stderr, "link failed or no entry point found\n");
     return 1;
   }
 }

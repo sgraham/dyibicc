@@ -20,7 +20,11 @@ int *g25=&g24;
 int g26[3] = {1, 2, 3};
 int *g27 = g26 + 1;
 int *g28 = &g11[1].a;
+#if __SIZEOF_LONG__ == 8
 long g29 = (long)(long)g26;
+#else
+long long g29 = (long long)(long long)g26;
+#endif
 struct { struct { int a[3]; } a; } g30 = {{{1,2,3}}};
 int *g31=g30.a.a;
 struct {int a[2];} g40[2] = {{1, 2}, 3, 4};
@@ -144,7 +148,7 @@ int main() {
   ASSERT(3, *g25);
   ASSERT(2, *g27);
   ASSERT(3, *g28);
-  ASSERT(1, *(int *)g29);
+  ASSERT(1, *(long *)g29);
 
   ASSERT(1, g31[0]);
   ASSERT(2, g31[1]);

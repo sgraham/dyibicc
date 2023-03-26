@@ -89,7 +89,7 @@ static bool write_string2_uncached(FILE* f, char* str, int str_len, int* str_ind
 }
 
 static bool write_string_uncached(FILE* f, char* str, int* str_index) {
-  return write_string2_uncached(f, str, strlen(str), str_index);
+  return write_string2_uncached(f, str, (int)strlen(str), str_index);
 }
 
 static bool write_string(FILE* f, char* str, int* str_index) {
@@ -253,7 +253,7 @@ bool patch_dyo_initializer_code_relocation(FILE* f, int file_loc, int final_code
 }
 
 bool write_dyo_code(FILE* f, void* data, size_t size) {
-  if (!write_record_header(f, kTypeX64Code, size))
+  if (!write_record_header(f, kTypeX64Code, (int)size))
     return false;
 
   if (fwrite(data, size, 1, f) < 0)
@@ -311,7 +311,7 @@ bool read_dyo_record(FILE* f,
 }
 
 bool dump_dyo_file(FILE* f) {
-  char buf[1 << 20];  // Arbitrary max length.
+  char buf[1 << 16];  // Arbitrary max length.
 
   if (!ensure_dyo_header(f))
     return false;
@@ -356,7 +356,7 @@ bool dump_dyo_file(FILE* f) {
       case kTypeInitializerBytes:
         printf("    ->%d initializer bytes (%d bytes)\n", record_index, size);
         printf("         ");
-        for (int i = 0; i < size; ++i) {
+        for (int i = 0; i < (int)size; ++i) {
           printf(" 0x%x", buf[i]);
         }
         printf("\n");

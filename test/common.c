@@ -44,7 +44,6 @@ int add_all(int n, ...) {
 float add_float(float x, float y) {
   return x + y;
 }
-
 double add_double(double x, double y) {
   return x + y;
 }
@@ -65,6 +64,7 @@ typedef struct { int a,b; short c; char d; } Ty4;
 typedef struct { int a; float b; double c; } Ty5;
 typedef struct { unsigned char a[3]; } Ty6;
 typedef struct { long a, b, c; } Ty7;
+typedef struct { int a, b; } Ty8;
 
 int struct_test4(Ty4 x, int n) {
   switch (n) {
@@ -92,6 +92,13 @@ int struct_test7(Ty7 x, int n) {
   case 0: return x.a;
   case 1: return x.b;
   default: return x.c;
+  }
+}
+
+int struct_test8(Ty8 x, int n) {
+  switch (n) {
+  case 0: return x.a;
+  default: return x.b;
   }
 }
 

@@ -15,7 +15,11 @@ Type* ty_ulong = &(Type){TY_LONG, 8, 8, true};
 
 Type* ty_float = &(Type){TY_FLOAT, 4, 4};
 Type* ty_double = &(Type){TY_DOUBLE, 8, 8};
+#if X64WIN
+Type* ty_ldouble = &(Type){TY_LDOUBLE, 8, 8};
+#else
 Type* ty_ldouble = &(Type){TY_LDOUBLE, 16, 16};
+#endif
 
 static Type* new_type(TypeKind kind, int size, int align) {
   Type* ty = bumpcalloc(1, sizeof(Type));
@@ -60,7 +64,9 @@ bool is_compatible(Type* t1, Type* t2) {
       return t1->is_unsigned == t2->is_unsigned;
     case TY_FLOAT:
     case TY_DOUBLE:
+#if !X64WIN
     case TY_LDOUBLE:
+#endif
       return true;
     case TY_PTR:
       return is_compatible(t1->base, t2->base);

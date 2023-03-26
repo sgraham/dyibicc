@@ -1,5 +1,5 @@
 #include "test.h"
-#include "stddef.h"
+#include <stddef.h>
 
 int main() {
   ASSERT(5, ({ struct { char a; int b; } __attribute__((packed)) x; sizeof(x); }));

@@ -11,15 +11,6 @@ static bool has_space;
 
 static HashMap keyword_map;
 
-// Reports an error and exit.
-void error(char* fmt, ...) {
-  va_list ap;
-  va_start(ap, fmt);
-  vfprintf(stderr, fmt, ap);
-  fprintf(stderr, "\n");
-  exit(1);
-}
-
 // Reports an error message in the following format.
 //
 // foo.c:10: x = y + 1;
@@ -39,7 +30,7 @@ static void verror_at(char* filename, char* input, int line_no, char* loc, char*
   fprintf(stderr, "%.*s\n", (int)(end - line), line);
 
   // Show the error message.
-  int pos = display_width(line, loc - line) + indent;
+  int pos = display_width(line, (int)(loc - line)) + indent;
 
   fprintf(stderr, "%*s", pos, "");  // print pos spaces.
   fprintf(stderr, "^ ");
@@ -75,7 +66,7 @@ void warn_tok(Token* tok, char* fmt, ...) {
 
 // Consumes the current token if it matches `op`.
 bool equal(Token* tok, char* op) {
-  return memcmp(tok->loc, op, tok->len) == 0 && op[tok->len] == '\0';
+  return strncmp(tok->loc, op, tok->len) == 0 && op[tok->len] == '\0';
 }
 
 // Ensure that the current token is `op`.
@@ -99,7 +90,7 @@ static Token* new_token(TokenKind kind, char* start, char* end) {
   Token* tok = bumpcalloc(1, sizeof(Token));
   tok->kind = kind;
   tok->loc = start;
-  tok->len = end - start;
+  tok->len = (int)(end - start);
   tok->file = current_file;
   tok->filename = current_file->display_name;
   tok->at_bol = at_bol;
@@ -125,7 +116,7 @@ static int read_ident(char* start) {
     char* q;
     c = decode_utf8(&q, p);
     if (!is_ident2(c))
-      return p - start;
+      return (int)(p - start);
     p = q;
   }
 }
@@ -147,7 +138,7 @@ static int read_punct(char* p) {
 
   for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
     if (startswith(p, kw[i]))
-      return strlen(kw[i]);
+      return (int)strlen(kw[i]);
 
   return ispunct(*p) ? 1 : 0;
 }
@@ -155,21 +146,55 @@ static int read_punct(char* p) {
 static bool is_keyword(Token* tok) {
   if (keyword_map.capacity == 0) {
     static char* kw[] = {
-        "return",    "if",         "else",
-        "for",       "while",      "int",
-        "sizeof",    "char",       "struct",
-        "union",     "short",      "long",
-        "void",      "typedef",    "_Bool",
-        "enum",      "static",     "goto",
-        "break",     "continue",   "switch",
-        "case",      "default",    "extern",
-        "_Alignof",  "_Alignas",   "do",
-        "signed",    "unsigned",   "const",
-        "volatile",  "auto",       "register",
-        "restrict",  "__restrict", "__restrict__",
-        "_Noreturn", "float",      "double",
-        "typeof",    "asm",        "_Thread_local",
-        "__thread",  "_Atomic",    "__attribute__",
+      "return",
+      "if",
+      "else",
+      "for",
+      "while",
+      "int",
+      "sizeof",
+      "char",
+      "struct",
+      "union",
+      "short",
+      "long",
+      "void",
+      "typedef",
+      "_Bool",
+      "enum",
+      "static",
+      "goto",
+      "break",
+      "continue",
+      "switch",
+      "case",
+      "default",
+      "extern",
+      "_Alignof",
+      "_Alignas",
+      "do",
+      "signed",
+      "unsigned",
+      "const",
+      "volatile",
+      "auto",
+      "register",
+      "restrict",
+      "__restrict",
+      "__restrict__",
+      "_Noreturn",
+      "float",
+      "double",
+      "typeof",
+      "asm",
+      "_Thread_local",
+      "__thread",
+      "_Atomic",
+      "__attribute__",
+
+#if X64WIN
+      "__int64",
+#endif
     };
 
     for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
@@ -260,7 +285,7 @@ static Token* read_string_literal(char* start, char* quote) {
 
   for (char* p = quote + 1; p < end;) {
     if (*p == '\\')
-      buf[len++] = read_escaped_char(&p, p + 1);
+      buf[len++] = (char)read_escaped_char(&p, p + 1);
     else
       buf[len++] = *p++;
   }
@@ -285,14 +310,14 @@ static Token* read_utf16_string_literal(char* start, char* quote) {
 
   for (char* p = quote + 1; p < end;) {
     if (*p == '\\') {
-      buf[len++] = read_escaped_char(&p, p + 1);
+      buf[len++] = (uint16_t)read_escaped_char(&p, p + 1);
       continue;
     }
 
     uint32_t c = decode_utf8(&p, p);
     if (c < 0x10000) {
       // Encode a code point in 2 bytes.
-      buf[len++] = c;
+      buf[len++] = (uint16_t)c;
     } else {
       // Encode a code point in 4 bytes.
       c -= 0x10000;
@@ -365,7 +390,7 @@ static bool convert_pp_int(Token* tok) {
     base = 8;
   }
 
-  int64_t val = strtoul(p, &p, base);
+  int64_t val = strtoull(p, &p, base);
 
   // Read U, L or LL suffixes.
   bool l = false;
@@ -501,7 +526,7 @@ Token* tokenize(File* file) {
   current_file = file;
 
   char* p = file->contents;
-  Token head = {};
+  Token head = {0};
   Token* cur = &head;
 
   at_bol = true;
@@ -646,11 +671,12 @@ Token* tokenize(File* file) {
   return head.next;
 }
 
-#ifdef _MSC_VER
+#if X64WIN
 
 // Returns the contents of a given file. Doesn't support '-' for reading from
 // stdin.
 static char* read_file(char* path) {
+  // fprintf(stderr, "reading \"%s\"\n", path);
   FILE* fp = fopen(path, "rb");
   if (!fp) {
     return NULL;

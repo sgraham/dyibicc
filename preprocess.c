@@ -112,7 +112,7 @@ static Hideset* new_hideset(char* name) {
 }
 
 static Hideset* hideset_union(Hideset* hs1, Hideset* hs2) {
-  Hideset head = {};
+  Hideset head = {0};
   Hideset* cur = &head;
 
   for (; hs1; hs1 = hs1->next)
@@ -129,17 +129,17 @@ static bool hideset_contains(Hideset* hs, char* s, int len) {
 }
 
 static Hideset* hideset_intersection(Hideset* hs1, Hideset* hs2) {
-  Hideset head = {};
+  Hideset head = {0};
   Hideset* cur = &head;
 
   for (; hs1; hs1 = hs1->next)
-    if (hideset_contains(hs2, hs1->name, strlen(hs1->name)))
+    if (hideset_contains(hs2, hs1->name, (int)strlen(hs1->name)))
       cur = cur->next = new_hideset(hs1->name);
   return head.next;
 }
 
 static Token* add_hideset(Token* tok, Hideset* hs) {
-  Token head = {};
+  Token head = {0};
   Token* cur = &head;
 
   for (; tok; tok = tok->next) {
@@ -155,7 +155,7 @@ static Token* append(Token* tok1, Token* tok2) {
   if (tok1->kind == TK_EOF)
     return tok2;
 
-  Token head = {};
+  Token head = {0};
   Token* cur = &head;
 
   for (; tok1->kind != TK_EOF; tok1 = tok1->next)
@@ -227,7 +227,7 @@ static Token* new_str_token(char* str, Token* tmpl) {
 // an EOF token and then returns them. This function is used to
 // create a new list of tokens for `#if` arguments.
 static Token* copy_line(Token** rest, Token* tok) {
-  Token head = {};
+  Token head = {0};
   Token* cur = &head;
 
   for (; !tok->at_bol; tok = tok->next)
@@ -246,7 +246,7 @@ static Token* new_num_token(int val, Token* tmpl) {
 static Token* read_const_expr(Token** rest, Token* tok) {
   tok = copy_line(rest, tok);
 
-  Token head = {};
+  Token head = {0};
   Token* cur = &head;
 
   while (tok->kind != TK_EOF) {
@@ -301,7 +301,7 @@ static long eval_const_expr(Token** rest, Token* tok) {
   convert_pp_tokens(expr);
 
   Token* rest2;
-  long val = const_expr(&rest2, expr);
+  long val = (long)const_expr(&rest2, expr);
   if (rest2->kind != TK_EOF)
     error_tok(rest2, "extra token");
   return val;
@@ -333,7 +333,7 @@ static Macro* add_macro(char* name, bool is_objlike, Token* body) {
 }
 
 static MacroParam* read_macro_params(Token** rest, Token* tok, char** va_args_name) {
-  MacroParam head = {};
+  MacroParam head = {0};
   MacroParam* cur = &head;
 
   while (!equal(tok, ")")) {
@@ -386,7 +386,7 @@ static void read_macro_definition(Token** rest, Token* tok) {
 }
 
 static MacroArg* read_macro_arg_one(Token** rest, Token* tok, bool read_rest) {
-  Token head = {};
+  Token head = {0};
   Token* cur = &head;
   int level = 0;
 
@@ -420,7 +420,7 @@ static MacroArg* read_macro_args(Token** rest, Token* tok, MacroParam* params, c
   Token* start = tok;
   tok = tok->next->next;
 
-  MacroArg head = {};
+  MacroArg head = {0};
   MacroArg* cur = &head;
 
   MacroParam* pp = params;
@@ -516,7 +516,7 @@ static bool has_varargs(MacroArg* args) {
 
 // Replace func-like macro parameters with given arguments.
 static Token* subst(Token* tok, MacroArg* args) {
-  Token head = {};
+  Token head = {0};
   Token* cur = &head;
 
   while (tok->kind != TK_EOF) {
@@ -595,9 +595,9 @@ static Token* subst(Token* tok, MacroArg* args) {
     // If __VA_ARG__ is empty, __VA_OPT__(x) is expanded to the
     // empty token list. Otherwise, __VA_OPT__(x) is expanded to x.
     if (equal(tok, "__VA_OPT__") && equal(tok->next, "(")) {
-      MacroArg* arg = read_macro_arg_one(&tok, tok->next->next, true);
+      MacroArg* arg2 = read_macro_arg_one(&tok, tok->next->next, true);
       if (has_varargs(args))
-        for (Token* t = arg->tok; t->kind != TK_EOF; t = t->next)
+        for (Token* t = arg2->tok; t->kind != TK_EOF; t = t->next)
           cur = cur->next = t;
       tok = skip(tok, ")");
       continue;
@@ -826,7 +826,7 @@ static void read_line_marker(Token** rest, Token* tok) {
 
   if (tok->kind != TK_NUM || tok->ty->kind != TY_INT)
     error_tok(tok, "invalid line marker");
-  start->file->line_delta = tok->val - start->line_no;
+  start->file->line_delta = (int)(tok->val - start->line_no);
 
   tok = tok->next;
   if (tok->kind == TK_EOF)
@@ -840,7 +840,7 @@ static void read_line_marker(Token** rest, Token* tok) {
 // Visit all tokens in `tok` while evaluating preprocessing
 // macros and directives.
 static Token* preprocess2(Token* tok) {
-  Token head = {};
+  Token head = {0};
   Token* cur = &head;
 
   while (tok->kind != TK_EOF) {
@@ -1002,6 +1002,12 @@ void undef_macro(char* name) {
   hashmap_delete(&macros, name);
 }
 
+void define_function_macro(char* buf) {
+  Token* tok = tokenize(new_file("<built-in>", buf));
+  Token* rest = tok;
+  read_macro_definition(&rest, tok);
+}
+
 static Macro* add_builtin(char* name, macro_handler_fn* fn) {
   Macro* m = add_macro(name, true, NULL);
   m->handler = fn;
@@ -1031,16 +1037,6 @@ static Token* counter_macro(Token* tmpl) {
 // "Fri Jul 24 01:32:50 2020"
 static Token* timestamp_macro(Token* tmpl) {
   return new_str_token("Mon May 02 01:23:45 1977", tmpl);
-#if 0
-  struct stat st;
-  if (stat(tmpl->file->name, &st) != 0)
-    return new_str_token("??? ??? ?? ??:??:?? ????", tmpl);
-
-  char buf[30];
-  ctime_r(&st.st_mtime, buf);
-  buf[24] = '\0';
-  return new_str_token(buf, tmpl);
-#endif
 }
 
 static Token* base_file_macro(Token* tmpl) {
@@ -1049,23 +1045,14 @@ static Token* base_file_macro(Token* tmpl) {
 
 // __DATE__ is expanded to the current date, e.g. "May 17 2020".
 static char* format_date(struct tm* tm) {
+  (void)tm;
   return "\"May 02 1977\"";
-#if 0
-  static char mon[][4] = {
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-  };
-
-  return format("\"%s %2d %d\"", mon[tm->tm_mon], tm->tm_mday, tm->tm_year + 1900);
-#endif
 }
 
 // __TIME__ is expanded to the current time, e.g. "13:34:03".
 static char* format_time(struct tm* tm) {
+  (void)tm;
   return "\"01:23:45\"";
-#if 0
-  return format("\"%02d:%02d:%02d\"", tm->tm_hour, tm->tm_min, tm->tm_sec);
-#endif
 }
 
 void init_macros(void) {
@@ -1076,9 +1063,7 @@ void init_macros(void) {
   define_macro("__SIZEOF_DOUBLE__", "8");
   define_macro("__SIZEOF_FLOAT__", "4");
   define_macro("__SIZEOF_INT__", "4");
-  define_macro("__SIZEOF_LONG_DOUBLE__", "8");
   define_macro("__SIZEOF_LONG_LONG__", "8");
-  define_macro("__SIZEOF_LONG__", "8");
   define_macro("__SIZEOF_POINTER__", "8");
   define_macro("__SIZEOF_PTRDIFF_T__", "8");
   define_macro("__SIZEOF_SHORT__", "2");
@@ -1107,10 +1092,22 @@ void init_macros(void) {
   define_macro("__volatile__", "volatile");
   define_macro("__x86_64", "1");
   define_macro("__x86_64__", "1");
-#ifdef _MSC_VER
-  define_macro("_M_X64", "1");
+#if X64WIN
+  define_macro("__SIZEOF_LONG__", "4");
+  define_macro("__SIZEOF_LONG_DOUBLE__", "8");
   define_macro("__cdecl", "");
+  define_macro("__inline", "");
+  define_macro("_M_X64", "100");
+  define_macro("_M_AMD64", "100");
+  define_macro("_WIN32", "1");
+  define_macro("_WIN64", "1");
+  define_macro("_NO_CRT_STDIO_INLINE", "1");
+  define_macro("__WINT_TYPE__", "unsigned short");
+  define_function_macro("__pragma(_)\n");
+  define_function_macro("__declspec(_)\n");
 #else
+  define_macro("__SIZEOF_LONG__", "8");
+  define_macro("__SIZEOF_LONG_DOUBLE__", "16");
   define_macro("__ELF__", "1");
   define_macro("linux", "1");
   define_macro("unix", "1");

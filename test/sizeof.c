@@ -6,9 +6,9 @@ int main() {
   ASSERT(2, sizeof(short int));
   ASSERT(2, sizeof(int short));
   ASSERT(4, sizeof(int));
-  ASSERT(8, sizeof(long));
-  ASSERT(8, sizeof(long int));
-  ASSERT(8, sizeof(long int));
+  ASSERT(__SIZEOF_LONG__, sizeof(long));
+  ASSERT(__SIZEOF_LONG__, sizeof(long int));
+  ASSERT(__SIZEOF_LONG__, sizeof(long int));
   ASSERT(8, sizeof(char *));
   ASSERT(8, sizeof(int *));
   ASSERT(8, sizeof(long *));
@@ -19,14 +19,14 @@ int main() {
   ASSERT(48, sizeof(int[3][4]));
   ASSERT(8, sizeof(struct {int a; int b;}));
 
-  ASSERT(8, sizeof(-10 + (long)5));
-  ASSERT(8, sizeof(-10 - (long)5));
-  ASSERT(8, sizeof(-10 * (long)5));
-  ASSERT(8, sizeof(-10 / (long)5));
-  ASSERT(8, sizeof((long)-10 + 5));
-  ASSERT(8, sizeof((long)-10 - 5));
-  ASSERT(8, sizeof((long)-10 * 5));
-  ASSERT(8, sizeof((long)-10 / 5));
+  ASSERT(__SIZEOF_LONG__, sizeof(-10 + (long)5));
+  ASSERT(__SIZEOF_LONG__, sizeof(-10 - (long)5));
+  ASSERT(__SIZEOF_LONG__, sizeof(-10 * (long)5));
+  ASSERT(__SIZEOF_LONG__, sizeof(-10 / (long)5));
+  ASSERT(__SIZEOF_LONG__, sizeof((long)-10 + 5));
+  ASSERT(__SIZEOF_LONG__, sizeof((long)-10 - 5));
+  ASSERT(__SIZEOF_LONG__, sizeof((long)-10 * 5));
+  ASSERT(__SIZEOF_LONG__, sizeof((long)-10 / 5));
 
   ASSERT(1, ({ char i; sizeof(++i); }));
   ASSERT(1, ({ char i; sizeof(i++); }));
@@ -58,11 +58,11 @@ int main() {
   ASSERT(4, sizeof(unsigned));
   ASSERT(4, sizeof(unsigned unsigned));
 
-  ASSERT(8, sizeof(long));
-  ASSERT(8, sizeof(signed long));
-  ASSERT(8, sizeof(signed long int));
-  ASSERT(8, sizeof(unsigned long));
-  ASSERT(8, sizeof(unsigned long int));
+  ASSERT(__SIZEOF_LONG__, sizeof(long));
+  ASSERT(__SIZEOF_LONG__, sizeof(signed long));
+  ASSERT(__SIZEOF_LONG__, sizeof(signed long int));
+  ASSERT(__SIZEOF_LONG__, sizeof(unsigned long));
+  ASSERT(__SIZEOF_LONG__, sizeof(unsigned long int));
 
   ASSERT(8, sizeof(long long));
   ASSERT(8, sizeof(signed long long));
@@ -73,13 +73,13 @@ int main() {
   ASSERT(1, sizeof((char)1));
   ASSERT(2, sizeof((short)1));
   ASSERT(4, sizeof((int)1));
-  ASSERT(8, sizeof((long)1));
+  ASSERT(__SIZEOF_LONG__, sizeof((long)1));
 
   ASSERT(4, sizeof((char)1 + (char)1));
   ASSERT(4, sizeof((short)1 + (short)1));
   ASSERT(4, sizeof(1?2:3));
   ASSERT(4, sizeof(1?(short)2:(char)3));
-  ASSERT(8, sizeof(1?(long)2:(char)3));
+  ASSERT(__SIZEOF_LONG__, sizeof(1?(long)2:(char)3));
 
   ASSERT(1, sizeof(char) << 31 >> 31);
   ASSERT(1, sizeof(char) << 63 >> 63);
@@ -96,7 +96,7 @@ int main() {
   ASSERT(4, sizeof(1f/2));
   ASSERT(8, sizeof(1.0/2));
 
-  ASSERT(16, sizeof(long double));
+  ASSERT(__SIZEOF_LONG_DOUBLE__, sizeof(long double));
 
   ASSERT(1, sizeof(main));
 

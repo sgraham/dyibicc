@@ -18,10 +18,12 @@ int main() {
   memcpy(p1, "0123456789abcdef", 16);
   memcpy(p2, "ghijklmnopqrstuv", 16);
   memcpy(p3, "wxy", 3);
+  memcpy(p4, "zippyzap", 8);
 
   ASSERT(0, memcmp(p1, "0123456789abcdef", 16));
   ASSERT(0, memcmp(p2, "ghijklmnopqrstuv", 16));
   ASSERT(0, memcmp(p3, "wxy", 3));
+  ASSERT(0, memcmp(p4, "zippyzap", 8));
 
   printf("OK\n");
   return 0;

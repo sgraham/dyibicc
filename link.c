@@ -1,6 +1,6 @@
 #include "dyibicc.h"
 
-#ifdef _MSC_VER
+#if X64WIN
 #include <windows.h>
 #else
 #include <dlfcn.h>
@@ -9,9 +9,57 @@
 
 #define MAX_DYOS 32
 
+#if X64WIN
+static HashMap runtime_function_map;
+
+static void* get_standard_runtime_function(char* name) {
+  if (runtime_function_map.capacity == 0) {
+#define X(func) hashmap_put(&runtime_function_map, #func, (void*)&func)
+    X(CloseHandle);
+    X(CreateThread);
+    X(WaitForSingleObject);
+    X(__acrt_iob_func);
+    X(__stdio_common_vfprintf);
+    X(__stdio_common_vfprintf_p);
+    X(__stdio_common_vfprintf_s);
+    X(__stdio_common_vfscanf);
+    X(__stdio_common_vfwprintf);
+    X(__stdio_common_vfwprintf_p);
+    X(__stdio_common_vfwprintf_s);
+    X(__stdio_common_vfwscanf);
+    X(__stdio_common_vsnprintf_s);
+    X(__stdio_common_vsnwprintf_s);
+    X(__stdio_common_vsprintf);
+    X(__stdio_common_vsprintf_p);
+    X(__stdio_common_vsprintf_s);
+    X(__stdio_common_vsscanf);
+    X(__stdio_common_vswprintf);
+    X(__stdio_common_vswprintf_p);
+    X(__stdio_common_vswprintf_s);
+    X(__stdio_common_vswscanf);
+    X(exit);
+    X(memcmp);
+    X(memcpy);
+    X(printf);
+    X(sprintf);
+    X(strcmp);
+    X(strlen);
+    X(strncmp);
+    X(vsprintf);
+#undef X
+  }
+
+  return hashmap_get(&runtime_function_map, name);
+}
+#endif
+
 static void* symbol_lookup(char* name) {
-#ifdef _MSC_VER
-  return GetProcAddress(GetModuleHandle(NULL), name);
+#if X64WIN
+  void* f = get_standard_runtime_function(name);
+  if (f) {
+    return f;
+  }
+  return (void*)GetProcAddress(GetModuleHandle(NULL), name);
 #else
   return dlsym(NULL, name);
 #endif
@@ -20,7 +68,7 @@ static void* symbol_lookup(char* name) {
 void* link_dyos(FILE** dyo_files) {
   char buf[1 << 16];
 
-#ifdef _MSC_VER
+#if X64WIN
   SYSTEM_INFO system_info;
   GetSystemInfo(&system_info);
   unsigned int page_size = system_info.dwPageSize;
@@ -28,7 +76,7 @@ void* link_dyos(FILE** dyo_files) {
   unsigned int page_size = sysconf(_SC_PAGESIZE);
 #endif
 
-  void* base_address[MAX_DYOS];
+  char* base_address[MAX_DYOS];
   size_t code_size[MAX_DYOS];
   int num_dyos = 0;
 
@@ -76,13 +124,13 @@ void* link_dyos(FILE** dyo_files) {
           ++num_dyos;
           break;
         } else if (type == kTypeInitializedData) {
-          unsigned int size = *(unsigned int*)&buf[0];
+          unsigned int data_size = *(unsigned int*)&buf[0];
           unsigned int align = *(unsigned int*)&buf[4];
           unsigned int is_static = *(unsigned int*)&buf[8];
           unsigned int name_index = *(unsigned int*)&buf[12];
 
-          void* global_data = aligned_allocate(size, align);
-          memset(global_data, 0, size);
+          void* global_data = aligned_allocate(data_size, align);
+          memset(global_data, 0, data_size);
 
           if (is_static) {
             hashmap_put(&per_dyo_global[num_dyos], strings.data[name_index], global_data);
@@ -151,9 +199,9 @@ void* link_dyos(FILE** dyo_files) {
     StringArray strings = {NULL, 0, 0};
     strarray_push(&strings, NULL);  // 1-based
 
-    void* current_data_base = NULL;
-    void* current_data_pointer = NULL;
-    void* current_data_end = NULL;
+    char* current_data_base = NULL;
+    char* current_data_pointer = NULL;
+    char* current_data_end = NULL;
 
     for (;;) {
       unsigned int type;
@@ -182,7 +230,7 @@ void* link_dyos(FILE** dyo_files) {
           // printf("fixed up import %p to point at %p (%s)\n", fixup_address, target_address,
           // strings.data[string_record_index]);
         } else if (type == kTypeInitializedData) {
-          unsigned int size = *(unsigned int*)&buf[0];
+          unsigned int data_size = *(unsigned int*)&buf[0];
           unsigned int is_static = *(unsigned int*)&buf[8];
           unsigned int name_index = *(unsigned int*)&buf[12];
 
@@ -196,7 +244,7 @@ void* link_dyos(FILE** dyo_files) {
             return NULL;
           }
           current_data_pointer = current_data_base;
-          current_data_end = current_data_base + size;
+          current_data_end = current_data_base + data_size;
         } else if (type == kTypeCodeReferenceToGlobal) {
           unsigned int fixup_offset = *(unsigned int*)&buf[0];
           unsigned int string_record_index = *(unsigned int*)&buf[4];
@@ -279,4 +327,10 @@ void* link_dyos(FILE** dyo_files) {
 
   // Return entry point.
   return entry_point;
+}
+
+void link_reset(void) {
+#if X64WIN
+  runtime_function_map = (HashMap){NULL, 0, 0};
+#endif
 }

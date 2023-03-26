@@ -78,6 +78,12 @@ short sshort_fn();
 
 int add_all(int n, ...);
 
+#ifdef _WIN64
+
+typedef char* va_list;
+
+#else
+
 typedef struct {
   int gp_offset;
   int fp_offset;
@@ -87,13 +93,18 @@ typedef struct {
 
 typedef __va_elem va_list[1];
 
-int add_all(int n, ...);
+#endif
+
 int sprintf(char *buf, char *fmt, ...);
 int vsprintf(char *buf, char *fmt, va_list ap);
 
 char *fmt(char *buf, char *fmt, ...) {
   va_list ap;
+#ifdef _WIN64
+  ap = (char*)(((__int64*)(&fmt)) + 1);
+#else
   *ap = *(__va_elem *)__va_area__;
+#endif
   vsprintf(buf, fmt, ap);
 }
 
@@ -145,11 +156,13 @@ typedef struct { int a,b; short c; char d; } Ty4;
 typedef struct { int a; float b; double c; } Ty5;
 typedef struct { unsigned char a[3]; } Ty6;
 typedef struct { long a, b, c; } Ty7;
+typedef struct { int a, b; } Ty8;
 
 int struct_test5(Ty5 x, int n);
 int struct_test4(Ty4 x, int n);
 int struct_test6(Ty6 x, int n);
 int struct_test7(Ty7 x, int n);
+int struct_test8(Ty7 x, int n);
 
 int struct_test14(Ty4 x, int n) {
   switch (n) {
@@ -195,6 +208,10 @@ Ty20 struct_test37(void) {
 
 Ty21 struct_test38(void) {
   return (Ty21){1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20};
+}
+
+Ty8 struct_test39(void) {
+  return (Ty8){99, 109};
 }
 
 inline int inline_fn(void) {
@@ -320,6 +337,9 @@ int main() {
   ASSERT(20, ({ Ty7 x={10,20,30}; struct_test7(x, 1); }));
   ASSERT(30, ({ Ty7 x={10,20,30}; struct_test7(x, 2); }));
 
+  ASSERT(10, ({ Ty8 x={10,20}; struct_test8(x, 0); }));
+  ASSERT(20, ({ Ty8 x={10,20}; struct_test8(x, 1); }));
+
   ASSERT(10, ({ Ty4 x={10,20,30,40}; struct_test14(x, 0); }));
   ASSERT(20, ({ Ty4 x={10,20,30,40}; struct_test14(x, 1); }));
   ASSERT(30, ({ Ty4 x={10,20,30,40}; struct_test14(x, 2); }));
@@ -374,6 +394,9 @@ int main() {
   ASSERT(10, struct_test38().a[9]);
   ASSERT(15, struct_test38().a[14]);
   ASSERT(20, struct_test38().a[19]);
+
+  ASSERT(99, struct_test39().a);
+  ASSERT(109, struct_test39().b);
 
   ASSERT(5, (***add2)(2,3));
 

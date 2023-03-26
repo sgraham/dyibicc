@@ -38,7 +38,7 @@ static void rehash(HashMap* map) {
   assert(cap > 0);
 
   // Create a new hashmap and copy all key-values.
-  HashMap map2 = {};
+  HashMap map2 = {0};
   map2.buckets = bumpcalloc(cap, sizeof(HashEntry));
   map2.capacity = cap;
 
@@ -106,7 +106,7 @@ static HashEntry* get_or_insert_entry(HashMap* map, char* key, int keylen) {
 }
 
 void* hashmap_get(HashMap* map, char* key) {
-  return hashmap_get2(map, key, strlen(key));
+  return hashmap_get2(map, key, (int)strlen(key));
 }
 
 void* hashmap_get2(HashMap* map, char* key, int keylen) {
@@ -115,7 +115,7 @@ void* hashmap_get2(HashMap* map, char* key, int keylen) {
 }
 
 void hashmap_put(HashMap* map, char* key, void* val) {
-  hashmap_put2(map, key, strlen(key), val);
+  hashmap_put2(map, key, (int)strlen(key), val);
 }
 
 void hashmap_put2(HashMap* map, char* key, int keylen, void* val) {
@@ -124,7 +124,7 @@ void hashmap_put2(HashMap* map, char* key, int keylen, void* val) {
 }
 
 void hashmap_delete(HashMap* map, char* key) {
-  hashmap_delete2(map, key, strlen(key));
+  hashmap_delete2(map, key, (int)strlen(key));
 }
 
 void hashmap_delete2(HashMap* map, char* key, int keylen) {

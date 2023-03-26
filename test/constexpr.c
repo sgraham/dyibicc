@@ -42,8 +42,13 @@ int main() {
   ASSERT(255, ({ char x[(unsigned char)0xffffffff]; sizeof(x); }));
   ASSERT(0x800f, ({ char x[(unsigned short)0xffff800f]; sizeof(x); }));
   ASSERT(1, ({ char x[(unsigned int)0xfffffffffff>>31]; sizeof(x); }));
+#if __SIZEOF_LONG__ == 8
   ASSERT(1, ({ char x[(long)-1/((long)1<<62)+1]; sizeof(x); }));
   ASSERT(4, ({ char x[(unsigned long)-1/((long)1<<62)+1]; sizeof(x); }));
+#else
+  ASSERT(1, ({ char x[(long long)-1/((long long)1<<62)+1]; sizeof(x); }));
+  ASSERT(4, ({ char x[(unsigned long long)-1/((long long)1<<62)+1]; sizeof(x); }));
+#endif
   ASSERT(1, ({ char x[(unsigned)1<-1]; sizeof(x); }));
   ASSERT(1, ({ char x[(unsigned)1<=-1]; sizeof(x); }));
 

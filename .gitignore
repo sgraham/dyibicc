@@ -13,4 +13,5 @@ tags
 objconv.exe
 test/x.c
 minilua
-codegen.c
+codegen.linux.c
+codegen.win32.c

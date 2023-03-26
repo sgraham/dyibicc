@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -13,7 +14,13 @@
 #include <sys/types.h>
 #include <time.h>
 
-#ifndef _MSC_VER
+#ifdef _MSC_VER
+#define NORETURN __declspec(noreturn)
+#else
+#define NORETURN _Noreturn
+#endif
+
+#if !X64WIN
 #include <strings.h>
 #endif
 
@@ -27,7 +34,7 @@
 // --------------
 // --------------
 // --------------
-#ifdef _MSC_VER
+#if X64WIN
 static inline char* strndup(const char* s, size_t n) {
   size_t l = strnlen(s, n);
   char* d = malloc(l + 1);
@@ -44,13 +51,13 @@ static inline char* dirname(char* s) {
   if (!s || !*s)
     return ".";
   i = strlen(s) - 1;
-  for (; s[i] == '/'; i--)
+  for (; s[i] == '/' || s[i] == '\\'; i--)
     if (!i)
       return "/";
-  for (; s[i] != '/'; i--)
+  for (; s[i] != '/' || s[i] == '\\'; i--)
     if (!i)
       return ".";
-  for (; s[i] == '/'; i--)
+  for (; s[i] == '/' || s[i] == '\\'; i--)
     if (!i)
       return "/";
   s[i + 1] = 0;
@@ -62,14 +69,14 @@ static inline char* basename(char* s) {
   if (!s || !*s)
     return ".";
   i = strlen(s) - 1;
-  for (; i && s[i] == '/'; i--)
+  for (; i && (s[i] == '/' || s[i] == '\\'); i--)
     s[i] = 0;
-  for (; i && s[i - 1] != '/'; i--)
+  for (; i && s[i - 1] != '/' && s[i - 1] != '\\'; i--)
     ;
   return s + i;
 }
 
-#ifdef _MSC_VER
+#if X64WIN
 #define strncasecmp _strnicmp
 #define strdup _strdup
 #endif
@@ -180,9 +187,9 @@ struct Token {
   Token* origin;     // If this is expanded from a macro, the original token
 };
 
-_Noreturn void error(char* fmt, ...) __attribute__((format(printf, 1, 2)));
-_Noreturn void error_at(char* loc, char* fmt, ...) __attribute__((format(printf, 2, 3)));
-_Noreturn void error_tok(Token* tok, char* fmt, ...) __attribute__((format(printf, 2, 3)));
+NORETURN void error(char* fmt, ...) __attribute__((format(printf, 1, 2)));
+NORETURN void error_at(char* loc, char* fmt, ...) __attribute__((format(printf, 2, 3)));
+NORETURN void error_tok(Token* tok, char* fmt, ...) __attribute__((format(printf, 2, 3)));
 void warn_tok(Token* tok, char* fmt, ...) __attribute__((format(printf, 2, 3)));
 bool equal(Token* tok, char* op);
 Token* skip(Token* tok, char* op);
@@ -218,7 +225,10 @@ struct Obj {
   Type* ty;       // Type
   Token* tok;     // representative token
   bool is_local;  // local or global/function
-  int align;      // alignment
+#if X64WIN
+  bool is_param_passed_by_reference;
+#endif
+  int align;  // alignment
 
   // Local variable
   int offset;
@@ -246,7 +256,7 @@ struct Obj {
   int stack_size;
 
   // Static inline function
-  bool is_live;
+  bool is_live;  // No code is emitted for "static inline" functions if no one is referencing them.
   bool is_root;
   StringArray refs;
 };
@@ -254,7 +264,6 @@ struct Obj {
 // Global variable can be initialized either by a constant expression
 // or a pointer to another global variable. This struct represents the
 // latter.
-typedef struct Relocation Relocation;
 struct Relocation {
   Relocation* next;
   int offset;
@@ -346,6 +355,9 @@ struct Node {
   Type* func_ty;
   Node* args;
   bool pass_by_stack;
+#if X64WIN
+  int pass_by_reference;  // Offset to copy of large struct.
+#endif
   Obj* ret_buffer;
 
   // Goto or labeled statement, or labels-as-values
@@ -399,7 +411,11 @@ typedef enum {
   TY_LONG,
   TY_FLOAT,
   TY_DOUBLE,
+#if X64WIN
+  TY_LDOUBLE = TY_DOUBLE,
+#else
   TY_LDOUBLE,
+#endif
   TY_ENUM,
   TY_PTR,
   TY_FUNC,
@@ -503,6 +519,9 @@ void add_type(Node* node);
 void codegen_init(void);
 void codegen(Obj* prog, FILE* dyo_out);
 int codegen_pclabel(void);
+#if X64WIN
+bool type_passed_in_register(Type* ty);
+#endif
 
 //
 // unicode.c
@@ -603,8 +622,9 @@ void* link_dyos(FILE** dyo_files);
 extern StringArray include_paths;
 extern char* base_file;
 
+void bumpcalloc_reset(void);
+void codegen_reset(void);
+void link_reset(void);
 void parse_reset(void);
 void preprocess_reset(void);
 void tokenize_reset(void);
-void codegen_reset(void);
-void bumpcalloc_reset(void);

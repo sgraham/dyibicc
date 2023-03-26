@@ -8,7 +8,7 @@ struct {
 
 int main() {
   ASSERT(4, sizeof(struct {int x:1; }));
-  ASSERT(8, sizeof(struct {long x:1; }));
+  ASSERT(__SIZEOF_LONG__, sizeof(struct {long x:1; }));
 
   struct bit1 {
     short a;

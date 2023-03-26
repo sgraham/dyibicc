@@ -113,7 +113,7 @@ int main() {
   ASSERT(-1, 0?-2:-1);
   ASSERT(-2, 1?-2:-1);
   ASSERT(4, sizeof(0?1:2));
-  ASSERT(8, sizeof(0?(long)1:(long)2));
+  ASSERT(__SIZEOF_LONG__, sizeof(0?(long)1:(long)2));
   ASSERT(-1, 0?(long)-2:-1);
   ASSERT(-1, 0?-2:(long)-1);
   ASSERT(-2, 1?(long)-2:-1);

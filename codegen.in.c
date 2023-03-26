@@ -2,22 +2,26 @@
 
 #define DASM_CHECKS 1
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4127)
+#pragma warning(disable : 4244)
+#endif
 #include "dynasm/dasm_proto.h"
 #include "dynasm/dasm_x86.h"
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 ///| .arch x64
 ///| .section main
 ///| .actionlist dynasm_actions
 ///| .globals dynasm_globals
-///|
 ///| .if WIN
-///| .define X64WIN, 1			// Windows/x64 calling conventions. Big todo!
+///| .define X64WIN, 1
 ///| .endif
 
 #define Dst &dynasm
-
-#define GP_MAX 6
-#define FP_MAX 8
 
 static FILE* dyo_file;
 static int depth;
@@ -26,14 +30,36 @@ static int depth;
 #define REG_SI 6
 #define REG_DX 2
 #define REG_CX 1
-#define REG_8 8
-#define REG_9 9
+#define REG_R8 8
+#define REG_R9 9
+
 // Used with Rq(), Rd(), Rw(), Rb()
-static int dasmargreg[] = {REG_DI, REG_SI, REG_DX, REG_CX, REG_8, REG_9};
+#if X64WIN
+static int dasmargreg[] = {REG_CX, REG_DX, REG_R8, REG_R9};
+#define X64WIN_REG_MAX 4
+#define PARAMETER_SAVE_SIZE (4 * 8)
+#else
+static int dasmargreg[] = {REG_DI, REG_SI, REG_DX, REG_CX, REG_R8, REG_R9};
+#define SYSV_GP_MAX 6
+#define SYSV_FP_MAX 8
+#endif
+///| .if X64WIN
+///| .define CARG1, rcx
+///| .define CARG1d, ecx
+///| .define CARG2, rdx
+///| .define CARG3, r8
+///| .define CARG4, r9
+///| .else
+///| .define CARG1, rdi
+///| .define CARG1d, edi
+///| .define CARG2, rsi
+///| .define CARG3, rdx
+///| .define CARG4, rcx
+///| .define CARG5, r8
+///| .define CARG6, r9
+///| .endif
 
 static Obj* current_fn;
-static int last_file_no;
-static int last_line_no;
 
 static dasm_State* dynasm;
 static int numlabels = 1;
@@ -73,88 +99,12 @@ static void popf(int reg) {
   depth--;
 }
 
-// Compute the absolute address of a given node.
-// It's an error if a given node does not reside in memory.
-static void gen_addr(Node* node) {
-  switch (node->kind) {
-    case ND_VAR:
-      // Variable-length array, which is always local.
-      if (node->var->ty->kind == TY_VLA) {
-        ///| mov rax, [rbp+node->var->offset]
-        return;
-      }
-
-      // Local variable
-      if (node->var->is_local) {
-        ///| lea rax, [rbp+node->var->offset]
-        return;
-      }
-
-      // Thread-local variable
-      if (node->var->is_tls) {
-        // println("  mov rax, fs:0");
-        // println("  add rax, [rel %s wrt ..gottpoff]", node->var->name);
-        error_tok(node->tok, "TLS not implemented");
-        return;
-      }
-
-      // Function
-      if (node->ty->kind == TY_FUNC) {
-        if (node->var->is_definition) {
-          ///| lea rax, [=>node->var->dasm_entry_label]
-        } else {
-          int fixup_location = codegen_pclabel();
-          strintarray_push(&import_fixups, (StringInt){node->var->name, fixup_location});
-          ///|=>fixup_location:
-          ///| mov64 rax, 0x1234567890abcdef
-        }
-        return;
-      }
-
-      // Global variable
-      int fixup_location = codegen_pclabel();
-      strintarray_push(&data_fixups, (StringInt){node->var->name, fixup_location});
-      ///|=>fixup_location:
-      ///| mov64 rax, 0xfedcba0987654321
-      return;
-    case ND_DEREF:
-      gen_expr(node->lhs);
-      return;
-    case ND_COMMA:
-      gen_expr(node->lhs);
-      gen_addr(node->rhs);
-      return;
-    case ND_MEMBER:
-      gen_addr(node->lhs);
-      ///| add rax, node->member->offset
-      return;
-    case ND_FUNCALL:
-      if (node->ret_buffer) {
-        gen_expr(node);
-        return;
-      }
-      break;
-    case ND_ASSIGN:
-    case ND_COND:
-      if (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION) {
-        gen_expr(node);
-        return;
-      }
-      break;
-    case ND_VLA_PTR:
-      ///| lea rax, [rbp+node->var->offset]
-      return;
-  }
-
-  error_tok(node->tok, "not an lvalue");
-}
-
 // Load a value from where %rax is pointing to.
 static void load(Type* ty) {
   switch (ty->kind) {
-    case TY_ARRAY:
     case TY_STRUCT:
     case TY_UNION:
+    case TY_ARRAY:
     case TY_FUNC:
     case TY_VLA:
       // If it is an array, do not attempt to load a value to the
@@ -170,9 +120,11 @@ static void load(Type* ty) {
     case TY_DOUBLE:
       ///| movsd xmm0, qword [rax]
       return;
+#if !X64WIN
     case TY_LDOUBLE:
       ///| fld tword [rax]
       return;
+#endif
   }
 
   // When we load a char or a short value to a register, we always
@@ -217,9 +169,11 @@ static void store(Type* ty) {
     case TY_DOUBLE:
       ///| movsd qword [rdi], xmm0
       return;
+#if !X64WIN
     case TY_LDOUBLE:
       ///| fstp tword [rdi]
       return;
+#endif
   }
 
   if (ty->size == 1) {
@@ -233,6 +187,101 @@ static void store(Type* ty) {
   }
 }
 
+// Compute the absolute address of a given node.
+// It's an error if a given node does not reside in memory.
+static void gen_addr(Node* node) {
+  switch (node->kind) {
+    case ND_VAR:
+      // Variable-length array, which is always local.
+      if (node->var->ty->kind == TY_VLA) {
+        ///| mov rax, [rbp+node->var->offset]
+        return;
+      }
+
+      // Local variable
+      if (node->var->is_local) {
+        ///| lea rax, [rbp+node->var->offset]
+        return;
+      }
+
+      // Thread-local variable
+      if (node->var->is_tls) {
+        // println("  mov rax, fs:0");
+        // println("  add rax, [rel %s wrt ..gottpoff]", node->var->name);
+        error_tok(node->tok, "TLS not implemented");
+        return;
+      }
+
+      // Function
+      if (node->ty->kind == TY_FUNC) {
+        if (node->var->is_definition) {
+          ///| lea rax, [=>node->var->dasm_entry_label]
+        } else {
+          int fixup_location = codegen_pclabel();
+          strintarray_push(&import_fixups, (StringInt){node->var->name, fixup_location});
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4310)  // dynasm casts the top and bottom of the 64bit arg
+#endif
+          ///|=>fixup_location:
+          ///| mov64 rax, 0xc0dec0dec0dec0de
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+        }
+        return;
+      }
+
+      // Global variable
+      int fixup_location = codegen_pclabel();
+      strintarray_push(&data_fixups, (StringInt){node->var->name, fixup_location});
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4310)  // dynasm casts the top and bottom of the 64bit arg
+#endif
+      ///|=>fixup_location:
+      ///| mov64 rax, 0xda7ada7ada7ada7a
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+      return;
+    case ND_DEREF:
+      gen_expr(node->lhs);
+      return;
+    case ND_COMMA:
+      gen_expr(node->lhs);
+      gen_addr(node->rhs);
+      return;
+    case ND_MEMBER:
+      gen_addr(node->lhs);
+#if X64WIN
+      if (node->lhs->kind == ND_VAR && node->lhs->var->is_param_passed_by_reference) {
+        ///| mov rax, [rax]
+      }
+#endif
+      ///| add rax, node->member->offset
+      return;
+    case ND_FUNCALL:
+      if (node->ret_buffer) {
+        gen_expr(node);
+        return;
+      }
+      break;
+    case ND_ASSIGN:
+    case ND_COND:
+      if (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION) {
+        gen_expr(node);
+        return;
+      }
+      break;
+    case ND_VLA_PTR:
+      ///| lea rax, [rbp+node->var->offset]
+      return;
+  }
+
+  error_tok(node->tok, "not an lvalue");
+}
+
 static void cmp_zero(Type* ty) {
   switch (ty->kind) {
     case TY_FLOAT:
@@ -243,11 +292,13 @@ static void cmp_zero(Type* ty) {
       ///| xorpd xmm1, xmm1
       ///| ucomisd xmm0, xmm1
       return;
+#if !X64WIN
     case TY_LDOUBLE:
       ///| fldz
       ///| fucomip st0
       ///| fstp st0
       return;
+#endif
   }
 
   if (is_integer(ty) && ty->size <= 4) {
@@ -273,8 +324,10 @@ static int get_type_id(Type* ty) {
       return F32;
     case TY_DOUBLE:
       return F64;
+#if !X64WIN
     case TY_LDOUBLE:
       return F80;
+#endif
   }
   return U64;
 }
@@ -584,7 +637,7 @@ static bool has_flonum2(Type* ty) {
   return has_flonum(ty, 8, 16, 0);
 }
 
-static void push_struct(Type* ty) {
+static int push_struct(Type* ty) {
   int sz = align_to(ty->size, 8);
   ///| sub rsp, sz
   depth += sz / 8;
@@ -593,13 +646,199 @@ static void push_struct(Type* ty) {
     ///| mov r10b, [rax+i]
     ///| mov [rsp+i], r10b
   }
+
+  return sz;
 }
 
-static void push_args2(Node* args, bool first_pass) {
+#if X64WIN
+
+bool type_passed_in_register(Type* ty) {
+  // https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention:
+  //   "__m128 types, arrays, and strings are never passed by immediate value.
+  //   Instead, a pointer is passed to memory allocated by the caller. Structs
+  //   and unions of size 8, 16, 32, or 64 bits, and __m64 types, are passed as
+  //   if they were integers of the same size."
+  //
+  // Note that e.g. a pragma pack 5 byte structure will be passed by reference,
+  // so this is not just size <= 8 as it is for 16 on SysV.
+  //
+  // Arrays and strings as mentioned won't be TY_STRUCT/TY_UNION so they should
+  // not use this function.
+  return ty->size == 1 || ty->size == 2 || ty->size == 4 || ty->size == 8;
+}
+
+static void push_args2_win(Node* args, bool first_pass) {
   if (!args)
     return;
-  push_args2(args->next, first_pass);
+  push_args2_win(args->next, first_pass);
 
+  // Push all the by-stack first, then on the second pass, push all the things
+  // that will be popped back into registers by the actual call.
+  if ((first_pass && !args->pass_by_stack) || (!first_pass && args->pass_by_stack))
+    return;
+
+  if ((args->ty->kind != TY_STRUCT && args->ty->kind != TY_UNION) ||
+      type_passed_in_register(args->ty)) {
+    gen_expr(args);
+  }
+
+  switch (args->ty->kind) {
+    case TY_STRUCT:
+    case TY_UNION:
+      if (!type_passed_in_register(args->ty)) {
+        assert(args->pass_by_reference);
+        ///| lea rax, [r11-args->pass_by_reference]
+      } else {
+        ///| mov rax, [rax]
+      }
+      push();
+      break;
+    case TY_FLOAT:
+    case TY_DOUBLE:
+      pushf();
+      break;
+    default:
+      push();
+      break;
+  }
+}
+
+// --- Windows ---
+// Load function call arguments. Arguments are already evaluated and
+// stored to the stack as local variables. What we need to do in this
+// function is to load them to registers or push them to the stack as
+// required by the Windows ABI.
+//
+// - Integer arguments in the leftmost four positions are passed in RCX, RDX,
+//   R8, and R9.
+//
+// - Floating point arguments in the leftmost four position are passed in
+//   XMM0-XM3.
+//
+// - The 5th and subsequent arguments are push on the stack in right-to-left
+//   order.
+//
+// - Arguments larger than 8 bytes are always passed by reference.
+//
+// - When mixing integer and floating point arguments, the opposite type's
+//   register is left unused, e.g.
+//
+//     void func(int a, double b, int c, float d, int e, float f);
+//
+//   would have a in RCX, b in XMM1, c in R8, d in XMM3, f then e pushed on stack.
+//
+// - Varargs follow the same conventions, but floating point values must also
+//   have their value stored in the corresponding integer register for the first
+//   four arguments.
+//
+// - For larger than 8 byte structs, they're passed by reference. So we first
+//   need to make a local copy on the stack (since they're still passed by value
+//   not reference as far as the language is concerned), but then pass a pointer
+//   to the copy rather than to the actual data. This difference definitely
+//   casues the most changes vs. SysV in the rest of the compiler.
+//
+// - Integer return values of 8 bytes or less are in RAX (including user-defined
+//   types like small structures). Floating point are returned in XMM0. For
+//   user-defined types that are larger than 8 bytes, the caller allocates a
+//   buffer and passes the address of the buffer in RCX, taking up the first
+//   integer register slot. The function returns the same address passed in RCX
+//   in RAX.
+//
+// - RAX, RCX, RDX, R8, R9, R10, R11, and XMM0-XMM5 are volatile.
+// - RBX, RBP, RDI, RSI, RSP, R12, R13, R14, R15, and XMM6-XMM15 are
+//   non-volatile.
+//
+// --- Windows ---
+static int push_args_win(Node* node, int* by_ref_copies_size) {
+  int stack = 0, reg = 0;
+
+  bool has_by_ref_args = false;
+  for (Node* arg = node->args; arg; arg = arg->next) {
+    if ((arg->ty->kind == TY_STRUCT || arg->ty->kind == TY_UNION) &&
+        !type_passed_in_register(arg->ty)) {
+      has_by_ref_args = true;
+      break;
+    }
+  }
+
+  if (has_by_ref_args) {
+    // Use r11 as a base pointer for by-reference copies of structs.
+    ///| push r11
+    ///| mov r11, rsp
+  }
+
+  // If the return type is a large struct/union, the caller passes
+  // a pointer to a buffer as if it were the first argument.
+  if (node->ret_buffer && !type_passed_in_register(node->ty))
+    reg++;
+
+  *by_ref_copies_size = 0;
+
+  // Load as many arguments to the registers as possible.
+  for (Node* arg = node->args; arg; arg = arg->next) {
+    Type* ty = arg->ty;
+
+    switch (ty->kind) {
+      case TY_STRUCT:
+      case TY_UNION:
+        if (type_passed_in_register(ty)) {
+          if (reg++ >= X64WIN_REG_MAX) {
+            arg->pass_by_stack = true;
+            ++stack;
+          }
+        } else {
+          // Make a copy, and note the offset for passing by reference.
+          gen_expr(arg);
+          *by_ref_copies_size += push_struct(ty);
+          arg->pass_by_reference = *by_ref_copies_size;
+        }
+        break;
+      case TY_FLOAT:
+      case TY_DOUBLE:
+        if (reg++ >= X64WIN_REG_MAX) {
+          arg->pass_by_stack = true;
+          stack++;
+        }
+        break;
+      default:
+        if (reg++ >= X64WIN_REG_MAX) {
+          arg->pass_by_stack = true;
+          stack++;
+        }
+    }
+  }
+
+  assert((*by_ref_copies_size == 0 && !has_by_ref_args) ||
+         (*by_ref_copies_size && has_by_ref_args));
+
+  if ((depth + stack) % 2 == 1) {
+    ///| sub rsp, 8
+    depth++;
+    stack++;
+  }
+
+  push_args2_win(node->args, true);
+  push_args2_win(node->args, false);
+
+  // If the return type is a large struct/union, the caller passes
+  // a pointer to a buffer as if it were the first argument.
+  if (node->ret_buffer && !type_passed_in_register(node->ty)) {
+    ///| lea rax, [rbp+node->ret_buffer->offset]
+    push();
+  }
+
+  return stack;
+}
+
+#else
+
+static void push_args2_sysv(Node* args, bool first_pass) {
+  if (!args)
+    return;
+  push_args2_sysv(args->next, first_pass);
+
+  // Push all the by-stack first, then on the second pass, push all the things
+  // that will be popped back into registers by the actual call.
   if ((first_pass && !args->pass_by_stack) || (!first_pass && args->pass_by_stack))
     return;
 
@@ -621,9 +860,12 @@ static void push_args2(Node* args, bool first_pass) {
       break;
     default:
       push();
+      break;
   }
 }
 
+// --- SysV ---
+//
 // Load function call arguments. Arguments are already evaluated and
 // stored to the stack as local variables. What we need to do in this
 // function is to load them to registers or push them to the stack as
@@ -643,7 +885,9 @@ static void push_args2(Node* args, bool first_pass) {
 //
 // - If a function is variadic, set the number of floating-point type
 //   arguments to RAX.
-static int push_args(Node* node) {
+//
+// --- SysV ---
+static int push_args_sysv(Node* node) {
   int stack = 0, gp = 0, fp = 0;
 
   // If the return type is a large struct/union, the caller passes
@@ -665,7 +909,7 @@ static int push_args(Node* node) {
           bool fp1 = has_flonum1(ty);
           bool fp2 = has_flonum2(ty);
 
-          if (fp + fp1 + fp2 < FP_MAX && gp + !fp1 + !fp2 < GP_MAX) {
+          if (fp + fp1 + fp2 < SYSV_FP_MAX && gp + !fp1 + !fp2 < SYSV_GP_MAX) {
             fp = fp + fp1 + fp2;
             gp = gp + !fp1 + !fp2;
           } else {
@@ -676,7 +920,7 @@ static int push_args(Node* node) {
         break;
       case TY_FLOAT:
       case TY_DOUBLE:
-        if (fp++ >= FP_MAX) {
+        if (fp++ >= SYSV_FP_MAX) {
           arg->pass_by_stack = true;
           stack++;
         }
@@ -686,7 +930,7 @@ static int push_args(Node* node) {
         stack += 2;
         break;
       default:
-        if (gp++ >= GP_MAX) {
+        if (gp++ >= SYSV_GP_MAX) {
           arg->pass_by_stack = true;
           stack++;
         }
@@ -699,8 +943,8 @@ static int push_args(Node* node) {
     stack++;
   }
 
-  push_args2(node->args, true);
-  push_args2(node->args, false);
+  push_args2_sysv(node->args, true);
+  push_args2_sysv(node->args, false);
 
   // If the return type is a large struct/union, the caller passes
   // a pointer to a buffer as if it were the first argument.
@@ -748,6 +992,8 @@ static void copy_ret_buffer(Obj* var) {
     }
   }
 }
+
+#endif
 
 static void copy_struct_reg(void) {
   Type* ty = current_fn->ty->return_ty;
@@ -804,29 +1050,29 @@ static void copy_struct_mem(void) {
 
 static void builtin_alloca(void) {
   // Align size to 16 bytes.
-  ///| add rdi, 15
-  ///| and edi, 0xfffffff0
+  ///| add CARG1, 15
+  ///| and CARG1d, 0xfffffff0
 
-  // Shift the temporary area by %rdi.
-  ///| mov rcx, [rbp+current_fn->alloca_bottom->offset]
-  ///| sub rcx, rsp
+  // Shift the temporary area by CARG1.
+  ///| mov CARG4, [rbp+current_fn->alloca_bottom->offset]
+  ///| sub CARG4, rsp
   ///| mov rax, rsp
-  ///| sub rsp, rdi
+  ///| sub rsp, CARG1
   ///| mov rdx, rsp
   ///|1:
-  ///| cmp rcx, 0
+  ///| cmp CARG4, 0
   ///| je >2
   ///| mov r8b, [rax]
   ///| mov [rdx], r8b
   ///| inc rdx
   ///| inc rax
-  ///| dec rcx
+  ///| dec CARG4
   ///| jmp <1
   ///|2:
 
   // Move alloca_bottom pointer.
   ///| mov rax, [rbp+current_fn->alloca_bottom->offset]
-  ///| sub rax, rdi
+  ///| sub rax, CARG1
   ///| mov [rbp+current_fn->alloca_bottom->offset], rax
 }
 
@@ -841,7 +1087,7 @@ static void gen_expr(Node* node) {
           union {
             float f32;
             uint32_t u32;
-          } u = {node->fval};
+          } u = {(float)node->fval};
           ///| mov eax, u.u32
           ///| movd xmm0, rax
           return;
@@ -850,11 +1096,12 @@ static void gen_expr(Node* node) {
           union {
             double f64;
             uint64_t u64;
-          } u = {node->fval};
+          } u = {(double)node->fval};
           ///| mov64 rax, u.u64
           ///| movd xmm0, rax
           return;
         }
+#if !X64WIN
         case TY_LDOUBLE: {
           union {
             long double f80;
@@ -869,9 +1116,14 @@ static void gen_expr(Node* node) {
           ///| fld tword [rsp-16]
           return;
         }
+#endif
       }
 
-      ///| mov rax, node->val
+      if (node->val < INT_MIN || node->val > INT_MAX) {
+        ///| mov64 rax, node->val
+      } else {
+        ///| mov rax, node->val
+      }
       return;
     }
     case ND_NEG:
@@ -890,9 +1142,11 @@ static void gen_expr(Node* node) {
           ///| movd xmm1, rax
           ///| xorpd xmm0, xmm1
           return;
+#if !X64WIN
         case TY_LDOUBLE:
           ///| fchs
           return;
+#endif
       }
 
       ///| neg rax
@@ -965,7 +1219,7 @@ static void gen_expr(Node* node) {
       cast(node->lhs->ty, node->ty);
       return;
     case ND_MEMZERO:
-      // `rep stosb` is equivalent to `memset(%rdi, %al, %rcx)`.
+      // `rep stosb` is equivalent to `memset(rdi, al, rcx)`.
       ///| mov rcx, node->var->ty->size
       ///| lea rdi, [rbp+node->var->offset]
       ///| mov al, 0
@@ -1030,12 +1284,115 @@ static void gen_expr(Node* node) {
     case ND_FUNCALL: {
       if (node->lhs->kind == ND_VAR && !strcmp(node->lhs->var->name, "alloca")) {
         gen_expr(node->args);
-        ///| mov rdi, rax
+        ///| mov CARG1, rax
         builtin_alloca();
         return;
       }
 
-      int stack_args = push_args(node);
+#if X64WIN
+      if (node->lhs->kind == ND_VAR && !strcmp(node->lhs->var->name, "__va_start")) {
+        // va_start(ap, x) turns into __va_start(&ap, x), so we only want the
+        // expr here, not the address.
+        gen_expr(node->args);
+        push();
+        // ToS is now &ap.
+
+        gen_addr(node->args->next);
+        // RAX is now &x, move it to the next qword.
+        ///| add rax, 8
+
+        // Store one-past the second argument into &ap.
+        pop(REG_DI);
+        ///| mov [rdi], rax
+        return;
+      }
+#endif
+
+#if X64WIN
+
+      int by_ref_copies_size = 0;
+      int stack_args = push_args_win(node, &by_ref_copies_size);
+      gen_expr(node->lhs);
+
+      int reg = 0;
+
+      // If the return type is a large struct/union, the caller passes
+      // a pointer to a buffer as if it were the first argument.
+      if (node->ret_buffer && !type_passed_in_register(node->ty)) {
+        pop(dasmargreg[reg++]);
+      }
+
+      for (Node* arg = node->args; arg; arg = arg->next) {
+        Type* ty = arg->ty;
+
+        switch (ty->kind) {
+          case TY_STRUCT:
+          case TY_UNION:
+            if (type_passed_in_register(ty) || (arg->pass_by_reference && reg < X64WIN_REG_MAX)) {
+              pop(dasmargreg[reg++]);
+            }
+            break;
+          case TY_FLOAT:
+          case TY_DOUBLE:
+            if (reg < X64WIN_REG_MAX) {
+              popf(reg);
+              // Varargs requires a copy of fp in gp.
+              ///| movd Rq(dasmargreg[reg]), xmm(reg)
+              ++reg;
+            }
+            break;
+          default:
+            if (reg < X64WIN_REG_MAX) {
+              pop(dasmargreg[reg++]);
+            }
+        }
+      }
+
+      ///| sub rsp, PARAMETER_SAVE_SIZE
+      ///| mov r10, rax
+      ///| call r10
+      ///| add rsp, stack_args*8 + PARAMETER_SAVE_SIZE + by_ref_copies_size
+      if (by_ref_copies_size > 0) {
+        ///| pop r11
+      }
+
+      depth -= by_ref_copies_size / 8;
+      depth -= stack_args;
+
+      // It looks like the most significant 48 or 56 bits in RAX may
+      // contain garbage if a function return type is short or bool/char,
+      // respectively. We clear the upper bits here.
+      switch (node->ty->kind) {
+        case TY_BOOL:
+          ///| movzx eax, al
+          return;
+        case TY_CHAR:
+          if (node->ty->is_unsigned) {
+            ///| movzx eax, al
+          } else {
+            ///| movsx eax, al
+          }
+          return;
+        case TY_SHORT:
+          if (node->ty->is_unsigned) {
+            ///| movzx eax, ax
+          } else {
+            ///| movsx eax, ax
+          }
+          return;
+      }
+
+      // If the return type is a small struct, a value is returned it's actually
+      // returned in rax, so copy it back into the return buffer where we're
+      // expecting it.
+      if (node->ret_buffer && type_passed_in_register(node->ty)) {
+        ///| mov [rbp+node->ret_buffer->offset], rax
+        ///| lea rax, [rbp+node->ret_buffer->offset]
+      }
+
+#else  // SysV
+
+      int stack_args = push_args_sysv(node);
       gen_expr(node->lhs);
 
       int gp = 0, fp = 0;
@@ -1058,7 +1415,7 @@ static void gen_expr(Node* node) {
             bool fp1 = has_flonum1(ty);
             bool fp2 = has_flonum2(ty);
 
-            if (fp + fp1 + fp2 < FP_MAX && gp + !fp1 + !fp2 < GP_MAX) {
+            if (fp + fp1 + fp2 < SYSV_FP_MAX && gp + !fp1 + !fp2 < SYSV_GP_MAX) {
               if (fp1) {
                 popf(fp++);
               } else {
@@ -1076,13 +1433,13 @@ static void gen_expr(Node* node) {
             break;
           case TY_FLOAT:
           case TY_DOUBLE:
-            if (fp < FP_MAX)
+            if (fp < SYSV_FP_MAX)
               popf(fp++);
             break;
           case TY_LDOUBLE:
             break;
           default:
-            if (gp < GP_MAX) {
+            if (gp < SYSV_GP_MAX) {
               pop(dasmargreg[gp++]);
             }
         }
@@ -1124,6 +1481,8 @@ static void gen_expr(Node* node) {
         copy_ret_buffer(node->ret_buffer);
         ///| lea rax, [rbp+node->ret_buffer->offset]
       }
+
+#endif  // SysV
 
       return;
     }
@@ -1299,6 +1658,7 @@ static void gen_expr(Node* node) {
 
       error_tok(node->tok, "invalid expression");
     }
+#if !X64WIN
     case TY_LDOUBLE: {
       gen_expr(node->lhs);
       gen_expr(node->rhs);
@@ -1339,6 +1699,7 @@ static void gen_expr(Node* node) {
 
       error_tok(node->tok, "invalid expression");
     }
+#endif
   }
 
   gen_expr(node->rhs);
@@ -1586,10 +1947,17 @@ static void gen_stmt(Node* node) {
         switch (ty->kind) {
           case TY_STRUCT:
           case TY_UNION:
-            if (ty->size <= 16)
+            if (
+#if X64WIN
+                type_passed_in_register(ty)
+#else
+                ty->size <= 16
+#endif
+            ) {
               copy_struct_reg();
-            else
+            } else {
               copy_struct_mem();
+            }
             break;
         }
       }
@@ -1605,6 +1973,109 @@ static void gen_stmt(Node* node) {
 
   error_tok(node->tok, "invalid statement");
 }
+
+#if X64WIN
+
+// Assign offsets to local variables.
+static void assign_lvar_offsets(Obj* prog) {
+  for (Obj* fn = prog; fn; fn = fn->next) {
+    if (!fn->is_function || !fn->is_definition || !fn->is_live)
+      continue;
+
+    // fprintf(stderr, "--- %s\n", fn->name);
+
+    // The parameter home area starts at 16 above rbp:
+    //   ...
+    //   stack arg 2 (6th arg)
+    //   stack arg 1 (5th arg)
+    //   R9 home
+    //   R8 home
+    //   RDX home
+    //   RCX home
+    //   return address pushed by call instr
+    //   old RBP (for the called function)  <<< RBP after push rbp; mov rbp, rsp
+    //   ...
+    //   ... stack space used by called function
+    //   ...
+    //
+    // The top of the diagram is addr 0xffffffff.. and the bottom is 0.
+    // PUSH decrements RSP and then stores.
+    // So, "top" means the highest numbered address corresponding the to root
+    // function and bottom moves to the frames for the leaf-ward functions.
+    int top = 16;
+    int bottom = 0;
+
+    int reg = 0;
+
+    // Assign offsets to pass-by-stack parameters and register homes.
+    for (Obj* var = fn->params; var; var = var->next) {
+      Type* ty = var->ty;
+
+      switch (ty->kind) {
+        case TY_STRUCT:
+        case TY_UNION:
+          if (!type_passed_in_register(ty)) {
+            // If it's too big for a register, then the value we're getting is a
+            // pointer to a copy, rather than the actual value, so flag it as
+            // such and then either assign a register or stack slot for the
+            // reference.
+            // fprintf(stderr, "by ref %s\n", var->name);
+            // var->passed_by_reference = true;
+          }
+
+          // If the pointer to a referenced value or the value itself can be
+          // passed in a register then assign here.
+          if (reg++ < X64WIN_REG_MAX) {
+            var->offset = top;
+            // fprintf(stderr, "  assigned reg offset 0x%x\n", var->offset);
+            top += 8;
+            continue;
+          }
+
+          // Otherwise fall through to the stack slot assignment below.
+          break;
+        case TY_FLOAT:
+        case TY_DOUBLE:
+          if (reg++ < X64WIN_REG_MAX) {
+            var->offset = top;
+            top += 8;
+            continue;
+          }
+          break;
+        default:
+          if (reg++ < X64WIN_REG_MAX) {
+            var->offset = top;
+            top += 8;
+            // fprintf(stderr, "int reg %s at home 0x%x\n", var->name, var->offset);
+            continue;
+          }
+      }
+
+      var->offset = top;
+      // fprintf(stderr, "int stack %s at stack 0x%x\n", var->name, var->offset);
+      top += MAX(8, var->ty->size);
+    }
+
+    // Assign offsets to local variables.
+    for (Obj* var = fn->locals; var; var = var->next) {
+      if (var->offset) {
+        continue;
+      }
+
+      int align =
+          (var->ty->kind == TY_ARRAY && var->ty->size >= 16) ? MAX(16, var->align) : var->align;
+
+      bottom += var->ty->size;
+      bottom = align_to(bottom, align);
+      var->offset = -bottom;
+      // fprintf(stderr, "local %s at -0x%x\n", var->name, -var->offset);
+    }
+
+    fn->stack_size = align_to(bottom, 16);
+  }
+}
+
+#else  // SysV
 
 // Assign offsets to local variables.
 static void assign_lvar_offsets(Obj* prog) {
@@ -1630,7 +2101,7 @@ static void assign_lvar_offsets(Obj* prog) {
           if (ty->size <= 16) {
             bool fp1 = has_flonum(ty, 0, 8, 0);
             bool fp2 = has_flonum(ty, 8, 16, 8);
-            if (fp + fp1 + fp2 < FP_MAX && gp + !fp1 + !fp2 < GP_MAX) {
+            if (fp + fp1 + fp2 < SYSV_FP_MAX && gp + !fp1 + !fp2 < SYSV_GP_MAX) {
               fp = fp + fp1 + fp2;
               gp = gp + !fp1 + !fp2;
               continue;
@@ -1639,13 +2110,13 @@ static void assign_lvar_offsets(Obj* prog) {
           break;
         case TY_FLOAT:
         case TY_DOUBLE:
-          if (fp++ < FP_MAX)
+          if (fp++ < SYSV_FP_MAX)
             continue;
           break;
         case TY_LDOUBLE:
           break;
         default:
-          if (gp++ < GP_MAX)
+          if (gp++ < SYSV_GP_MAX)
             continue;
       }
 
@@ -1674,6 +2145,8 @@ static void assign_lvar_offsets(Obj* prog) {
     fn->stack_size = align_to(bottom, 16);
   }
 }
+
+#endif  // SysV
 
 static void emit_data(Obj* prog) {
   for (Obj* var = prog; var; var = var->next) {
@@ -1730,14 +2203,6 @@ static void emit_data(Obj* prog) {
         }
       }
 
-      /*
-      fprintf(stderr, "allocated '%s' @ %p size=%d: ", var->name, value, var->ty->size);
-      for (int i = 0; i < var->ty->size; ++i) {
-        fprintf(stderr, "%02x ", ((unsigned char*)value)[i]);
-      }
-      fprintf(stderr, "\n");
-      */
-
       if (bytes.len > 0) {
         write_dyo_initializer_bytes(dyo_file, bytes.data, bytes.len);
         bytes = (ByteArray){NULL, 0, 0};
@@ -1791,16 +2256,7 @@ static void store_gp(int r, int offset, int sz) {
 static void emit_text(Obj* prog) {
   // Preallocate the dasm labels so they can be used in functions out of order.
   for (Obj* fn = prog; fn; fn = fn->next) {
-    if (!fn->is_function)
-      continue;
-
-    if (!fn->is_definition) {
-      continue;
-    }
-
-    // No code is emitted for "static inline" functions
-    // if no one is referencing them.
-    if (!fn->is_live)
+    if (!fn->is_function || !fn->is_definition || !fn->is_live)
       continue;
 
     fn->dasm_return_label = codegen_pclabel();
@@ -1808,21 +2264,14 @@ static void emit_text(Obj* prog) {
   }
 
   for (Obj* fn = prog; fn; fn = fn->next) {
-    if (!fn->is_function)
-      continue;
-
-    if (!fn->is_definition) {
-      continue;
-    }
-
-    // No code is emitted for "static inline" functions
-    // if no one is referencing them.
-    if (!fn->is_live)
+    if (!fn->is_function || !fn->is_definition || !fn->is_live)
       continue;
 
     ///|=>fn->dasm_entry_label:
 
     current_fn = fn;
+
+    // fprintf(stderr, "---- %s\n", fn->name);
 
     // Prologue
     ///| push rbp
@@ -1830,6 +2279,7 @@ static void emit_text(Obj* prog) {
     ///| sub rsp, fn->stack_size
     ///| mov [rbp+fn->alloca_bottom->offset], rsp
 
+#if !X64WIN
     // Save arg registers if function is variadic
     if (fn->va_area) {
       int gp = 0, fp = 0;
@@ -1866,7 +2316,43 @@ static void emit_text(Obj* prog) {
       ///| movsd qword [rbp + off + 120], xmm6
       ///| movsd qword [rbp + off + 128], xmm7
     }
+#endif
 
+#if X64WIN
+    // If variadic, we have to store all registers; floats will have been
+    // duplicated into the integer registers.
+    if (fn->ty->is_variadic) {
+      ///| mov [rbp + 16], CARG1
+      ///| mov [rbp + 24], CARG2
+      ///| mov [rbp + 32], CARG3
+      ///| mov [rbp + 40], CARG4
+    } else {
+      // Save passed-by-register arguments to the stack
+      int reg = 0;
+      for (Obj* var = fn->params; var; var = var->next) {
+        if (var->offset >= 16 + PARAMETER_SAVE_SIZE)
+          continue;
+
+        Type* ty = var->ty;
+
+        switch (ty->kind) {
+          case TY_STRUCT:
+          case TY_UNION:
+            // It's either small and so passed in a register, or isn't and then
+            // we're instead storing the pointer to the larger struct.
+            store_gp(reg++, var->offset, MIN(8, ty->size));
+            break;
+          case TY_FLOAT:
+          case TY_DOUBLE:
+            store_fp(reg++, var->offset, ty->size);
+            break;
+          default:
+            store_gp(reg++, var->offset, ty->size);
+            break;
+        }
+      }
+    }
+#else
     // Save passed-by-register arguments to the stack
     int gp = 0, fp = 0;
     for (Obj* var = fn->params; var; var = var->next) {
@@ -1899,6 +2385,7 @@ static void emit_text(Obj* prog) {
           store_gp(gp++, var->offset, ty->size);
       }
     }
+#endif
 
     // Emit code
     gen_stmt(fn->body);
@@ -1923,14 +2410,7 @@ static void emit_text(Obj* prog) {
 
 static void write_text_exports(Obj* prog) {
   for (Obj* fn = prog; fn; fn = fn->next) {
-    if (!fn->is_function)
-      continue;
-
-    if (!fn->is_definition) {
-      continue;
-    }
-
-    if (!fn->is_live)
+    if (!fn->is_function || !fn->is_definition || !fn->is_live)
       continue;
 
     if (!fn->is_static) {
@@ -1950,8 +2430,6 @@ static void write_imports(void) {
     offset += 2;
 
     write_dyo_import(dyo_file, import_fixups.data[i].str, offset);
-    // fprintf(stderr, "import %s => %d which is @%d\n", import_fixups.data[i].str,
-    //       import_fixups.data[i].i, offset);
   }
 }
 
@@ -1993,9 +2471,6 @@ void codegen(Obj* prog, FILE* dyo_out) {
 
   dasm_setup(&dynasm, dynasm_actions);
 
-  last_file_no = 0;
-  last_line_no = 0;
-
   assign_lvar_offsets(prog);
   emit_data(prog);
   emit_text(prog);
@@ -2033,8 +2508,6 @@ void codegen(Obj* prog, FILE* dyo_out) {
 void codegen_reset(void) {
   depth = 0;
   current_fn = NULL;
-  last_file_no = 0;
-  last_line_no = 0;
 
   dynasm = NULL;
   numlabels = 1;

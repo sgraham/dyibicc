@@ -6,12 +6,18 @@ generates machine code via [DynASM](https://luajit.org/dynasm.html).
 I renamed it from chibicc to dyibicc to avoid confusion between the two. But the
 code still overwhelmingly follows Rui's model and style.
 
-Build and test with:
+Build and test on Linux with:
 
 ```
 $ make
 $ make test
 ```
 
-Currently only supports Linux and x64. (It will build on Windows where it can
-generate .dyos, but the calling convention is always SysV so they can't be run.)
+or on Windows (from a VS x64 cmd):
+
+```
+> make
+> make test
+```
+
+Currently only supports Linux or Windows, and x64 only.
