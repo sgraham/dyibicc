@@ -123,7 +123,7 @@ static Hideset* hideset_union(Hideset* hs1, Hideset* hs2) {
 
 static bool hideset_contains(Hideset* hs, char* s, int len) {
   for (; hs; hs = hs->next)
-    if (strlen(hs->name) == len && !strncmp(hs->name, s, len))
+    if (strlen(hs->name) == (size_t)len && !strncmp(hs->name, s, len))
       return true;
   return false;
 }
@@ -350,13 +350,13 @@ static MacroParam* read_macro_params(Token** rest, Token* tok, char** va_args_na
       error_tok(tok, "expected an identifier");
 
     if (equal(tok->next, "...")) {
-      *va_args_name = strndup(tok->loc, tok->len);
+      *va_args_name = bumpstrndup(tok->loc, tok->len);
       *rest = skip(tok->next->next, ")");
       return head.next;
     }
 
     MacroParam* m = bumpcalloc(1, sizeof(MacroParam));
-    m->name = strndup(tok->loc, tok->len);
+    m->name = bumpstrndup(tok->loc, tok->len);
     cur = cur->next = m;
     tok = tok->next;
   }
@@ -368,7 +368,7 @@ static MacroParam* read_macro_params(Token** rest, Token* tok, char** va_args_na
 static void read_macro_definition(Token** rest, Token* tok) {
   if (tok->kind != TK_IDENT)
     error_tok(tok, "macro name must be an identifier");
-  char* name = strndup(tok->loc, tok->len);
+  char* name = bumpstrndup(tok->loc, tok->len);
   tok = tok->next;
 
   if (!tok->has_space && equal(tok, "(")) {
@@ -456,7 +456,7 @@ static MacroArg* read_macro_args(Token** rest, Token* tok, MacroParam* params, c
 
 static MacroArg* find_arg(MacroArg* args, Token* tok) {
   for (MacroArg* ap = args; ap; ap = ap->next)
-    if (tok->len == strlen(ap->name) && !strncmp(tok->loc, ap->name, tok->len))
+    if ((size_t)tok->len == strlen(ap->name) && !strncmp(tok->loc, ap->name, tok->len))
       return ap;
   return NULL;
 }
@@ -727,7 +727,7 @@ static char* read_include_filename(Token** rest, Token* tok, bool* is_dquote) {
     // So we don't want to use token->str.
     *is_dquote = true;
     *rest = skip_line(tok->next);
-    return strndup(tok->loc + 1, tok->len - 2);
+    return bumpstrndup(tok->loc + 1, tok->len - 2);
   }
 
   // Pattern 2: #include <foo.h>
@@ -772,7 +772,7 @@ static char* detect_include_guard(Token* tok) {
   if (tok->kind != TK_IDENT)
     return NULL;
 
-  char* macro = strndup(tok->loc, tok->len);
+  char* macro = bumpstrndup(tok->loc, tok->len);
   tok = tok->next;
 
   if (!is_hash(tok) || !equal(tok->next, "define") || !equal(tok->next->next, macro))
@@ -865,7 +865,7 @@ static Token* preprocess2(Token* tok) {
       char* filename = read_include_filename(&tok, tok->next, &is_dquote);
 
       if (filename[0] != '/' && is_dquote) {
-        char* path = format("%s/%s", dirname(strdup(start->file->name)), filename);
+        char* path = format("%s/%s", dirname(bumpstrdup(start->file->name)), filename);
         if (file_exists(path)) {
           tok = include_file(tok, path, start->next->next);
           continue;
@@ -894,7 +894,7 @@ static Token* preprocess2(Token* tok) {
       tok = tok->next;
       if (tok->kind != TK_IDENT)
         error_tok(tok, "macro name must be an identifier");
-      undef_macro(strndup(tok->loc, tok->len));
+      undef_macro(bumpstrndup(tok->loc, tok->len));
       tok = skip_line(tok->next);
       continue;
     }

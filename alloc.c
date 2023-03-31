@@ -6,6 +6,23 @@
 #include <sys/mman.h>
 #endif
 
+// MSVC chokes during preprocess on __has_feature().
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define __SANITIZE_ADDRESS__ 1
+#endif
+#endif
+
+#if defined(__SANITIZE_ADDRESS__)
+void __asan_poison_memory_region(void const volatile* addr, size_t size);
+void __asan_unpoison_memory_region(void const volatile* addr, size_t size);
+#define ASAN_POISON_MEMORY_REGION(addr, size) __asan_poison_memory_region((addr), (size))
+#define ASAN_UNPOISON_MEMORY_REGION(addr, size) __asan_unpoison_memory_region((addr), (size))
+#else
+#define ASAN_POISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
+#define ASAN_UNPOISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
+#endif
+
 static char* allmem;
 static char* current_alloc_pointer;
 
@@ -23,15 +40,17 @@ void error(char* fmt, ...) {
 void bumpcalloc_init(void) {
   allmem = allocate_writable_memory(HEAP_SIZE);
   current_alloc_pointer = allmem;
+  ASAN_POISON_MEMORY_REGION(allmem, HEAP_SIZE);
 }
 
 void* bumpcalloc(size_t num, size_t size) {
-  size_t toalloc = align_to((int)(num * size), 8);
+  size_t toalloc = align_to_u(num * size, 8);
   char* ret = current_alloc_pointer;
   current_alloc_pointer += toalloc;
   if (current_alloc_pointer > allmem + HEAP_SIZE) {
     error("heap exhausted");
   }
+  ASAN_UNPOISON_MEMORY_REGION(ret, toalloc);
   memset(ret, 0, toalloc);
   return ret;
 }
@@ -39,21 +58,21 @@ void* bumpcalloc(size_t num, size_t size) {
 void* bumplamerealloc(void* old, size_t old_size, size_t new_size) {
   void* newptr = bumpcalloc(1, new_size);
   memcpy(newptr, old, MIN(old_size, new_size));
+  ASAN_POISON_MEMORY_REGION(old, old_size);
   return newptr;
 }
 
 void bumpcalloc_reset(void) {
   free_executable_memory(allmem, HEAP_SIZE);
+  ASAN_POISON_MEMORY_REGION(allmem, HEAP_SIZE);
   allmem = NULL;
   current_alloc_pointer = NULL;
 }
 
-void* aligned_allocate(size_t size, size_t alignment) {
-#if X64WIN
-  return _aligned_malloc(size, alignment);
-#else
-  return aligned_alloc(alignment, size);
-#endif
+void* bumpaligned_allocate(size_t size, size_t alignment) {
+  size = align_to_u(size, alignment);
+  current_alloc_pointer = (void*)align_to_u((uint64_t)current_alloc_pointer, alignment);
+  return bumpcalloc(1, size);
 }
 
 // Allocates RW memory of given size and returns a pointer to it. On failure,
@@ -61,7 +80,7 @@ void* aligned_allocate(size_t size, size_t alignment) {
 // on a page boundary so it's suitable for calling mprotect.
 void* allocate_writable_memory(size_t size) {
 #if X64WIN
-  void* p = VirtualAlloc(0, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+  void* p = VirtualAlloc(0, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
   if (!p) {
     error("VirtualAlloc failed: 0x%x\n", GetLastError());
   }
@@ -80,9 +99,10 @@ void* allocate_writable_memory(size_t size) {
 // 0 on success. On failure, prints out the error and returns -1.
 bool make_memory_executable(void* m, size_t size) {
 #if X64WIN
-  (void)m;
-  (void)size;
-  // TODO: alloc as non-execute
+  DWORD old_protect;
+  if (!VirtualProtect(m, size, PAGE_EXECUTE_READ, &old_protect)) {
+    error("VirtualProtect failed: 0x%x\n", GetLastError());
+  }
   return true;
 #else
   if (mprotect(m, size, PROT_READ | PROT_EXEC) == -1) {

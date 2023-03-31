@@ -68,7 +68,7 @@ uint32_t decode_utf8(char** new_pos, char* p) {
 }
 
 static bool in_range(uint32_t* range, uint32_t c) {
-  for (int i = 0; range[i] != -1; i += 2)
+  for (uint32_t i = 0; range[i] != (uint32_t)-1; i += 2)
     if (range[i] <= c && c <= range[i + 1])
       return true;
   return false;

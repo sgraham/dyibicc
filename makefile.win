@@ -4,6 +4,8 @@ SRCS=$(SRCS) codegen.win32.c
 
 CC=@cl
 CFLAGS=/nologo /Ox /Zi /D_CRT_SECURE_NO_DEPRECATE /DX64WIN=1 /W4 /WX
+#CC=@"C:\Program Files\LLVM\bin\clang-cl.exe"
+#CFLAGS=/nologo /O1 /fsanitize=address /Zi /D_CRT_SECURE_NO_DEPRECATE /DX64WIN=1 /W4 /WX -Wno-missing-field-initializers -Wno-switch
 
 OBJS=$(SRCS:.c=.obj)
 
@@ -17,7 +19,7 @@ $(OBJS): dyibicc.h
 minilua.exe: dynasm/minilua.c
 	$(CC) $(CFLAGS) /wd4132 /wd4324 $** /link /out:$@
 
-dumpdyo.exe: dumpdyo.obj dyo.obj hashmap.obj alloc.obj
+dumpdyo.exe: dumpdyo.obj dyo.obj hashmap.obj alloc.obj util.obj
 	$(CC) $(CFLAGS) $** /link /out:$@ 
 
 .c.obj:
@@ -35,6 +37,7 @@ clean:
 	del /f /q dyibicc.exe 2>nul
 	del /f /q dumpdyo.exe 2>nul
 	del /f /q minilua.exe 2>nul
+	del /f /q codegen.win32.c 2>nul
 	del /f /q *.obj 2>nul
 	del /f /q *.dyo 2>nul
 	del /f /q *.ilk 2>nul

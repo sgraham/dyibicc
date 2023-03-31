@@ -36,10 +36,12 @@ static int depth;
 // Used with Rq(), Rd(), Rw(), Rb()
 #if X64WIN
 static int dasmargreg[] = {REG_CX, REG_DX, REG_R8, REG_R9};
+#define REG_UTIL REG_CX
 #define X64WIN_REG_MAX 4
 #define PARAMETER_SAVE_SIZE (4 * 8)
 #else
 static int dasmargreg[] = {REG_DI, REG_SI, REG_DX, REG_CX, REG_R8, REG_R9};
+#define REG_UTIL REG_DI
 #define SYSV_GP_MAX 6
 #define SYSV_FP_MAX 8
 #endif
@@ -49,6 +51,9 @@ static int dasmargreg[] = {REG_DI, REG_SI, REG_DX, REG_CX, REG_R8, REG_R9};
 ///| .define CARG2, rdx
 ///| .define CARG3, r8
 ///| .define CARG4, r9
+///| .define RUTIL, rcx
+///| .define RUTILd, ecx
+///| .define RUTILenc, 0x11
 ///| .else
 ///| .define CARG1, rdi
 ///| .define CARG1d, edi
@@ -57,6 +62,9 @@ static int dasmargreg[] = {REG_DI, REG_SI, REG_DX, REG_CX, REG_R8, REG_R9};
 ///| .define CARG4, rcx
 ///| .define CARG5, r8
 ///| .define CARG6, r9
+///| .define RUTIL, rdi
+///| .define RUTILd, edi
+///| .define RUTILenc, 0x17
 ///| .endif
 
 static Obj* current_fn;
@@ -153,37 +161,37 @@ static void load(Type* ty) {
 
 // Store %rax to an address that the stack top is pointing to.
 static void store(Type* ty) {
-  pop(REG_DI);
+  pop(REG_UTIL);
 
   switch (ty->kind) {
     case TY_STRUCT:
     case TY_UNION:
       for (int i = 0; i < ty->size; i++) {
         ///| mov r8b, [rax+i]
-        ///| mov [rdi+i], r8b
+        ///| mov [RUTIL+i], r8b
       }
       return;
     case TY_FLOAT:
-      ///| movss dword [rdi], xmm0
+      ///| movss dword [RUTIL], xmm0
       return;
     case TY_DOUBLE:
-      ///| movsd qword [rdi], xmm0
+      ///| movsd qword [RUTIL], xmm0
       return;
 #if !X64WIN
     case TY_LDOUBLE:
-      ///| fstp tword [rdi]
+      ///| fstp tword [RUTIL]
       return;
 #endif
   }
 
   if (ty->size == 1) {
-    ///| mov [rdi], al
+    ///| mov [RUTIL], al
   } else if (ty->size == 2) {
-    ///| mov [rdi], ax
+    ///| mov [RUTIL], ax
   } else if (ty->size == 4) {
-    ///| mov [rdi], eax
+    ///| mov [RUTIL], eax
   } else {
-    ///| mov [rdi], rax
+    ///| mov [RUTIL], rax
   }
 }
 
@@ -396,12 +404,12 @@ static void u64f64(void) {
   ///| cvtsi2sd xmm0,rax
   ///| jmp >2
   ///|1:
-  ///| mov rdi,rax
+  ///| mov RUTIL,rax
   ///| and eax,1
   ///| pxor xmm0,xmm0
-  ///| shr rdi, 1
-  ///| or rdi,rax
-  ///| cvtsi2sd xmm0,rdi
+  ///| shr RUTIL, 1
+  ///| or RUTIL,rax
+  ///| cvtsi2sd xmm0,RUTIL
   ///| addsd xmm0,xmm0
   ///|2:
 }
@@ -599,6 +607,8 @@ static void cast(Type* from, Type* to) {
   }
 }
 
+#if !X64WIN
+
 // Structs or unions equal or smaller than 16 bytes are passed
 // using up to two registers.
 //
@@ -637,8 +647,10 @@ static bool has_flonum2(Type* ty) {
   return has_flonum(ty, 8, 16, 0);
 }
 
+#endif
+
 static int push_struct(Type* ty) {
-  int sz = align_to(ty->size, 8);
+  int sz = (int)align_to_s(ty->size, 8);
   ///| sub rsp, sz
   depth += sz / 8;
 
@@ -904,7 +916,7 @@ static int push_args_sysv(Node* node) {
       case TY_UNION:
         if (ty->size > 16) {
           arg->pass_by_stack = true;
-          stack += align_to(ty->size, 8) / 8;
+          stack += align_to_s(ty->size, 8) / 8;
         } else {
           bool fp1 = has_flonum1(ty);
           bool fp2 = has_flonum2(ty);
@@ -914,7 +926,7 @@ static int push_args_sysv(Node* node) {
             gp = gp + !fp1 + !fp2;
           } else {
             arg->pass_by_stack = true;
-            stack += align_to(ty->size, 8) / 8;
+            stack += align_to_s(ty->size, 8) / 8;
           }
         }
         break;
@@ -996,24 +1008,29 @@ static void copy_ret_buffer(Obj* var) {
 #endif
 
 static void copy_struct_reg(void) {
+#if X64WIN
+  // TODO: I'm not sure if this is right/sufficient.
+  ///| mov rax, [rax]
+#else
   Type* ty = current_fn->ty->return_ty;
+
   int gp = 0, fp = 0;
 
-  ///| mov rdi, rax
+  ///| mov RUTIL, rax
 
   if (has_flonum(ty, 0, 8, 0)) {
     assert(ty->size == 4 || 8 <= ty->size);
     if (ty->size == 4) {
-      ///| movss xmm0, dword [rdi]
+      ///| movss xmm0, dword [RUTIL]
     } else {
-      ///| movsd xmm0, qword [rdi]
+      ///| movsd xmm0, qword [RUTIL]
     }
     fp++;
   } else {
     ///| mov rax, 0
     for (int i = MIN(8, ty->size) - 1; i >= 0; i--) {
       ///| shl rax, 8
-      ///| mov ax, [rdi+i]
+      ///| mov ax, [RUTIL+i]
     }
     gp++;
   }
@@ -1022,29 +1039,30 @@ static void copy_struct_reg(void) {
     if (has_flonum(ty, 8, 16, 0)) {
       assert(ty->size == 12 || ty->size == 16);
       if (ty->size == 4) {
-        ///| movss xmm(fp), dword [rdi+8]
+        ///| movss xmm(fp), dword [RUTIL+8]
       } else {
-        ///| movsd xmm(fp), qword [rdi+8]
+        ///| movsd xmm(fp), qword [RUTIL+8]
       }
     } else {
       ///| mov Rq(gp), 0
       for (int i = MIN(16, ty->size) - 1; i >= 8; i--) {
         ///| shl Rq(gp), 8
-        ///| mov Rb(gp), [rdi+i]
+        ///| mov Rb(gp), [RUTIL+i]
       }
     }
   }
+#endif
 }
 
 static void copy_struct_mem(void) {
   Type* ty = current_fn->ty->return_ty;
   Obj* var = current_fn->params;
 
-  ///| mov rdi, [rbp+var->offset]
+  ///| mov RUTIL, [rbp+var->offset]
 
   for (int i = 0; i < ty->size; i++) {
     ///| mov dl, [rax+i]
-    ///| mov [rdi+i], dl
+    ///| mov [RUTIL+i], dl
   }
 }
 
@@ -1188,9 +1206,9 @@ static void gen_expr(Node* node) {
         // If the lhs is a bitfield, we need to read the current value
         // from memory and merge it with a new value.
         Member* mem = node->lhs->member;
-        ///| mov rdi, rax
-        ///| and rdi, (1L << mem->bit_width) - 1
-        ///| shl rdi, mem->bit_offset
+        ///| mov RUTIL, rax
+        ///| and RUTIL, (1L << mem->bit_width) - 1
+        ///| shl RUTIL, mem->bit_offset
 
         ///| mov rax, [rsp]
         load(mem->ty);
@@ -1198,7 +1216,7 @@ static void gen_expr(Node* node) {
         long mask = ((1L << mem->bit_width) - 1) << mem->bit_offset;
         ///| mov r9, ~mask
         ///| and rax, r9
-        ///| or rax, rdi
+        ///| or rax, RUTIL
         store(node->ty);
         ///| mov rax, r8
         return;
@@ -1220,11 +1238,17 @@ static void gen_expr(Node* node) {
       return;
     case ND_MEMZERO:
       // `rep stosb` is equivalent to `memset(rdi, al, rcx)`.
+#if X64WIN
+      ///| push rdi
+#endif
       ///| mov rcx, node->var->ty->size
       ///| lea rdi, [rbp+node->var->offset]
       ///| mov al, 0
       ///| rep
       ///| stosb
+#if X64WIN
+      ///| pop rdi
+#endif
       return;
     case ND_COND: {
       int lelse = codegen_pclabel();
@@ -1302,8 +1326,8 @@ static void gen_expr(Node* node) {
         ///| add rax, 8
 
         // Store one-past the second argument into &ap.
-        pop(REG_DI);
-        ///| mov [rdi], rax
+        pop(REG_UTIL);
+        ///| mov [RUTIL], rax
         return;
       }
 #endif
@@ -1497,43 +1521,44 @@ static void gen_expr(Node* node) {
       gen_expr(node->cas_old);
       ///| mov r8, rax
       load(node->cas_old->ty->base);
-      pop(REG_DX);  // new
-      pop(REG_DI);  // addr
+      pop(REG_DX);    // new
+      pop(REG_UTIL);  // addr
 
       int sz = node->cas_addr->ty->base->size;
       // dynasm doesn't support cmpxchg, and I didn't grok the encoding yet.
       // Hack in the various bytes for the instructions we want since there's
-      // limited forms.
+      // limited forms. RUTILenc is either 0x17 for RDI or 0x11 for RCX
+      // depending on whether we're encoding for Windows or SysV.
       switch (sz) {
         case 1:
-          // lock cmpxchg BYTE PTR [rdi], dl
+          // lock cmpxchg BYTE PTR [rdi/rcx], dl
           ///| .byte 0xf0
           ///| .byte 0x0f
           ///| .byte 0xb0
-          ///| .byte 0x17
+          ///| .byte RUTILenc
           break;
         case 2:
-          // lock cmpxchg WORD PTR [rdi],dx
+          // lock cmpxchg WORD PTR [rdi/rcx],dx
           ///| .byte 0x66
           ///| .byte 0xf0
           ///| .byte 0x0f
           ///| .byte 0xb1
-          ///| .byte 0x17
+          ///| .byte RUTILenc
           break;
         case 4:
-          // lock cmpxchg DWORD PTR [rdi],edx
+          // lock cmpxchg DWORD PTR [rdi/rcx],edx
           ///| .byte 0xf0
           ///| .byte 0x0f
           ///| .byte 0xb1
-          ///| .byte 0x17
+          ///| .byte RUTILenc
           break;
         case 8:
-          // lock cmpxchg QWORD PTR [rdi],rdx
+          // lock cmpxchg QWORD PTR [rdi/rcx],rdx
           ///| .byte 0xf0
           ///| .byte 0x48
           ///| .byte 0x0f
           ///| .byte 0xb1
-          ///| .byte 0x17
+          ///| .byte RUTILenc
           break;
         default:
           unreachable();
@@ -1565,21 +1590,21 @@ static void gen_expr(Node* node) {
       gen_expr(node->lhs);
       push();
       gen_expr(node->rhs);
-      pop(REG_DI);
+      pop(REG_UTIL);
 
       int sz = node->lhs->ty->base->size;
       switch (sz) {
         case 1:
-          ///| xchg [rdi], al
+          ///| xchg [RUTIL], al
           break;
         case 2:
-          ///| xchg [rdi], ax
+          ///| xchg [RUTIL], ax
           break;
         case 4:
-          ///| xchg [rdi], eax
+          ///| xchg [RUTIL], eax
           break;
         case 8:
-          ///| xchg [rdi], rax
+          ///| xchg [RUTIL], rax
           break;
         default:
           unreachable();
@@ -1705,30 +1730,30 @@ static void gen_expr(Node* node) {
   gen_expr(node->rhs);
   push();
   gen_expr(node->lhs);
-  pop(REG_DI);
+  pop(REG_UTIL);
 
   bool is_long = node->lhs->ty->kind == TY_LONG || node->lhs->ty->base;
 
   switch (node->kind) {
     case ND_ADD:
       if (is_long) {
-        ///| add rax, rdi
+        ///| add rax, RUTIL
       } else {
-        ///| add eax, edi
+        ///| add eax, RUTILd
       }
       return;
     case ND_SUB:
       if (is_long) {
-        ///| sub rax, rdi
+        ///| sub rax, RUTIL
       } else {
-        ///| sub eax, edi
+        ///| sub eax, RUTILd
       }
       return;
     case ND_MUL:
       if (is_long) {
-        ///| imul rax, rdi
+        ///| imul rax, RUTIL
       } else {
-        ///| imul eax, edi
+        ///| imul eax, RUTILd
       }
       return;
     case ND_DIV:
@@ -1736,10 +1761,10 @@ static void gen_expr(Node* node) {
       if (node->ty->is_unsigned) {
         if (is_long) {
           ///| mov rdx, 0
-          ///| div rdi
+          ///| div RUTIL
         } else {
           ///| mov edx, 0
-          ///| div edi
+          ///| div RUTILd
         }
       } else {
         if (node->lhs->ty->size == 8) {
@@ -1748,9 +1773,9 @@ static void gen_expr(Node* node) {
           ///| cdq
         }
         if (is_long) {
-          ///| idiv rdi
+          ///| idiv RUTIL
         } else {
-          ///| idiv edi
+          ///| idiv RUTILd
         }
       }
 
@@ -1760,23 +1785,23 @@ static void gen_expr(Node* node) {
       return;
     case ND_BITAND:
       if (is_long) {
-        ///| and rax, rdi
+        ///| and rax, RUTIL
       } else {
-        ///| and eax, edi
+        ///| and eax, RUTILd
       }
       return;
     case ND_BITOR:
       if (is_long) {
-        ///| or rax, rdi
+        ///| or rax, RUTIL
       } else {
-        ///| or eax, edi
+        ///| or eax, RUTILd
       }
       return;
     case ND_BITXOR:
       if (is_long) {
-        ///| xor rax, rdi
+        ///| xor rax, RUTIL
       } else {
-        ///| xor eax, edi
+        ///| xor eax, RUTILd
       }
       return;
     case ND_EQ:
@@ -1784,9 +1809,9 @@ static void gen_expr(Node* node) {
     case ND_LT:
     case ND_LE:
       if (is_long) {
-        ///| cmp rax, rdi
+        ///| cmp rax, RUTIL
       } else {
-        ///| cmp eax, edi
+        ///| cmp eax, RUTILd
       }
 
       if (node->kind == ND_EQ) {
@@ -1810,7 +1835,7 @@ static void gen_expr(Node* node) {
       ///| movzx rax, al
       return;
     case ND_SHL:
-      ///| mov rcx, rdi
+      ///| mov rcx, RUTIL
       if (is_long) {
         ///| shl rax, cl
       } else {
@@ -1818,7 +1843,7 @@ static void gen_expr(Node* node) {
       }
       return;
     case ND_SHR:
-      ///| mov rcx, rdi
+      ///| mov rcx, RUTIL
       if (node->lhs->ty->is_unsigned) {
         if (is_long) {
           ///| shr rax, cl
@@ -1901,13 +1926,13 @@ static void gen_stmt(Node* node) {
 
         // [GNU] Case ranges
         if (is_long) {
-          ///| mov rdi, rax
-          ///| sub rdi, n->begin
-          ///| cmp rdi, n->end - n->begin
+          ///| mov RUTIL, rax
+          ///| sub RUTIL, n->begin
+          ///| cmp RUTIL, n->end - n->begin
         } else {
-          ///| mov edi, eax
-          ///| sub edi, n->begin
-          ///| cmp edi, n->end - n->begin
+          ///| mov RUTILd, eax
+          ///| sub RUTILd, n->begin
+          ///| cmp RUTILd, n->end - n->begin
         }
         ///| jbe =>n->pc_label
       }
@@ -2066,12 +2091,12 @@ static void assign_lvar_offsets(Obj* prog) {
           (var->ty->kind == TY_ARRAY && var->ty->size >= 16) ? MAX(16, var->align) : var->align;
 
       bottom += var->ty->size;
-      bottom = align_to(bottom, align);
+      bottom = (int)align_to_s(bottom, align);
       var->offset = -bottom;
       // fprintf(stderr, "local %s at -0x%x\n", var->name, -var->offset);
     }
 
-    fn->stack_size = align_to(bottom, 16);
+    fn->stack_size = (int)align_to_s(bottom, 16);
   }
 }
 
@@ -2120,7 +2145,7 @@ static void assign_lvar_offsets(Obj* prog) {
             continue;
       }
 
-      top = align_to(top, 8);
+      top = align_to_s(top, 8);
       var->offset = top;
       top += var->ty->size;
     }
@@ -2138,11 +2163,11 @@ static void assign_lvar_offsets(Obj* prog) {
           (var->ty->kind == TY_ARRAY && var->ty->size >= 16) ? MAX(16, var->align) : var->align;
 
       bottom += var->ty->size;
-      bottom = align_to(bottom, align);
+      bottom = align_to_s(bottom, align);
       var->offset = -bottom;
     }
 
-    fn->stack_size = align_to(bottom, 16);
+    fn->stack_size = align_to_s(bottom, 16);
   }
 }
 

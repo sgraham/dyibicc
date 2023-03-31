@@ -161,7 +161,7 @@ static Token* function(Token* tok, Type* basety, VarAttr* attr);
 static Token* global_variable(Token* tok, Type* basety, VarAttr* attr);
 
 static int align_down(int n, int align) {
-  return align_to(n - align + 1, align);
+  return (int)align_to_s(n - align + 1, align);
 }
 
 static void enter_scope(void) {
@@ -346,7 +346,7 @@ static Obj* new_string_literal(char* p, Type* ty) {
 static char* get_ident(Token* tok) {
   if (tok->kind != TK_IDENT)
     error_tok(tok, "expected an identifier");
-  return strndup(tok->loc, tok->len);
+  return bumpstrndup(tok->loc, tok->len);
 }
 
 static Type* find_typedef(Token* tok) {
@@ -1577,7 +1577,7 @@ static bool is_typename(Token* tok) {
 #endif
     };
 
-    for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
+    for (size_t i = 0; i < sizeof(kw) / sizeof(*kw); i++)
       hashmap_put(&typename_map, kw[i], (void*)1);
   }
 
@@ -1822,7 +1822,7 @@ static Node* stmt(Token** rest, Token* tok) {
 
   if (tok->kind == TK_IDENT && equal(tok->next, ":")) {
     Node* node = new_node(ND_LABEL, tok);
-    node->label = strndup(tok->loc, tok->len);
+    node->label = bumpstrndup(tok->loc, tok->len);
     node->unique_pc_label = codegen_pclabel();
     node->lhs = stmt(rest, tok->next->next);
     node->goto_next = labels;
@@ -2755,18 +2755,18 @@ static Type* struct_decl(Token** rest, Token* tok) {
     if (mem->is_bitfield && mem->bit_width == 0) {
       // Zero-width anonymous bitfield has a special meaning.
       // It affects only alignment.
-      bits = align_to(bits, mem->ty->size * 8);
+      bits = (int)align_to_s(bits, mem->ty->size * 8);
     } else if (mem->is_bitfield) {
       int sz = mem->ty->size;
       if (bits / (sz * 8) != (bits + mem->bit_width - 1) / (sz * 8))
-        bits = align_to(bits, sz * 8);
+        bits = (int)align_to_s(bits, sz * 8);
 
       mem->offset = align_down(bits / 8, sz);
       mem->bit_offset = bits % (sz * 8);
       bits += mem->bit_width;
     } else {
       if (!ty->is_packed)
-        bits = align_to(bits, mem->align * 8);
+        bits = (int)align_to_s(bits, mem->align * 8);
       mem->offset = bits / 8;
       bits += mem->ty->size * 8;
     }
@@ -2775,7 +2775,7 @@ static Type* struct_decl(Token** rest, Token* tok) {
       ty->align = mem->align;
   }
 
-  ty->size = align_to(bits, ty->align * 8) / 8;
+  ty->size = (int)align_to_s(bits, ty->align * 8) / 8;
   return ty;
 }
 
@@ -2796,7 +2796,7 @@ static Type* union_decl(Token** rest, Token* tok) {
     if (ty->size < mem->ty->size)
       ty->size = mem->ty->size;
   }
-  ty->size = align_to(ty->size, ty->align);
+  ty->size = (int)align_to_s(ty->size, ty->align);
   return ty;
 }
 

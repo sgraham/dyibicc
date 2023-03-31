@@ -1,5 +1,9 @@
 #include "dyibicc.h"
 
+#if X64WIN
+#define strncasecmp _strnicmp
+#endif
+
 // Input file
 static File* current_file;
 
@@ -136,7 +140,7 @@ static int read_punct(char* p) {
       "++",  "--",  "%=",  "&=", "|=", "^=", "&&", "||", "<<", ">>", "##",
   };
 
-  for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
+  for (size_t i = 0; i < sizeof(kw) / sizeof(*kw); i++)
     if (startswith(p, kw[i]))
       return (int)strlen(kw[i]);
 
@@ -197,7 +201,7 @@ static bool is_keyword(Token* tok) {
 #endif
     };
 
-    for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
+    for (size_t i = 0; i < sizeof(kw) / sizeof(*kw); i++)
       hashmap_put(&keyword_map, kw[i], (void*)1);
   }
 
@@ -671,8 +675,6 @@ Token* tokenize(File* file) {
   return head.next;
 }
 
-#if X64WIN
-
 // Returns the contents of a given file. Doesn't support '-' for reading from
 // stdin.
 static char* read_file(char* path) {
@@ -685,54 +687,12 @@ static char* read_file(char* path) {
   fseek(fp, 0, SEEK_END);
   long long size = ftell(fp);
   rewind(fp);
-  char* buf = malloc(size + 1);
+  char* buf = bumpcalloc(1, size + 1);
   long long n = fread(buf, 1, size, fp);
   fclose(fp);
   buf[n] = 0;
   return buf;
 }
-
-#else
-
-// Returns the contents of a given file.
-static char* read_file(char* path) {
-  FILE* fp;
-
-  if (strcmp(path, "-") == 0) {
-    // By convention, read from stdin if a given filename is "-".
-    fp = stdin;
-  } else {
-    fp = fopen(path, "r");
-    if (!fp)
-      return NULL;
-  }
-
-  char* buf;
-  size_t buflen;
-  FILE* out = open_memstream(&buf, &buflen);
-
-  // Read the entire file.
-  for (;;) {
-    char buf2[4096];
-    int n = fread(buf2, 1, sizeof(buf2), fp);
-    if (n == 0)
-      break;
-    fwrite(buf2, 1, n, out);
-  }
-
-  if (fp != stdin)
-    fclose(fp);
-
-  // Make sure that the last line is properly terminated with '\n'.
-  fflush(out);
-  if (buflen == 0 || buf[buflen - 1] != '\n')
-    fputc('\n', out);
-  fputc('\0', out);
-  fclose(out);
-  return buf;
-}
-
-#endif
 
 File* new_file(char* name, char* contents) {
   File* file = bumpcalloc(1, sizeof(File));

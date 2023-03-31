@@ -1,6 +1,8 @@
 include makefile.shared
 
+CC=clang
 CFLAGS=-std=c11 -g -fno-common -Wall -Werror -Wno-switch -pthread
+# -O1 -fsanitize=address
 
 SRCS += codegen.linux.c
 
@@ -26,7 +28,7 @@ test: $(TEST_SRCS) dyibicc
 # Misc.
 
 clean:
-	rm -rf dyibicc dumpdyo codegen.c test/*.s test/*.exe minilua minilua.exe *.dyo *.exe *.pdb *.ilk
+	rm -rf dyibicc dumpdyo codegen.linux.c test/*.s test/*.exe minilua minilua.exe *.dyo
 	find * -type f '(' -name '*~' -o -name '*.o' ')' -exec rm {} ';'
 	clang-format -i *.c *.h
 

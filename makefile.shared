@@ -6,10 +6,10 @@ link.c \
 main.c \
 parse.c \
 preprocess.c \
-strings.c \
 tokenize.c \
 type.c \
-unicode.c
+unicode.c \
+util.c
 
 # XXX:
 # test/asm.c

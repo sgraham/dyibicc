@@ -31,66 +31,6 @@
 #define __attribute__(x)
 #endif
 
-// --------------
-// --------------
-// --------------
-#if X64WIN
-static inline char* strndup(const char* s, size_t n) {
-  size_t l = strnlen(s, n);
-  char* d = malloc(l + 1);
-  if (!d)
-    return NULL;
-  memcpy(d, s, l);
-  d[l] = 0;
-  return d;
-}
-#endif
-
-static inline char* dirname(char* s) {
-  size_t i;
-  if (!s || !*s)
-    return ".";
-  i = strlen(s) - 1;
-  for (; s[i] == '/' || s[i] == '\\'; i--)
-    if (!i)
-      return "/";
-  for (; s[i] != '/' || s[i] == '\\'; i--)
-    if (!i)
-      return ".";
-  for (; s[i] == '/' || s[i] == '\\'; i--)
-    if (!i)
-      return "/";
-  s[i + 1] = 0;
-  return s;
-}
-
-static inline char* basename(char* s) {
-  size_t i;
-  if (!s || !*s)
-    return ".";
-  i = strlen(s) - 1;
-  for (; i && (s[i] == '/' || s[i] == '\\'); i--)
-    s[i] = 0;
-  for (; i && s[i - 1] != '/' && s[i - 1] != '\\'; i--)
-    ;
-  return s + i;
-}
-
-#if X64WIN
-#define strncasecmp _strnicmp
-#define strdup _strdup
-#endif
-
-// Round up `n` to the nearest multiple of `align`. For instance,
-// align_to(5, 8) returns 8 and align_to(11, 8) returns 16.
-static inline int align_to(int n, int align) {
-  return (n + align - 1) / align * align;
-}
-
-// --------------
-// --------------
-// --------------
-
 typedef struct Type Type;
 typedef struct Node Node;
 typedef struct Member Member;
@@ -98,7 +38,7 @@ typedef struct Relocation Relocation;
 typedef struct Hideset Hideset;
 
 //
-// strings.c
+// util.c
 //
 
 typedef struct {
@@ -135,6 +75,12 @@ typedef struct IntIntArray {
   int len;
 } IntIntArray;
 
+char* bumpstrndup(const char* s, size_t n);
+char* bumpstrdup(const char* s);
+char* dirname(char* s);
+char* basename(char* s);
+uint64_t align_to_u(uint64_t n, uint64_t align);
+int64_t align_to_s(int64_t n, int64_t align);
 void strarray_push(StringArray* arr, char* s);
 void strintarray_push(StringIntArray* arr, StringInt item);
 void bytearray_push(ByteArray* arr, char b);
@@ -566,7 +512,7 @@ void free_executable_memory(void* p, size_t size);
 void bumpcalloc_init(void);
 void* bumpcalloc(size_t num, size_t size);
 void* bumplamerealloc(void* old, size_t old_size, size_t new_size);
-void* aligned_allocate(size_t size, size_t alignment);
+void* bumpaligned_allocate(size_t size, size_t alignment);
 
 //
 // dyo.c
@@ -611,7 +557,7 @@ bool read_dyo_record(FILE* f,
 bool dump_dyo_file(FILE* f);
 
 //
-// link.cc
+// link.c
 //
 void* link_dyos(FILE** dyo_files);
 

@@ -104,14 +104,14 @@ void* link_dyos(FILE** dyo_files) {
         return false;
 
       if (type == kTypeString) {
-        strarray_push(&strings, strndup(buf, size));
+        strarray_push(&strings, bumpstrndup(buf, size));
       } else {
         strarray_push(&strings, NULL);
 
         if (type == kTypeEntryPoint) {
           entry_point_offset = *(unsigned int*)&buf[0];
         } else if (type == kTypeX64Code) {
-          unsigned int page_sized = align_to(size, page_size);
+          unsigned int page_sized = (unsigned int)align_to_u(size, page_size);
           // fprintf(stderr, "code %d, allocating %d\n", size, page_sized);
           assert(num_dyos < MAX_DYOS);
           base_address[num_dyos] = allocate_writable_memory(page_sized);
@@ -129,7 +129,7 @@ void* link_dyos(FILE** dyo_files) {
           unsigned int is_static = *(unsigned int*)&buf[8];
           unsigned int name_index = *(unsigned int*)&buf[12];
 
-          void* global_data = aligned_allocate(data_size, align);
+          void* global_data = bumpaligned_allocate(data_size, align);
           memset(global_data, 0, data_size);
 
           if (is_static) {
@@ -165,7 +165,7 @@ void* link_dyos(FILE** dyo_files) {
         return false;
 
       if (type == kTypeString) {
-        strarray_push(&strings, strndup(buf, size));
+        strarray_push(&strings, bumpstrndup(buf, size));
       } else {
         strarray_push(&strings, NULL);
 
@@ -210,7 +210,7 @@ void* link_dyos(FILE** dyo_files) {
         return false;
 
       if (type == kTypeString) {
-        strarray_push(&strings, strndup(buf, size));
+        strarray_push(&strings, bumpstrndup(buf, size));
       } else {
         strarray_push(&strings, NULL);
 

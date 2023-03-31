@@ -7,6 +7,10 @@
 //   Disassembly view is correct in VS. Required for SEH too. cl /Fa emits
 //   without using any helper macros for samples.
 //
+// Large allocas aren't _chkstk'ing on Windows
+//
+//   Will STACK_OVERFLOW if it jumps past the guard page.
+//
 // Parsing windows.h:
 //
 //   We make it through CRT, but windows.h will have lots more wild stuff.
@@ -39,6 +43,12 @@
 //     - basic polymophic containers (dict, list, slice, sizedarray)
 //     - range-based for loop (to go with containers)
 //     - range notation
+//
+// rep stosb for local clear:
+//
+//   Especially on Windows where rdi is non-volatile, it seems like quite a lot
+//   of instructions. At the very least we could only do one memset for all
+//   locals to clear out a range.
 //
 // Don't emit __func__, __FUNCTION__ unless used:
 //
@@ -87,8 +97,8 @@ static bool opt_E = false;
 
 static void add_default_include_paths(char* argv0) {
 #if X64WIN
-  strarray_push(&include_paths, format("%s/include/win", dirname(strdup(argv0))));
-  strarray_push(&include_paths, format("%s/include/all", dirname(strdup(argv0))));
+  strarray_push(&include_paths, format("%s/include/win", dirname(bumpstrdup(argv0))));
+  strarray_push(&include_paths, format("%s/include/all", dirname(bumpstrdup(argv0))));
 
   strarray_push(&include_paths,
                 "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.19041.0\\ucrt");
@@ -96,8 +106,8 @@ static void add_default_include_paths(char* argv0) {
                 "C:\\Program Files\\Microsoft Visual "
                 "Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.34.31933\\include");
 #else
-  strarray_push(&include_paths, format("%s/include/linux", dirname(strdup(argv0))));
-  strarray_push(&include_paths, format("%s/include/all", dirname(strdup(argv0))));
+  strarray_push(&include_paths, format("%s/include/linux", dirname(bumpstrdup(argv0))));
+  strarray_push(&include_paths, format("%s/include/all", dirname(bumpstrdup(argv0))));
 
   // Add standard include paths.
   strarray_push(&include_paths, "/usr/local/include");
@@ -116,7 +126,7 @@ static bool take_arg(char* arg) {
       "-I",
   };
 
-  for (int i = 0; i < sizeof(x) / sizeof(*x); i++)
+  for (size_t i = 0; i < sizeof(x) / sizeof(*x); i++)
     if (!strcmp(arg, x[i]))
       return true;
   return false;
@@ -194,7 +204,7 @@ static FILE* open_file(char* path) {
 
 // Replace file extension
 static char* replace_extn(char* tmpl, char* extn) {
-  char* filename = basename(strdup(tmpl));
+  char* filename = basename(bumpstrdup(tmpl));
   char* dot = strrchr(filename, '.');
   if (dot)
     *dot = '\0';

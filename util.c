@@ -1,5 +1,65 @@
 #include "dyibicc.h"
 
+char* bumpstrndup(const char* s, size_t n) {
+  size_t l = strnlen(s, n);
+  char* d = bumpcalloc(1, l + 1);
+  if (!d)
+    return NULL;
+  memcpy(d, s, l);
+  d[l] = 0;
+  return d;
+}
+
+char* bumpstrdup(const char* s) {
+  size_t l = strlen(s);
+  char* d = bumpcalloc(1, l + 1);
+  if (!d)
+    return NULL;
+  memcpy(d, s, l);
+  d[l] = 0;
+  return d;
+}
+
+char* dirname(char* s) {
+  size_t i;
+  if (!s || !*s)
+    return ".";
+  i = strlen(s) - 1;
+  for (; s[i] == '/' || s[i] == '\\'; i--)
+    if (!i)
+      return "/";
+  for (; s[i] != '/' || s[i] == '\\'; i--)
+    if (!i)
+      return ".";
+  for (; s[i] == '/' || s[i] == '\\'; i--)
+    if (!i)
+      return "/";
+  s[i + 1] = 0;
+  return s;
+}
+
+char* basename(char* s) {
+  size_t i;
+  if (!s || !*s)
+    return ".";
+  i = strlen(s) - 1;
+  for (; i && (s[i] == '/' || s[i] == '\\'); i--)
+    s[i] = 0;
+  for (; i && s[i - 1] != '/' && s[i - 1] != '\\'; i--)
+    ;
+  return s + i;
+}
+
+// Round up `n` to the nearest multiple of `align`. For instance,
+// align_to(5, 8) returns 8 and align_to(11, 8) returns 16.
+uint64_t align_to_u(uint64_t n, uint64_t align) {
+  return (n + align - 1) / align * align;
+}
+
+int64_t align_to_s(int64_t n, int64_t align) {
+  return (n + align - 1) / align * align;
+}
+
 void strarray_push(StringArray* arr, char* s) {
   if (!arr->data) {
     arr->data = bumpcalloc(8, sizeof(char*));
@@ -76,5 +136,5 @@ char* format(char* fmt, ...) {
   va_start(ap, fmt);
   vsprintf(buf, fmt, ap);
   va_end(ap);
-  return strdup(buf);
+  return bumpstrdup(buf);
 }

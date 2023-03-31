@@ -4,6 +4,7 @@
 **/a.out
 **/*.dyo
 /tmp*
+x.bat
 /thirdparty
 /dyibicc
 /test/*.exe
