@@ -2477,7 +2477,7 @@ static void update_pending_code_relocations(void) {
     int file_loc = pending_code_pclabels.data[i].a;
     int pclabel = pending_code_pclabels.data[i].b;
     int offset = dasm_getpclabel(&dynasm, pclabel);
-    printf("update at %d, label %d, offset %d\n", file_loc, pclabel, offset);
+    // printf("update at %d, label %d, offset %d\n", file_loc, pclabel, offset);
     patch_dyo_initializer_code_relocation(dyo_file, file_loc, offset);
   }
 }

@@ -7,7 +7,41 @@
 //   Disassembly view is correct in VS. Required for SEH too. cl /Fa emits
 //   without using any helper macros for samples.
 //
-// Large allocas aren't _chkstk'ing on Windows
+// Break up into small symbol-sized 'sections':
+//
+//   In order to update code without losing global state, need to be able to
+//   replace and relink. Right now, link_dyos() does all the allocation of
+//   global data at the same time as mapping the code in to executable pages.
+//
+//   The simplest fix would be to keep the mappings of globals around and not
+//   reallocate them on updates (one map for global symbols, plus one per
+//   translation unit). The code updating could still be tossing all code, and
+//   relinking everything, but using the old hashmaps for data addresses.
+//
+//   Alternatively, it might be a better direction to break everything up into
+//   symbol-sized chunks (i.e. either a variable or a function indexed by symbol
+//   name). Initial and update become more similar, in that if any symbol is
+//   updated, the old one (if any) gets thrown away, the new one gets mapped in
+//   (whether code or data), and then everything that refers to it is patched.
+//
+//   The main gotchas that come to mind on the second approach are:
+//
+//     - The parser (and DynASM to assign labels) need to be initialized before
+//     processing the whole file; C is just never going to be able to compile a
+//     single function in isolation. So emit_data() and emit_text() need to make
+//     sure that each symbol blob can be ripped out of the generated block, and
+//     any offsets have to be saved relative to the start of that symbol for
+//     emitting fixups. Probably codegen_pclabel() a start/end for each for
+//     rippage/re-offseting.
+//
+//     - Need figure out how to name things. If everything becomes a flat bag of
+//     symbols, we need to make sure that statics from a.c are local to a.c, so
+//     they'll need to be file prefixed.
+//
+//     - Probably wll need to switch to a new format (some kv store or
+//     something), as symbol-per-dyo would be a spamming of files to deal with.
+//
+// Large allocas aren't _chkstk'ing on Windows:
 //
 //   Will STACK_OVERFLOW if it jumps past the guard page.
 //
@@ -85,6 +119,25 @@
 //   little faster for direct use, could still have a dump-dyo-from-mem for
 //   debugging purposes. Goes more with an always-live compiler host hooked to
 //   target.
+//
+// Consider merging some of the record types in dyo:
+//
+//     kTypeImport is (offset-to-fix, string-to-reference)
+//     kTypeCodeReferenceToGlobal is (offset-to-fix, string-to-reference)
+//     kTypeInitializerDataRelocation is (string-to-reference, addend)
+//
+//   The only difference between the first two is that one does GetProcAddress()
+//   or similar, and the other looks in the export tables for other dyos. But we
+//   might want data imported from host too.
+//
+//   The third is different in that the address to fix up is implicit because
+//   it's in a sequence of data segment initializers, but just having all
+//   imports be:
+//
+//      (offset-to-fix, string-to-reference, addend)
+//
+//   might be nicer.
+//
 //
 #include "dyibicc.h"
 

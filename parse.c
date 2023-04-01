@@ -305,7 +305,6 @@ static Initializer* new_initializer(Type* ty, bool is_flexible) {
 static Obj* new_var(char* name, Type* ty) {
   Obj* var = bumpcalloc(1, sizeof(Obj));
   var->name = name;
-  // XXX var->pcname = codegen_pclabel();
   var->ty = ty;
   var->align = ty->align;
   push_scope(name)->var = var;

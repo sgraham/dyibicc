@@ -286,6 +286,10 @@ void* link_dyos(FILE** dyo_files) {
           memcpy(current_data_pointer, buf, size);
           current_data_pointer += size;
         } else if (type == kTypeInitializerDataRelocation) {
+          // This is the same as kTypeCodeReferenceToGlobal, except that a)
+          // there's an additional addend added to the target location; and b)
+          // the location to fixup is implicit (the current init location)
+          // rather than specified as an offset.
           assert(current_data_base);
           if (current_data_pointer + 8 > current_data_end) {
             fprintf(stderr, "initializer overrun reloc\n");
