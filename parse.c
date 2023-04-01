@@ -1044,10 +1044,12 @@ static Member* struct_designator(Token** rest, Token* tok, Type* ty) {
 
   for (Member* mem = ty->members; mem; mem = mem->next) {
     // Anonymous struct member
-    if (mem->ty->kind == TY_STRUCT && !mem->name) {
-      if (get_struct_member(mem->ty, tok)) {
-        *rest = start;
-        return mem;
+    if (!mem->name) {
+      if (mem->ty->kind == TY_STRUCT || mem->ty->kind == TY_UNION) {
+        if (get_struct_member(mem->ty, tok)) {
+          *rest = start;
+          return mem;
+        }
       }
       continue;
     }
@@ -1275,10 +1277,18 @@ static void initializer2(Token** rest, Token* tok, Initializer* init) {
   }
 
   if (init->ty->kind == TY_ARRAY) {
-    if (equal(tok, "{"))
+    if (equal(tok, "{")) {
+      if (init->ty->base->kind == TY_CHAR && tok->next->kind == TK_STR) {
+        // A string initializer for a char array can be surrounded by braces.
+        // E.g. `char str[] = {"foo"};`.
+        initializer2(&tok, tok->next, init);
+        *rest = skip(tok, "}");
+        return;
+      }
       array_initializer1(rest, tok, init);
-    else
-      array_initializer2(rest, tok, init, 0);
+      return;
+    }
+    array_initializer2(rest, tok, init, 0);
     return;
   }
 
@@ -2804,9 +2814,10 @@ static Type* union_decl(Token** rest, Token* tok) {
 static Member* get_struct_member(Type* ty, Token* tok) {
   for (Member* mem = ty->members; mem; mem = mem->next) {
     // Anonymous struct member
-    if ((mem->ty->kind == TY_STRUCT || mem->ty->kind == TY_UNION) && !mem->name) {
-      if (get_struct_member(mem->ty, tok))
-        return mem;
+    if (!mem->name) {
+      if (mem->ty->kind == TY_STRUCT || mem->ty->kind == TY_UNION)
+        if (get_struct_member(mem->ty, tok))
+          return mem;
       continue;
     }
 
@@ -3411,14 +3422,6 @@ static void declare_builtin_functions(void) {
   ty->params = copy_type(ty_int);
   builtin_alloca = new_gvar("alloca", ty);
   builtin_alloca->is_definition = false;
-
-#if 0  // X64WIN
-  Type* ty2 = func_type(ty_void);
-  ty2->params = copy_type(pointer_to(ty_void));
-  ty2->is_variadic = true;
-  va_start = new_gvar("__va_start", ty2);
-  va_start->is_definition = false;
-#endif
 }
 
 // program = (typedef | function-definition | global-variable)*

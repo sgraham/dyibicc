@@ -224,7 +224,7 @@ static void print_tokens(Token* tok) {
   fprintf(stdout, "\n");
 }
 
-int main(int argc, char** argv) {
+void* compile_and_link(int argc, char** argv) {
   bumpcalloc_init();
   parse_args(argc, argv);
 
@@ -260,14 +260,5 @@ int main(int argc, char** argv) {
   if (opt_E)
     return 0;
 
-  void* entry_point = link_dyos(dyo_files);
-  if (entry_point) {
-    int (*p)() = (int (*)())entry_point;
-    int result = p();
-    printf("main returned: %d\n", result);
-    return result;
-  } else {
-    fprintf(stderr, "link failed or no entry point found\n");
-    return 1;
-  }
+  return link_dyos(dyo_files);
 }

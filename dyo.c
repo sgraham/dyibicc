@@ -357,7 +357,7 @@ bool dump_dyo_file(FILE* f) {
         printf("    ->%d initializer bytes (%d bytes)\n", record_index, size);
         printf("         ");
         for (int i = 0; i < (int)size; ++i) {
-          printf(" 0x%x", buf[i]);
+          printf(" 0x%x", (unsigned char)buf[i]);
         }
         printf("\n");
         break;

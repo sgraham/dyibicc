@@ -65,6 +65,8 @@ int main() {
   ASSERT(1, ({ struct {int a;} x={1}, y={2}; (1?x:y).a; }));
   ASSERT(2, ({ struct {int a;} x={1}, y={2}; (0?x:y).a; }));
 
+  ASSERT(7, ({struct S { union { int a; }; }; struct S x = (struct S){.a = 7}; x.a; }));
+
   printf("OK\n");
   return 0;
 }

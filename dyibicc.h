@@ -560,6 +560,7 @@ bool dump_dyo_file(FILE* f);
 // link.c
 //
 void* link_dyos(FILE** dyo_files);
+void set_user_runtime_function_callback(void* (*f)(char*));
 
 //
 // main.c
@@ -574,3 +575,4 @@ void link_reset(void);
 void parse_reset(void);
 void preprocess_reset(void);
 void tokenize_reset(void);
+void* compile_and_link(int argc, char** argv);

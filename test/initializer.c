@@ -33,6 +33,7 @@ char g43[][4] = {'f', 'o', 'o', 0, 'b', 'a', 'r', 0};
 char *g44 = {"foo"};
 union { int a; char b[4]; } g50 = {.b[2]=0x12};
 union { int a; } g51[2] = {};
+const char str_braced[] = {"foo"};
 
 typedef char T60[];
 T60 g60 = {1, 2, 3};
@@ -265,6 +266,26 @@ int main() {
 
   ASSERT(16, ({ char x[]={[2 ... 10]='a', [7]='b', [15 ... 15]='c', [3 ... 5]='d'}; sizeof(x); }));
   ASSERT(0, ({ char x[]={[2 ... 10]='a', [7]='b', [15 ... 15]='c', [3 ... 5]='d'}; memcmp(x, "\0\0adddabaaa\0\0\0\0c", 16); }));
+
+  // TODO: Nested designated initializers:
+  //   https://github.com/rui314/chibicc/issues/62
+  // There's a proposed patch there, but it didn't seem to work so need some
+  // more digging in parse.
+#if 0
+  ASSERT(3, {
+    struct S {
+      struct {
+        int i;
+        int j;
+      } t;
+      int k;
+    };
+    struct S x = {.t.i = 1, .k = 2};
+    x.t.i + x.k;
+  });
+#endif
+
+  ASSERT(4, sizeof(str_braced));
 
   printf("OK\n");
   return 0;

@@ -9,8 +9,14 @@
 
 #define MAX_DYOS 32
 
+static void* (*user_runtime_function_callback)(char*) = NULL;
+
 #if X64WIN
 static HashMap runtime_function_map;
+
+void set_user_runtime_function_callback(void* (*f)(char*)) {
+  user_runtime_function_callback = f;
+}
 
 static void* get_standard_runtime_function(char* name) {
   if (runtime_function_map.capacity == 0) {
@@ -54,6 +60,13 @@ static void* get_standard_runtime_function(char* name) {
 #endif
 
 static void* symbol_lookup(char* name) {
+  if (user_runtime_function_callback) {
+    void* f = user_runtime_function_callback(name);
+    if (f) {
+      return f;
+    }
+  }
+
 #if X64WIN
   void* f = get_standard_runtime_function(name);
   if (f) {
