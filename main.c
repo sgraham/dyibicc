@@ -41,6 +41,20 @@
 //     - Probably wll need to switch to a new format (some kv store or
 //     something), as symbol-per-dyo would be a spamming of files to deal with.
 //
+// Testing for relinking:
+//
+//   Basic relinking is implemented, but there's no test driver that sequences a
+//   bunch of code changes to make sure that the updates can be applied
+//   successfully.
+//
+// khash <-> swisstable:
+//
+//   Look into hashtable libs, khash is used in link.c now and it seems ok, but
+//   the interface isn't that pleasant. Possibly wrap and extern C a few common
+//   instantiations of absl's with a more pleasant interface (and that could
+//   replace hashmap.c too). Need to consider how they would/can integrate with
+//   bumpalloc.
+//
 // Large allocas aren't _chkstk'ing on Windows:
 //
 //   Will STACK_OVERFLOW if it jumps past the guard page.

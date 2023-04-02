@@ -2195,7 +2195,8 @@ static void emit_data(Obj* prog) {
     // continue;
     //}
 
-    write_dyo_initialized_data(dyo_file, var->ty->size, align, var->is_static, var->name);
+    write_dyo_initialized_data(dyo_file, var->ty->size, align, var->is_static, var->is_rodata,
+                               var->name);
 
     // .data or .tdata
     if (var->init_data) {

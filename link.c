@@ -7,6 +7,10 @@
 #include <unistd.h>
 #endif
 
+#include "khash.h"
+
+KHASH_SET_INIT_INT64(voidp)
+
 static void* (*user_runtime_function_callback)(char*) = NULL;
 
 #if X64WIN
@@ -110,13 +114,13 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
 
   int num_dyos = 0;
 
-  HashMap created_this_update = {0};
+  khash_t(voidp)* created_this_update = kh_init(voidp);
 
   // Map code blocks from each and save base address.
   // Allocate and global data and save address/size by name.
   for (FILE** dyo = dyo_files; *dyo; ++dyo) {
     if (!ensure_dyo_header(*dyo))
-      return false;
+      goto fail;
 
     unsigned int entry_point_offset = 0xffffffff;
     int record_index = 0;
@@ -128,7 +132,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
       unsigned int type;
       unsigned int size;
       if (!read_dyo_record(*dyo, &record_index, buf, sizeof(buf), &type, &size))
-        return false;
+        goto fail;
 
       if (type == kTypeString) {
         strarray_push(&strings, bumpstrndup(buf, size));
@@ -152,18 +156,32 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
         } else if (type == kTypeInitializedData) {
           unsigned int data_size = *(unsigned int*)&buf[0];
           unsigned int align = *(unsigned int*)&buf[4];
-          unsigned int is_static = *(unsigned int*)&buf[8];
+          unsigned int flags = *(unsigned int*)&buf[8];
           unsigned int name_index = *(unsigned int*)&buf[12];
+          bool is_static = flags & 0x01;
+          bool is_rodata = flags & 0x02;
 
-          // Don't recreate data if relinking. Currently new data can be
-          // created, but I'm not sure how well that will work in practice.
+          // Don't recreate non-rodata if relinking. TBD what data should be
+          // recreated vs. preserved, maybe some sort of annotations.
           if (relinking) {
             if (is_static) {
-              if (hashmap_get(&li.per_dyo_data[num_dyos], strings.data[name_index]))
-                continue;
+              void* prev = hashmap_get(&li.per_dyo_data[num_dyos], strings.data[name_index]);
+              if (prev) {
+                if (is_rodata) {
+                  aligned_free(prev);
+                } else {
+                  continue;
+                }
+              }
             } else {
-              if (hashmap_get(&li.global_data, strings.data[name_index]))
-                continue;
+              void* prev = hashmap_get(&li.global_data, strings.data[name_index]);
+              if (prev) {
+                if (is_rodata) {
+                  aligned_free(prev);
+                } else {
+                  continue;
+                }
+              }
             }
           }
 
@@ -177,7 +195,8 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
             hashmap_put(&li.global_data, strdup(strings.data[name_index]), global_data);
           }
 
-          hashmap_put(&created_this_update, global_data, (void*)1);
+          int ret;
+          kh_put(voidp, created_this_update, (khint64_t)global_data, &ret);
         }
       }
     }
@@ -192,7 +211,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
   num_dyos = 0;
   for (FILE** dyo = dyo_files; *dyo; ++dyo) {
     if (!ensure_dyo_header(*dyo))
-      return false;
+      goto fail;
 
     int record_index = 0;
 
@@ -203,7 +222,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
       unsigned int type;
       unsigned int size;
       if (!read_dyo_record(*dyo, &record_index, buf, sizeof(buf), &type, &size))
-        return false;
+        goto fail;
 
       if (type == kTypeString) {
         strarray_push(&strings, bumpstrndup(buf, size));
@@ -233,7 +252,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
   num_dyos = 0;
   for (FILE** dyo = dyo_files; *dyo; ++dyo) {
     if (!ensure_dyo_header(*dyo))
-      return false;
+      goto fail;
 
     int record_index = 0;
 
@@ -248,7 +267,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
       unsigned int type;
       unsigned int size;
       if (!read_dyo_record(*dyo, &record_index, buf, sizeof(buf), &type, &size))
-        return false;
+        goto fail;
 
       if (type == kTypeString) {
         strarray_push(&strings, bumpstrndup(buf, size));
@@ -264,7 +283,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
             target_address = symbol_lookup(strings.data[string_record_index]);
             if (target_address == NULL) {
               fprintf(stderr, "undefined symbol: %s\n", strings.data[string_record_index]);
-              return false;
+              goto fail;
             }
           }
           *((uintptr_t*)fixup_address) = (uintptr_t)target_address;
@@ -272,7 +291,9 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           // strings.data[string_record_index]);
         } else if (type == kTypeInitializedData) {
           unsigned int data_size = *(unsigned int*)&buf[0];
-          unsigned int is_static = *(unsigned int*)&buf[8];
+          unsigned int flags = *(unsigned int*)&buf[8];
+          bool is_static = flags & 0x01;
+          // bool is_rodata = flags & 0x02;
           unsigned int name_index = *(unsigned int*)&buf[12];
 
           if (is_static) {
@@ -282,12 +303,13 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           }
 
           // Don't reinitialize data from previous links.
-          if (relinking && !hashmap_get(&created_this_update, current_data_base))
+          khiter_t it = kh_get(voidp, created_this_update, (khint64_t)current_data_base);
+          if (relinking && it == kh_end(created_this_update))
             continue;
 
           if (!current_data_base) {
             fprintf(stderr, "init data not allocated\n");
-            return false;
+            goto fail;
           }
           current_data_pointer = current_data_base;
           current_data_end = current_data_base + data_size;
@@ -301,7 +323,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
             target_address = hashmap_get(&li.global_data, strings.data[string_record_index]);
             if (!target_address) {
               fprintf(stderr, "undefined symbol: %s\n", strings.data[string_record_index]);
-              return false;
+              goto fail;
             }
           }
           *((uintptr_t*)fixup_address) = (uintptr_t)target_address;
@@ -312,7 +334,8 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           current_data_base = current_data_pointer = current_data_end = NULL;
         } else if (type == kTypeInitializerBytes) {
           // Don't reinitialize data from previous links.
-          if (relinking && !hashmap_get(&created_this_update, current_data_base))
+          khiter_t it = kh_get(voidp, created_this_update, (khint64_t)current_data_base);
+          if (relinking && it == kh_end(created_this_update))
             continue;
 
           assert(current_data_base);
@@ -324,7 +347,8 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           current_data_pointer += size;
         } else if (type == kTypeInitializerDataRelocation) {
           // Don't reinitialize data from previous links.
-          if (relinking && !hashmap_get(&created_this_update, current_data_base))
+          khiter_t it = kh_get(voidp, created_this_update, (khint64_t)current_data_base);
+          if (relinking && it == kh_end(created_this_update))
             continue;
 
           // This is the same as kTypeCodeReferenceToGlobal, except that a)
@@ -344,7 +368,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
             target_address = hashmap_get(&li.global_data, strings.data[name_index]);
             if (!target_address) {
               fprintf(stderr, "undefined symbol: %s\n", strings.data[name_index]);
-              return false;
+              goto fail;
             }
           }
           *((uintptr_t*)current_data_pointer) = (uintptr_t)target_address + addend;
@@ -353,7 +377,8 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           current_data_pointer += 8;
         } else if (type == kTypeInitializerCodeRelocation) {
           // Don't reinitialize data from previous links.
-          if (relinking && !hashmap_get(&created_this_update, current_data_base))
+          khiter_t it = kh_get(voidp, created_this_update, (khint64_t)current_data_base);
+          if (relinking && it == kh_end(created_this_update))
             continue;
 
           assert(current_data_base);
@@ -383,13 +408,17 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
 
   for (int i = 0; i < num_dyos; ++i) {
     if (!make_memory_executable(li.code[i].base_address, li.code[i].size)) {
-      return false;
+      goto fail;
     }
   }
 
   li.num_dyos = num_dyos;
   *link_info = li;
   return true;
+
+fail:
+  kh_destroy(voidp, created_this_update);
+  return false;
 }
 
 void link_reset(void) {

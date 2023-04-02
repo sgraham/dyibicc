@@ -22,7 +22,7 @@ type 4: code reference to global (# 8)
 <offset into code><string record index containing name>
 
 type 5: initialized data (# 12)
-<size><alignment><string record index containing name>
+<size><alignment><flags><string record index containing name>
  4     4          4
 if <name> == 0, not exported
 at least one type 6-9 must immediately follow type 5
@@ -161,7 +161,12 @@ bool write_dyo_code_reference_to_global(FILE* f, char* name, unsigned int offset
   return true;
 }
 
-bool write_dyo_initialized_data(FILE* f, int size, int align, int is_static, char* name) {
+bool write_dyo_initialized_data(FILE* f,
+                                int size,
+                                int align,
+                                bool is_static,
+                                bool is_rodata,
+                                char* name) {
   int str_index = 0;
   if (name) {
     if (!write_string(f, name, &str_index))
@@ -174,7 +179,10 @@ bool write_dyo_initialized_data(FILE* f, int size, int align, int is_static, cha
     return false;
   if (!write_int(f, align))
     return false;
-  if (!write_int(f, is_static))
+  int flags = 0;
+  flags |= is_static ? 0x01 : 0;
+  flags |= is_rodata ? 0x02 : 0;
+  if (!write_int(f, flags))
     return false;
   if (!write_int(f, str_index))
     return false;
@@ -347,7 +355,12 @@ bool dump_dyo_file(FILE* f) {
         printf("%4d initialized data (%d bytes)\n", record_index, size);
         printf("       size %d\n", *(unsigned int*)&buf[0]);
         printf("       align %d\n", *(unsigned int*)&buf[4]);
-        printf("       is_static %d\n", *(unsigned int*)&buf[8]);
+        unsigned int flags = *(unsigned int*)&buf[8];
+        printf("       flags %x\n", flags);
+        if (flags & 0x01)
+          printf("         static\n");
+        if (flags & 0x02)
+          printf("         rodata\n");
         printf("       name at str record %d\n", *(unsigned int*)&buf[12]);
         break;
       case kTypeInitializerEnd:

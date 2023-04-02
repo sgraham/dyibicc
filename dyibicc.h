@@ -189,6 +189,7 @@ struct Obj {
   // Global variable
   bool is_tentative;
   bool is_tls;
+  bool is_rodata;
   char* init_data;
   Relocation* rel;
 
@@ -511,7 +512,7 @@ void bumpcalloc_init(void);
 void* bumpcalloc(size_t num, size_t size);
 void* bumplamerealloc(void* old, size_t old_size, size_t new_size);
 void* aligned_allocate(size_t size, size_t alignment);
-void aligned_fred(void* p);
+void aligned_free(void* p);
 void* allocate_writable_memory(size_t size);
 bool make_memory_executable(void* m, size_t size);
 void free_executable_memory(void* p, size_t size);
@@ -539,7 +540,12 @@ bool write_dyo_begin(FILE* f);
 bool write_dyo_import(FILE* f, char* name, unsigned int loc);
 bool write_dyo_function_export(FILE* f, char* name, unsigned int loc);
 bool write_dyo_code_reference_to_global(FILE* f, char* name, unsigned int offset);
-bool write_dyo_initialized_data(FILE* f, int size, int align, int is_static, char* name);
+bool write_dyo_initialized_data(FILE* f,
+                                int size,
+                                int align,
+                                bool is_static,
+                                bool is_rodata,
+                                char* name);
 bool write_dyo_initializer_end(FILE* f);
 bool write_dyo_initializer_bytes(FILE* f, char* data, int len);
 bool write_dyo_initializer_data_relocation(FILE* f, char* data, int addend);

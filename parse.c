@@ -339,6 +339,7 @@ static Obj* new_anon_gvar(Type* ty) {
 static Obj* new_string_literal(char* p, Type* ty) {
   Obj* var = new_anon_gvar(ty);
   var->init_data = p;
+  var->is_rodata = true;
   return var;
 }
 
