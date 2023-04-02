@@ -492,6 +492,7 @@ typedef struct {
   HashEntry* buckets;
   int capacity;
   int used;
+  bool global_alloc;
 } HashMap;
 
 void* hashmap_get(HashMap* map, char* key);
@@ -558,7 +559,18 @@ bool dump_dyo_file(FILE* f);
 //
 // link.c
 //
-void* link_dyos(FILE** dyo_files);
+#define MAX_DYOS 64  // Arbitrary
+typedef struct LinkInfo {
+  void* entry_point;
+  int num_dyos;
+  struct {
+    char* base_address;
+    size_t size;
+  } code[MAX_DYOS];
+  HashMap global_data;
+  HashMap per_dyo_data[MAX_DYOS];
+} LinkInfo;
+bool link_dyos(FILE** dyo_files, LinkInfo* link_info);
 void set_user_runtime_function_callback(void* (*f)(char*));
 
 //
@@ -574,4 +586,4 @@ void link_reset(void);
 void parse_reset(void);
 void preprocess_reset(void);
 void tokenize_reset(void);
-void* compile_and_link(int argc, char** argv);
+bool compile_and_link(int argc, char** argv, LinkInfo* link_info);

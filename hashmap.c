@@ -39,7 +39,12 @@ static void rehash(HashMap* map) {
 
   // Create a new hashmap and copy all key-values.
   HashMap map2 = {0};
-  map2.buckets = bumpcalloc(cap, sizeof(HashEntry));
+  map2.global_alloc = map->global_alloc;
+  if (map2.global_alloc) {
+    map2.buckets = calloc(cap, sizeof(HashEntry));
+  } else {
+    map2.buckets = bumpcalloc(cap, sizeof(HashEntry));
+  }
   map2.capacity = cap;
 
   for (int i = 0; i < map->capacity; i++) {
@@ -75,7 +80,11 @@ static HashEntry* get_entry(HashMap* map, char* key, int keylen) {
 
 static HashEntry* get_or_insert_entry(HashMap* map, char* key, int keylen) {
   if (!map->buckets) {
-    map->buckets = bumpcalloc(INIT_SIZE, sizeof(HashEntry));
+    if (map->global_alloc) {
+      map->buckets = calloc(INIT_SIZE, sizeof(HashEntry));
+    } else {
+      map->buckets = bumpcalloc(INIT_SIZE, sizeof(HashEntry));
+    }
     map->capacity = INIT_SIZE;
   } else if ((map->used * 100) / map->capacity >= HIGH_WATERMARK) {
     rehash(map);

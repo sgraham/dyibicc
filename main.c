@@ -277,7 +277,7 @@ static void print_tokens(Token* tok) {
   fprintf(stdout, "\n");
 }
 
-void* compile_and_link(int argc, char** argv) {
+bool compile_and_link(int argc, char** argv, LinkInfo* link_info) {
   bumpcalloc_init();
   parse_args(argc, argv);
 
@@ -313,5 +313,5 @@ void* compile_and_link(int argc, char** argv) {
   if (opt_E)
     return 0;
 
-  return link_dyos(dyo_files);
+  return link_dyos(dyo_files, link_info);
 }
