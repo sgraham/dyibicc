@@ -16,6 +16,7 @@
 
 #ifdef _MSC_VER
 #define NORETURN __declspec(noreturn)
+#define strdup _strdup
 #else
 #define NORETURN _Noreturn
 #endif
@@ -506,13 +507,14 @@ void hashmap_test(void);
 //
 // alloc.c
 //
-void* allocate_writable_memory(size_t size);
-bool make_memory_executable(void* m, size_t size);
-void free_executable_memory(void* p, size_t size);
 void bumpcalloc_init(void);
 void* bumpcalloc(size_t num, size_t size);
 void* bumplamerealloc(void* old, size_t old_size, size_t new_size);
-void* bumpaligned_allocate(size_t size, size_t alignment);
+void* aligned_allocate(size_t size, size_t alignment);
+void aligned_fred(void* p);
+void* allocate_writable_memory(size_t size);
+bool make_memory_executable(void* m, size_t size);
+void free_executable_memory(void* p, size_t size);
 
 //
 // dyo.c
@@ -579,6 +581,7 @@ void set_user_runtime_function_callback(void* (*f)(char*));
 
 extern StringArray include_paths;
 extern char* base_file;
+extern char* entry_point_override;
 
 void bumpcalloc_reset(void);
 void codegen_reset(void);

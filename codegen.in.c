@@ -2425,6 +2425,10 @@ static void emit_text(Obj* prog) {
       dasm_label_main_entry = fn->dasm_entry_label;
     }
 
+    if (entry_point_override && strcmp(fn->name, entry_point_override) == 0) {
+      dasm_label_main_entry = fn->dasm_entry_label;
+    }
+
     // Epilogue
     ///|=>fn->dasm_return_label:
     ///| mov rsp, rbp

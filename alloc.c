@@ -38,6 +38,7 @@ void error(char* fmt, ...) {
 }
 
 void bumpcalloc_init(void) {
+  assert(!allmem);
   allmem = allocate_writable_memory(HEAP_SIZE);
   current_alloc_pointer = allmem;
   ASAN_POISON_MEMORY_REGION(allmem, HEAP_SIZE);
@@ -69,10 +70,21 @@ void bumpcalloc_reset(void) {
   current_alloc_pointer = NULL;
 }
 
-void* bumpaligned_allocate(size_t size, size_t alignment) {
+void* aligned_allocate(size_t size, size_t alignment) {
   size = align_to_u(size, alignment);
-  current_alloc_pointer = (void*)align_to_u((uint64_t)current_alloc_pointer, alignment);
-  return bumpcalloc(1, size);
+#if X64WIN
+  return _aligned_malloc(size, alignment);
+#else
+  return aligned_alloc(alignment, size);
+#endif
+}
+
+void aligned_free(void* p) {
+#if X64WIN
+  _aligned_free(p);
+#else
+  free(p);
+#endif
 }
 
 // Allocates RW memory of given size and returns a pointer to it. On failure,
@@ -115,7 +127,10 @@ bool make_memory_executable(void* m, size_t size) {
 
 void free_executable_memory(void* p, size_t size) {
 #if X64WIN
-  VirtualFree(p, size, MEM_RELEASE);
+  (void)size;  // If |size| is passed, free will fail.
+  if (!VirtualFree(p, 0, MEM_RELEASE)) {
+    error("VirtualFree failed: 0x%x\n", GetLastError());
+  }
 #else
   munmap(p, size);
 #endif

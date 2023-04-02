@@ -87,15 +87,30 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
   unsigned int page_size = sysconf(_SC_PAGESIZE);
 #endif
 
+  bool relinking = link_info->num_dyos > 0;
+
   LinkInfo li = {0};
-  // These hashmaps live beyond the purge to maintain addresses of the global
-  // data that shouldn't be updated.
-  li.global_data.global_alloc = true;
-  for (int i = 0; i < MAX_DYOS; ++i) {
-    li.per_dyo_data[i].global_alloc = true;
+
+  if (relinking) {
+    assert(link_info->global_data.global_alloc);
+    li = *link_info;
+
+    // Free all old code, but not data.
+    for (int i = 0; i < li.num_dyos; ++i) {
+      free_executable_memory(li.code[i].base_address, li.code[i].size);
+    }
+  } else {
+    // These hashmaps live beyond the purge to maintain addresses of the global
+    // data that shouldn't be updated.
+    li.global_data.global_alloc = true;
+    for (int i = 0; i < MAX_DYOS; ++i) {
+      li.per_dyo_data[i].global_alloc = true;
+    }
   }
 
   int num_dyos = 0;
+
+  HashMap created_this_update = {0};
 
   // Map code blocks from each and save base address.
   // Allocate and global data and save address/size by name.
@@ -140,15 +155,29 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           unsigned int is_static = *(unsigned int*)&buf[8];
           unsigned int name_index = *(unsigned int*)&buf[12];
 
-          void* global_data = bumpaligned_allocate(data_size, align);
+          // Don't recreate data if relinking. Currently new data can be
+          // created, but I'm not sure how well that will work in practice.
+          if (relinking) {
+            if (is_static) {
+              if (hashmap_get(&li.per_dyo_data[num_dyos], strings.data[name_index]))
+                continue;
+            } else {
+              if (hashmap_get(&li.global_data, strings.data[name_index]))
+                continue;
+            }
+          }
+
+          void* global_data = aligned_allocate(data_size, align);
           memset(global_data, 0, data_size);
 
-          // TODO: Don't overwrite for re-link
+          // The keys need to be strdup'd to stick around for subsequent links.
           if (is_static) {
-            hashmap_put(&li.per_dyo_data[num_dyos], strings.data[name_index], global_data);
+            hashmap_put(&li.per_dyo_data[num_dyos], strdup(strings.data[name_index]), global_data);
           } else {
-            hashmap_put(&li.global_data, strings.data[name_index], global_data);
+            hashmap_put(&li.global_data, strdup(strings.data[name_index]), global_data);
           }
+
+          hashmap_put(&created_this_update, global_data, (void*)1);
         }
       }
     }
@@ -251,6 +280,11 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           } else {
             current_data_base = hashmap_get(&li.global_data, strings.data[name_index]);
           }
+
+          // Don't reinitialize data from previous links.
+          if (relinking && !hashmap_get(&created_this_update, current_data_base))
+            continue;
+
           if (!current_data_base) {
             fprintf(stderr, "init data not allocated\n");
             return false;
@@ -277,6 +311,10 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           assert(current_data_base);
           current_data_base = current_data_pointer = current_data_end = NULL;
         } else if (type == kTypeInitializerBytes) {
+          // Don't reinitialize data from previous links.
+          if (relinking && !hashmap_get(&created_this_update, current_data_base))
+            continue;
+
           assert(current_data_base);
           if (current_data_pointer + size > current_data_end) {
             fprintf(stderr, "initializer overrun bytes\n");
@@ -285,6 +323,10 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           memcpy(current_data_pointer, buf, size);
           current_data_pointer += size;
         } else if (type == kTypeInitializerDataRelocation) {
+          // Don't reinitialize data from previous links.
+          if (relinking && !hashmap_get(&created_this_update, current_data_base))
+            continue;
+
           // This is the same as kTypeCodeReferenceToGlobal, except that a)
           // there's an additional addend added to the target location; and b)
           // the location to fixup is implicit (the current init location)
@@ -310,6 +352,10 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           // target_address, strings.data[name_index]);
           current_data_pointer += 8;
         } else if (type == kTypeInitializerCodeRelocation) {
+          // Don't reinitialize data from previous links.
+          if (relinking && !hashmap_get(&created_this_update, current_data_base))
+            continue;
+
           assert(current_data_base);
           if (current_data_pointer + 8 > current_data_end) {
             fprintf(stderr, "initializer overrun reloc\n");

@@ -144,6 +144,7 @@
 StringArray include_paths;
 
 char* base_file;
+char* entry_point_override;
 
 static StringArray input_paths;
 static bool opt_E = false;
@@ -170,13 +171,14 @@ static void add_default_include_paths(char* argv0) {
 }
 
 static void usage(int status) {
-  fprintf(stderr, "dyibicc [-E] [-I <path>] <file0> [<file1>...]\n");
+  fprintf(stderr, "dyibicc [-E] [-e symbolname] [-I <path>] <file0> [<file1>...]\n");
   exit(status);
 }
 
 static bool take_arg(char* arg) {
   char* x[] = {
       "-I",
+      "-e",
   };
 
   for (size_t i = 0; i < sizeof(x) / sizeof(*x); i++)
@@ -194,6 +196,11 @@ static void parse_args(int argc, char** argv) {
   for (int i = 1; i < argc; i++) {
     if (!strncmp(argv[i], "-I", 2)) {
       strarray_push(&include_paths, argv[i] + 2);
+      continue;
+    }
+
+    if (!strncmp(argv[i], "-e", 2)) {
+      entry_point_override = argv[i] + 2;
       continue;
     }
 
@@ -282,7 +289,7 @@ bool compile_and_link(int argc, char** argv, LinkInfo* link_info) {
   parse_args(argc, argv);
 
   // TODO: Can't use a strarray because it'll get purged.
-  FILE* dyo_files[32] = {0};
+  FILE* dyo_files[MAX_DYOS] = {0};
   int num_dyo_files = 0;
 
   for (int i = 0; i < input_paths.len; i++) {
@@ -313,5 +320,7 @@ bool compile_and_link(int argc, char** argv, LinkInfo* link_info) {
   if (opt_E)
     return 0;
 
-  return link_dyos(dyo_files, link_info);
+  bool result = link_dyos(dyo_files, link_info);
+  bumpcalloc_reset();
+  return result;
 }
