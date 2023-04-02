@@ -1,7 +1,7 @@
 #include "dyibicc.h"
 
 /*
-# dyibicc obj v1\n
+# dyibicc obj v1\n <num_records>
 
 each record is
 <4 byte record type and length><arbitrary data of length specified>
@@ -45,7 +45,6 @@ type 100: x64 code (# variable)
 <array of x64 code bytes>
 these are indexed by various types
 there can only be one type 100 per file
-it must be the last entry in the file
 
 type 101: entry point (# 4)
 <offset into code>
@@ -112,7 +111,22 @@ bool write_dyo_begin(FILE* f) {
   if (fwrite(kSignature, sizeof(kSignature) - 1, 1, f) < 0) {
     return false;
   }
+  if (!write_int(f, 0xffffffff))  // num_records for fixup later
+    return false;
 
+  return true;
+}
+
+bool write_dyo_finish(FILE* f) {
+  if (fseek(f, sizeof(kSignature) - 1, SEEK_SET) < 0) {
+    return false;
+  }
+  if (!write_int(f, current_record_index)) {
+    fprintf(stderr, "writing num_records patch failed\n");
+    return false;
+  }
+
+  fclose(f);
   return true;
 }
 
@@ -271,7 +285,7 @@ bool write_dyo_entrypoint(FILE* f, unsigned int loc) {
   return true;
 }
 
-bool ensure_dyo_header(FILE* f) {
+bool ensure_dyo_header(FILE* f, int* num_records) {
   char buf[sizeof(kSignature)];
   if (fread(buf, sizeof(kSignature) - 1, 1, f) < 0) {
     fprintf(stderr, "read error");
@@ -281,6 +295,16 @@ bool ensure_dyo_header(FILE* f) {
     fprintf(stderr, "signature doesn't match");
     return false;
   }
+  if (fread(buf, sizeof(int), 1, f) < 0) {
+    fprintf(stderr, "read error");
+    return false;
+  }
+  *num_records = *(int*)&buf[0];
+  if (*num_records <= 0) {
+    fprintf(stderr, "invalid num_records");
+    return false;
+  }
+
   return true;
 }
 
@@ -313,11 +337,14 @@ bool read_dyo_record(FILE* f,
 bool dump_dyo_file(FILE* f) {
   char buf[1 << 16];  // Arbitrary max length.
 
-  if (!ensure_dyo_header(f))
+  int num_records = 0;
+  if (!ensure_dyo_header(f, &num_records))
     return false;
 
+  printf("dyo contains %d records\n", num_records);
+
   int record_index = 0;
-  for (;;) {
+  for (int i = 0; i < num_records; ++i) {
     unsigned int type;
     unsigned int size;
     if (!read_dyo_record(f, &record_index, buf, sizeof(buf), &type, &size))
@@ -356,8 +383,8 @@ bool dump_dyo_file(FILE* f) {
       case kTypeInitializerBytes:
         printf("    ->%d initializer bytes (%d bytes)\n", record_index, size);
         printf("         ");
-        for (int i = 0; i < (int)size; ++i) {
-          printf(" 0x%x", (unsigned char)buf[i]);
+        for (int j = 0; j < (int)size; ++j) {
+          printf(" 0x%x", (unsigned char)buf[j]);
         }
         printf("\n");
         break;
@@ -387,7 +414,7 @@ bool dump_dyo_file(FILE* f) {
           return false;
         }
         printf("--------------------\n");
-        return true;
+        break;
       case kTypeEntryPoint:
         printf("%4d entry point (%d bytes)\n", record_index, size);
         printf("       located at offset %d\n", *(unsigned int*)&buf[0]);
@@ -397,4 +424,6 @@ bool dump_dyo_file(FILE* f) {
         break;
     }
   }
+
+  return true;
 }

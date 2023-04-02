@@ -86,6 +86,7 @@ void strintarray_push(StringIntArray* arr, StringInt item);
 void bytearray_push(ByteArray* arr, char b);
 void intintarray_push(IntIntArray* arr, IntInt item);
 char* format(char* fmt, ...) __attribute__((format(printf, 1, 2)));
+char* get_full_path_to_file(char* filename);
 
 //
 // tokenize.c
@@ -184,6 +185,7 @@ struct Obj {
   bool is_static;
   int dasm_entry_label;
   int dasm_return_label;
+  int dasm_end_label;
 
   // Global variable
   bool is_tentative;
@@ -462,7 +464,7 @@ void add_type(Node* node);
 //
 
 void codegen_init(void);
-void codegen(Obj* prog, FILE* dyo_out);
+void codegen(Obj* prog);
 int codegen_pclabel(void);
 #if X64WIN
 bool type_passed_in_register(Type* ty);
@@ -492,7 +494,11 @@ typedef struct {
   HashEntry* buckets;
   int capacity;
   int used;
+  bool global_alloc;
 } HashMap;
+
+// Represents a deleted hash entry
+#define TOMBSTONE ((void*)-1)
 
 void* hashmap_get(HashMap* map, char* key);
 void* hashmap_get2(HashMap* map, char* key, int keylen);
@@ -533,6 +539,7 @@ typedef enum DyoRecordType {
 
 // Writing.
 bool write_dyo_begin(FILE* f);
+bool write_dyo_finish(FILE* f);
 bool write_dyo_import(FILE* f, char* name, unsigned int loc);
 bool write_dyo_function_export(FILE* f, char* name, unsigned int loc);
 bool write_dyo_code_reference_to_global(FILE* f, char* name, unsigned int offset);
@@ -546,7 +553,7 @@ bool write_dyo_code(FILE* f, void* data, size_t size);
 bool write_dyo_entrypoint(FILE* f, unsigned int loc);
 
 // Reading.
-bool ensure_dyo_header(FILE* f);
+bool ensure_dyo_header(FILE* f, int* num_records);
 bool read_dyo_record(FILE* f,
                      int* record_index,
                      char* buf,
@@ -556,9 +563,19 @@ bool read_dyo_record(FILE* f,
 bool dump_dyo_file(FILE* f);
 
 //
+// dyostore.c
+//
+void dyostore_init_new_generation(HashMap* active_symbols);
+int dyostore_current_generation(void);
+FILE* dyostore_write_begin(char* filename, char* symbol_name, bool is_private);
+void dyostore_write_finalize(void);
+FILE* dyostore_read_open(char* name);
+void dyostore_read_close(FILE* f);
+
+//
 // link.c
 //
-void* link_dyos(FILE** dyo_files);
+void* link_dyos(HashMap* active_symbols);
 void set_user_runtime_function_callback(void* (*f)(char*));
 
 //
@@ -574,4 +591,4 @@ void link_reset(void);
 void parse_reset(void);
 void preprocess_reset(void);
 void tokenize_reset(void);
-void* compile_and_link(int argc, char** argv);
+void* compile_and_link(int argc, char** argv, HashMap* active_symbols);

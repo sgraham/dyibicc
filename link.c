@@ -7,7 +7,7 @@
 #include <unistd.h>
 #endif
 
-#define MAX_DYOS 32
+#define MAX_DYOS 1024  // XXX
 
 static void* (*user_runtime_function_callback)(char*) = NULL;
 
@@ -78,7 +78,22 @@ static void* symbol_lookup(char* name) {
 #endif
 }
 
-void* link_dyos(FILE** dyo_files) {
+static void remove_obsolete_symbols(HashMap* map) {
+  assert(map->global_alloc);
+
+  int cur = dyostore_current_generation();
+  for (int i = 0; i < map->capacity; i++) {
+    HashEntry* ent = &map->buckets[i];
+    if (ent->key && ent->key != TOMBSTONE) {
+      if (ent->val != (void*)(intptr_t)cur) {
+        free(ent->key);
+        ent->key = TOMBSTONE;
+      }
+    }
+  }
+}
+
+void* link_dyos(HashMap* active_symbols) {
   char buf[1 << 16];
 
 #if X64WIN
@@ -98,10 +113,18 @@ void* link_dyos(FILE** dyo_files) {
   HashMap exported_global_data = {0};
   HashMap per_dyo_global[MAX_DYOS] = {0};
 
+  remove_obsolete_symbols(active_symbols);
+
   // Map code blocks from each and save base address.
   // Allocate and global data and save address/size by name.
-  for (FILE** dyo = dyo_files; *dyo; ++dyo) {
-    if (!ensure_dyo_header(*dyo))
+  for (int i = 0; i < active_symbols->capacity; ++i) {
+    HashEntry* ent = &active_symbols->buckets[i];
+    if (!ent->key || ent->key == TOMBSTONE)
+      continue;
+    FILE* dyo = dyostore_read_open(ent->key);
+
+    int num_records = 0;
+    if (!ensure_dyo_header(dyo, &num_records))
       return NULL;
 
     unsigned int entry_point_offset = 0xffffffff;
@@ -110,10 +133,10 @@ void* link_dyos(FILE** dyo_files) {
     StringArray strings = {NULL, 0, 0};
     strarray_push(&strings, NULL);  // 1-based
 
-    for (;;) {
+    for (int j = 0; j < num_records; ++j) {
       unsigned int type;
       unsigned int size;
-      if (!read_dyo_record(*dyo, &record_index, buf, sizeof(buf), &type, &size))
+      if (!read_dyo_record(dyo, &record_index, buf, sizeof(buf), &type, &size))
         return false;
 
       if (type == kTypeString) {
@@ -153,17 +176,21 @@ void* link_dyos(FILE** dyo_files) {
         }
       }
     }
-  }
 
-  for (FILE** dyo = dyo_files; *dyo; ++dyo) {
-    rewind(*dyo);
+    dyostore_read_close(dyo);
   }
 
   // Get all exported symbols as hashmap of name => real address.
   HashMap exports = {NULL, 0, 0};
   num_dyos = 0;
-  for (FILE** dyo = dyo_files; *dyo; ++dyo) {
-    if (!ensure_dyo_header(*dyo))
+  for (int i = 0; i < active_symbols->capacity; ++i) {
+    HashEntry* ent = &active_symbols->buckets[i];
+    if (!ent->key || ent->key == TOMBSTONE)
+      continue;
+    FILE* dyo = dyostore_read_open(ent->key);
+
+    int num_records = 0;
+    if (!ensure_dyo_header(dyo, &num_records))
       return NULL;
 
     int record_index = 0;
@@ -171,10 +198,10 @@ void* link_dyos(FILE** dyo_files) {
     StringArray strings = {NULL, 0, 0};
     strarray_push(&strings, NULL);  // 1-based
 
-    for (;;) {
+    for (int j = 0; j < num_records; ++j) {
       unsigned int type;
       unsigned int size;
-      if (!read_dyo_record(*dyo, &record_index, buf, sizeof(buf), &type, &size))
+      if (!read_dyo_record(dyo, &record_index, buf, sizeof(buf), &type, &size))
         return false;
 
       if (type == kTypeString) {
@@ -195,16 +222,20 @@ void* link_dyos(FILE** dyo_files) {
         }
       }
     }
-  }
 
-  for (FILE** dyo = dyo_files; *dyo; ++dyo) {
-    rewind(*dyo);
+    dyostore_read_close(dyo);
   }
 
   // Run through all imports and data relocs and fix up the addresses.
   num_dyos = 0;
-  for (FILE** dyo = dyo_files; *dyo; ++dyo) {
-    if (!ensure_dyo_header(*dyo))
+  for (int i = 0; i < active_symbols->capacity; ++i) {
+    HashEntry* ent = &active_symbols->buckets[i];
+    if (!ent->key || ent->key == TOMBSTONE)
+      continue;
+    FILE* dyo = dyostore_read_open(ent->key);
+
+    int num_records = 0;
+    if (!ensure_dyo_header(dyo, &num_records))
       return NULL;
 
     int record_index = 0;
@@ -216,10 +247,10 @@ void* link_dyos(FILE** dyo_files) {
     char* current_data_pointer = NULL;
     char* current_data_end = NULL;
 
-    for (;;) {
+    for (int j = 0; j < num_records; ++j) {
       unsigned int type;
       unsigned int size;
-      if (!read_dyo_record(*dyo, &record_index, buf, sizeof(buf), &type, &size))
+      if (!read_dyo_record(dyo, &record_index, buf, sizeof(buf), &type, &size))
         return false;
 
       if (type == kTypeString) {
@@ -330,10 +361,8 @@ void* link_dyos(FILE** dyo_files) {
         }
       }
     }
-  }
 
-  for (FILE** dyo = dyo_files; *dyo; ++dyo) {
-    fclose(*dyo);
+    dyostore_read_close(dyo);
   }
 
   for (int i = 0; i < num_dyos; ++i) {

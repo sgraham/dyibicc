@@ -277,18 +277,17 @@ static void print_tokens(Token* tok) {
   fprintf(stdout, "\n");
 }
 
-void* compile_and_link(int argc, char** argv) {
+void* compile_and_link(int argc, char** argv, HashMap* active_symbols) {
   bumpcalloc_init();
   parse_args(argc, argv);
 
-  // TODO: Can't use a strarray because it'll get purged.
-  FILE* dyo_files[32] = {0};
-  int num_dyo_files = 0;
+  // bumpalloc is cleared after each input path, so this HashMap must globally
+  // allocate to have them remaining during link.
+  assert(active_symbols->global_alloc);
 
   for (int i = 0; i < input_paths.len; i++) {
     purge_and_reset_all(argc, argv);
     base_file = input_paths.data[i];
-    char* dyo_output_file = replace_extn(base_file, ".dyo");
 
     Token* tok = must_tokenize_file(base_file);
     tok = preprocess(tok);
@@ -303,15 +302,11 @@ void* compile_and_link(int argc, char** argv) {
 
     Obj* prog = parse(tok);
 
-    FILE* dyo_out = open_file(dyo_output_file);
-    codegen(prog, dyo_out);
-    fclose(dyo_out);
-
-    dyo_files[num_dyo_files++] = fopen(dyo_output_file, "rb");
+    codegen(prog);
   }
 
   if (opt_E)
     return 0;
 
-  return link_dyos(dyo_files);
+  return link_dyos(active_symbols);
 }

@@ -1,5 +1,9 @@
 #include "dyibicc.h"
 
+#if X64WIN
+#include <windows.h>
+#endif
+
 char* bumpstrndup(const char* s, size_t n) {
   size_t l = strnlen(s, n);
   char* d = bumpcalloc(1, l + 1);
@@ -137,4 +141,18 @@ char* format(char* fmt, ...) {
   vsprintf(buf, fmt, ap);
   va_end(ap);
   return bumpstrdup(buf);
+}
+
+char* get_full_path_to_file(char* filename) {
+#if X64WIN
+  char buf[_MAX_PATH];
+  DWORD ret = GetFullPathName(filename, sizeof(buf), buf, NULL);
+  if (ret == 0 || ret > sizeof(buf)) {
+    fprintf(stderr, "couldn't get full path name of '%s'\n", filename);
+    abort();
+  }
+  return bumpstrdup(buf);
+#else
+#error todo
+#endif
 }

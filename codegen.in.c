@@ -2173,6 +2173,18 @@ static void assign_lvar_offsets(Obj* prog) {
 
 #endif  // SysV
 
+static void update_pending_code_relocations(void) {
+  for (int i = 0; i < pending_code_pclabels.len; ++i) {
+    int file_loc = pending_code_pclabels.data[i].a;
+    int pclabel = pending_code_pclabels.data[i].b;
+    int offset = dasm_getpclabel(&dynasm, pclabel);
+    // printf("update at %d, label %d, offset %d\n", file_loc, pclabel, offset);
+    patch_dyo_initializer_code_relocation(dyo_file, file_loc, offset);
+  }
+
+  pending_code_pclabels = (IntIntArray){NULL, 0, 0};
+}
+
 static void emit_data(Obj* prog) {
   for (Obj* var = prog; var; var = var->next) {
     // printf("var->name %s %d %d %d %d\n", var->name, var->is_function, var->is_definition,
@@ -2184,6 +2196,9 @@ static void emit_data(Obj* prog) {
       continue;
     }
 
+    dyo_file = dyostore_write_begin(get_full_path_to_file(base_file), var->name, var->is_static);
+    write_dyo_begin(dyo_file);
+
     int align =
         (var->ty->kind == TY_ARRAY && var->ty->size >= 16) ? MAX(16, var->align) : var->align;
 
@@ -2192,6 +2207,7 @@ static void emit_data(Obj* prog) {
     // common, apparently.
     // if (false && var->is_tentative && !var->is_static) {
     // println("  common %s %d:%d", var->name, var->ty->size, align);
+    // XXX need dyostore_finalize
     // continue;
     //}
 
@@ -2234,11 +2250,19 @@ static void emit_data(Obj* prog) {
       }
 
       write_dyo_initializer_end(dyo_file);
+
+      update_pending_code_relocations();
+      write_dyo_finish(dyo_file);
+      dyostore_write_finalize();
       continue;
     }
 
     // .bss or .tbss
     write_dyo_initializer_end(dyo_file);
+
+    update_pending_code_relocations();
+    write_dyo_finish(dyo_file);
+    dyostore_write_finalize();
   }
 }
 
@@ -2278,6 +2302,38 @@ static void store_gp(int r, int offset, int sz) {
   }
 }
 
+static void write_imports(void) {
+  for (int i = 0; i < import_fixups.len; ++i) {
+    int offset = dasm_getpclabel(&dynasm, import_fixups.data[i].i);
+    // +2 is a hack taking advantage of the fact that import fixups are always
+    // of the form `mov64 rax, <ADDR>` which is encoded as:
+    //   48 B8 <8 byte address>
+    // so skip over the mov64 prefix and point directly at the address to be
+    // slapped into place.
+    offset += 2;
+
+    write_dyo_import(dyo_file, import_fixups.data[i].str, offset);
+  }
+
+  import_fixups = (StringIntArray){NULL, 0, 0};
+}
+
+static void write_data_fixups(void) {
+  for (int i = 0; i < data_fixups.len; ++i) {
+    int offset = dasm_getpclabel(&dynasm, data_fixups.data[i].i);
+    // +2 is a hack taking advantage of the fact that import fixups are always
+    // of the form `mov64 rax, <ADDR>` which is encoded as:
+    //   48 B8 <8 byte address>
+    // so skip over the mov64 prefix and point directly at the address to be
+    // slapped into place.
+    offset += 2;
+
+    write_dyo_code_reference_to_global(dyo_file, data_fixups.data[i].str, offset);
+  }
+
+  data_fixups = (StringIntArray){NULL, 0, 0};
+}
+
 static void emit_text(Obj* prog) {
   // Preallocate the dasm labels so they can be used in functions out of order.
   for (Obj* fn = prog; fn; fn = fn->next) {
@@ -2286,11 +2342,15 @@ static void emit_text(Obj* prog) {
 
     fn->dasm_return_label = codegen_pclabel();
     fn->dasm_entry_label = codegen_pclabel();
+    fn->dasm_end_label = codegen_pclabel();
   }
 
   for (Obj* fn = prog; fn; fn = fn->next) {
     if (!fn->is_function || !fn->is_definition || !fn->is_live)
       continue;
+
+    dyo_file = dyostore_write_begin(get_full_path_to_file(base_file), fn->name, fn->is_static);
+    write_dyo_begin(dyo_file);
 
     ///|=>fn->dasm_entry_label:
 
@@ -2425,60 +2485,20 @@ static void emit_text(Obj* prog) {
       dasm_label_main_entry = fn->dasm_entry_label;
     }
 
+    // TODO: user-named entry point override
+
     // Epilogue
     ///|=>fn->dasm_return_label:
     ///| mov rsp, rbp
     ///| pop rbp
     ///| ret
-  }
-}
 
-static void write_text_exports(Obj* prog) {
-  for (Obj* fn = prog; fn; fn = fn->next) {
-    if (!fn->is_function || !fn->is_definition || !fn->is_live)
-      continue;
+    ///|=>fn->dasm_end_label:
 
-    if (!fn->is_static) {
-      write_dyo_function_export(dyo_file, fn->name, dasm_getpclabel(&dynasm, fn->dasm_entry_label));
-    }
-  }
-}
-
-static void write_imports(void) {
-  for (int i = 0; i < import_fixups.len; ++i) {
-    int offset = dasm_getpclabel(&dynasm, import_fixups.data[i].i);
-    // +2 is a hack taking advantage of the fact that import fixups are always
-    // of the form `mov64 rax, <ADDR>` which is encoded as:
-    //   48 B8 <8 byte address>
-    // so skip over the mov64 prefix and point directly at the address to be
-    // slapped into place.
-    offset += 2;
-
-    write_dyo_import(dyo_file, import_fixups.data[i].str, offset);
-  }
-}
-
-static void write_data_fixups(void) {
-  for (int i = 0; i < data_fixups.len; ++i) {
-    int offset = dasm_getpclabel(&dynasm, data_fixups.data[i].i);
-    // +2 is a hack taking advantage of the fact that import fixups are always
-    // of the form `mov64 rax, <ADDR>` which is encoded as:
-    //   48 B8 <8 byte address>
-    // so skip over the mov64 prefix and point directly at the address to be
-    // slapped into place.
-    offset += 2;
-
-    write_dyo_code_reference_to_global(dyo_file, data_fixups.data[i].str, offset);
-  }
-}
-
-static void update_pending_code_relocations(void) {
-  for (int i = 0; i < pending_code_pclabels.len; ++i) {
-    int file_loc = pending_code_pclabels.data[i].a;
-    int pclabel = pending_code_pclabels.data[i].b;
-    int offset = dasm_getpclabel(&dynasm, pclabel);
-    // printf("update at %d, label %d, offset %d\n", file_loc, pclabel, offset);
-    patch_dyo_initializer_code_relocation(dyo_file, file_loc, offset);
+    write_dyo_function_export(dyo_file, fn->name, dasm_getpclabel(&dynasm, fn->dasm_entry_label));
+    write_imports();
+    write_dyo_finish(dyo_file);
+    dyostore_write_finalize();
   }
 }
 
@@ -2487,10 +2507,7 @@ void codegen_init(void) {
   dasm_growpc(&dynasm, 1 << 16);  // Arbitrary number to avoid lots of reallocs of that array.
 }
 
-void codegen(Obj* prog, FILE* dyo_out) {
-  dyo_file = dyo_out;
-  write_dyo_begin(dyo_file);
-
+void codegen(Obj* prog) {
   void* globals[dynasm_globals_MAX + 1];
   dasm_setupglobal(&dynasm, globals, dynasm_globals_MAX + 1);
 
@@ -2502,11 +2519,6 @@ void codegen(Obj* prog, FILE* dyo_out) {
 
   size_t code_size;
   dasm_link(&dynasm, &code_size);
-
-  write_text_exports(prog);
-  write_imports();
-  write_data_fixups();
-  update_pending_code_relocations();
 
   void* code_buf = malloc(code_size);
 
@@ -2540,4 +2552,5 @@ void codegen_reset(void) {
   import_fixups = (StringIntArray){NULL, 0, 0};
   data_fixups = (StringIntArray){NULL, 0, 0};
   pending_code_pclabels = (IntIntArray){NULL, 0, 0};
+  dyo_file = NULL;
 }

@@ -1,7 +1,10 @@
 #include "dyibicc.h"
 
 int main(int argc, char** argv) {
-  void* entry_point = compile_and_link(argc, argv);
+  HashMap active_symbols = {NULL, 0, 0, /*global_alloc=*/true};
+  dyostore_init_new_generation(&active_symbols);
+
+  void* entry_point = compile_and_link(argc, argv, &active_symbols);
   if (entry_point) {
     int (*p)() = (int (*)())entry_point;
     int result = p();
