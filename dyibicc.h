@@ -613,12 +613,28 @@ extern char* base_file;
 extern char* entry_point_override;
 extern DyibiccOutputFn output_fn;
 
-void codegen_reset(void);
-void link_reset(void);
-void parse_reset(void);
 bool compile_and_link(int argc, char** argv, LinkInfo* link_info);
 
+
+//
+// Entire compiler state in one struct for clearing, esp. after longjmp.
+//
+
 typedef struct CondIncl CondIncl;
+
+typedef struct Scope Scope;
+// Represents a block scope.
+struct Scope {
+  Scope* next;
+
+  // C has two block scopes; one is for variables/typedefs and
+  // the other is for struct/union/enum tags.
+  HashMap vars;
+  HashMap tags;
+};
+
+typedef struct dasm_State dasm_State;
+
 typedef struct CompilerState {
   // tokenize.c
   File* tokenize__current_file;  // Input file
@@ -634,6 +650,37 @@ typedef struct CompilerState {
   HashMap preprocess__include_path_cache;
   HashMap preprocess__include_guards;
   int preprocess__counter_macro_i;
+
+  // parse.c
+  Obj* parse__locals;   // All local variable instances created during parsing are accumulated to
+                        // this list.
+  Obj* parse__globals;  // Likewise, global variables are accumulated to this list.
+  Scope* parse__scope;  // NOTE: needs to be reinitialized after clear to point at empty_scope.
+  Scope parse__empty_scope;
+  Obj* parse__current_fn;  // Points to the function object the parser is currently parsing.
+  Node* parse__gotos;      // Lists of all goto statements and labels in the curent function.
+  Node* parse__labels;
+  int parse__brk_pc_label;  // Current "goto" and "continue" jump targets.
+  int parse__cont_pc_label;
+  Node* parse__current_switch;  // Points to a node representing a switch if we are parsing a switch
+                                // statement. Otherwise, NULL.
+  Obj* parse__builtin_alloca;
+  int parse__unique_name_id;
+  HashMap parse__typename_map;
+
+  // codegen.in.c
+  int codegen__depth;
+  FILE* codegen__dyo_file;
+  dasm_State* codegen__dynasm;
+  Obj* codegen__current_fn;
+  int codegen__numlabels;
+  int codegen__dasm_label_main_entry;
+  StringIntArray codegen__import_fixups;
+  StringIntArray codegen__data_fixups;
+  IntIntArray codegen__pending_code_pclabels;
+
+  // link.c
+  HashMap link__runtime_function_map;
 } CompilerState;
 
 extern CompilerState compiler_state;

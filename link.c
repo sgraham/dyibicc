@@ -7,22 +7,23 @@
 #include <unistd.h>
 #endif
 
+#define C(x) compiler_state.link__##x
+
 #include "khash.h"
 
 KHASH_SET_INIT_INT64(voidp)
 
 static DyibiccFunctionLookupFn user_runtime_function_callback = NULL;
 
-#if X64WIN
-static HashMap runtime_function_map = {NULL, 0, 0, AL_Link};
-
 void dyibicc_set_user_runtime_function_callback(DyibiccFunctionLookupFn f) {
   user_runtime_function_callback = f;
 }
 
 static void* get_standard_runtime_function(char* name) {
-  if (runtime_function_map.capacity == 0) {
-#define X(func) hashmap_put(&runtime_function_map, #func, (void*)&func)
+  if (C(runtime_function_map).capacity == 0) {
+    C(runtime_function_map).alloc_lifetime = AL_Link;
+#define X(func) hashmap_put(&C(runtime_function_map), #func, (void*)&func)
+#if X64WIN
     X(CloseHandle);
     X(CreateThread);
     X(WaitForSingleObject);
@@ -45,6 +46,7 @@ static void* get_standard_runtime_function(char* name) {
     X(__stdio_common_vswprintf_p);
     X(__stdio_common_vswprintf_s);
     X(__stdio_common_vswscanf);
+#endif
     X(exit);
     X(memcmp);
     X(memcpy);
@@ -57,9 +59,8 @@ static void* get_standard_runtime_function(char* name) {
 #undef X
   }
 
-  return hashmap_get(&runtime_function_map, name);
+  return hashmap_get(&C(runtime_function_map), name);
 }
-#endif
 
 static void* symbol_lookup(char* name) {
   if (user_runtime_function_callback) {
@@ -69,11 +70,11 @@ static void* symbol_lookup(char* name) {
     }
   }
 
-#if X64WIN
   void* f = get_standard_runtime_function(name);
   if (f) {
     return f;
   }
+#if X64WIN
   return (void*)GetProcAddress(GetModuleHandle(NULL), name);
 #else
   return dlsym(NULL, name);
@@ -453,10 +454,4 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
 fail:
   kh_destroy(voidp, created_this_update);
   return false;
-}
-
-void link_reset(void) {
-#if X64WIN
-  runtime_function_map = (HashMap){NULL, 0, 0, AL_Link};
-#endif
 }

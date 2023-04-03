@@ -251,16 +251,6 @@ static void parse_args(int argc, char** argv) {
     error("no input files");
 }
 
-// This attempts to blast all static variables back to zero-initialized and
-// clears all memory that was calloc'd in a previous iteration of the compiler.
-// All previously allocated pointers become invalidated. Command line arguments
-// are reparsed because of this, and will be identical to the last time.
-static void purge_all(void) {
-  codegen_reset();
-  link_reset();
-  parse_reset();
-}
-
 static Token* must_tokenize_file(char* path) {
   Token* tok = tokenize_file(path);
   if (!tok)
@@ -311,14 +301,13 @@ bool dyibicc_compile_and_link(int argc, char** argv, DyibiccLinkInfo* link_info)
   parse_args(argc, argv);
   add_default_include_paths(argv[0]);
 
-  // TODO: Can't use a strarray because it'll get purged.
+  // TODO: Make a FILEArray and use AL_Link here.
   FILE* dyo_files[MAX_DYOS] = {0};
   int num_dyo_files = 0;
 
   for (int i = 0; i < input_paths.len; i++) {
     alloc_init(AL_Compile);
 
-    purge_all();
     init_macros();
     base_file = input_paths.data[i];
     char* dyo_output_file = replace_extn(base_file, ".dyo");
@@ -343,6 +332,7 @@ bool dyibicc_compile_and_link(int argc, char** argv, DyibiccLinkInfo* link_info)
     dyo_files[num_dyo_files++] = fopen(dyo_output_file, "rb");
 
     alloc_reset(AL_Compile);
+
     memset(&compiler_state, 0, sizeof(compiler_state));
   }
 
@@ -353,7 +343,6 @@ bool dyibicc_compile_and_link(int argc, char** argv, DyibiccLinkInfo* link_info)
 
   alloc_reset(AL_Link);
 
-  purge_all();
   return result;
 }
 
