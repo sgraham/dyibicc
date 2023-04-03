@@ -259,8 +259,6 @@ static void purge_all(void) {
   codegen_reset();
   link_reset();
   parse_reset();
-  preprocess_reset();
-  tokenize_reset();
 }
 
 static Token* must_tokenize_file(char* path) {
@@ -345,6 +343,7 @@ bool dyibicc_compile_and_link(int argc, char** argv, DyibiccLinkInfo* link_info)
     dyo_files[num_dyo_files++] = fopen(dyo_output_file, "rb");
 
     alloc_reset(AL_Compile);
+    memset(&compiler_state, 0, sizeof(compiler_state));
   }
 
   if (opt_E)

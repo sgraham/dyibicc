@@ -800,10 +800,3 @@ Token* tokenize_file(char* path) {
   File* file = new_file(path, p);
   return tokenize(file);
 }
-
-void tokenize_reset(void) {
-  C(current_file) = NULL;
-  C(at_bol) = false;
-  C(has_space) = false;
-  C(keyword_map) = (HashMap){NULL, 0, 0};
-}

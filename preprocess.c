@@ -24,6 +24,8 @@
 
 #include "dyibicc.h"
 
+#define C(x) compiler_state.preprocess__##x
+
 typedef struct MacroParam MacroParam;
 struct MacroParam {
   MacroParam* next;
@@ -51,7 +53,6 @@ struct Macro {
 };
 
 // `#if` can be nested, so we use a stack to manage nested `#if`s.
-typedef struct CondIncl CondIncl;
 struct CondIncl {
   CondIncl* next;
   enum { IN_THEN, IN_ELIF, IN_ELSE } ctx;
@@ -64,14 +65,6 @@ struct Hideset {
   Hideset* next;
   char* name;
 };
-
-static HashMap macros;
-static CondIncl* cond_incl;
-static HashMap pragma_once;
-static int include_next_idx;
-static HashMap include_path_cache;
-static HashMap include_guards;
-static int counter_macro_i = 0;
 
 static Token* preprocess2(Token* tok);
 static Macro* find_macro(Token* tok);
@@ -309,18 +302,18 @@ static long eval_const_expr(Token** rest, Token* tok) {
 
 static CondIncl* push_cond_incl(Token* tok, bool included) {
   CondIncl* ci = bumpcalloc(1, sizeof(CondIncl), AL_Compile);
-  ci->next = cond_incl;
+  ci->next = C(cond_incl);
   ci->ctx = IN_THEN;
   ci->tok = tok;
   ci->included = included;
-  cond_incl = ci;
+  C(cond_incl) = ci;
   return ci;
 }
 
 static Macro* find_macro(Token* tok) {
   if (tok->kind != TK_IDENT)
     return NULL;
-  return hashmap_get2(&macros, tok->loc, tok->len);
+  return hashmap_get2(&C(macros), tok->loc, tok->len);
 }
 
 static Macro* add_macro(char* name, bool is_objlike, Token* body) {
@@ -328,7 +321,7 @@ static Macro* add_macro(char* name, bool is_objlike, Token* body) {
   m->name = name;
   m->is_objlike = is_objlike;
   m->body = body;
-  hashmap_put(&macros, name, m);
+  hashmap_put(&C(macros), name, m);
   return m;
 }
 
@@ -691,7 +684,7 @@ char* search_include_paths(char* filename) {
   if (filename[0] == '/')
     return filename;
 
-  char* cached = hashmap_get(&include_path_cache, filename);
+  char* cached = hashmap_get(&C(include_path_cache), filename);
   if (cached)
     return cached;
 
@@ -700,16 +693,16 @@ char* search_include_paths(char* filename) {
     char* path = format(AL_Compile, "%s/%s", include_paths.data[i], filename);
     if (!file_exists(path))
       continue;
-    hashmap_put(&include_path_cache, filename, path);
-    include_next_idx = i + 1;
+    hashmap_put(&C(include_path_cache), filename, path);
+    C(include_next_idx) = i + 1;
     return path;
   }
   return NULL;
 }
 
 static char* search_include_next(char* filename) {
-  for (; include_next_idx < include_paths.len; include_next_idx++) {
-    char* path = format(AL_Compile, "%s/%s", include_paths.data[include_next_idx], filename);
+  for (; C(include_next_idx) < include_paths.len; C(include_next_idx)++) {
+    char* path = format(AL_Compile, "%s/%s", include_paths.data[C(include_next_idx)], filename);
     if (file_exists(path))
       return path;
   }
@@ -798,14 +791,14 @@ static char* detect_include_guard(Token* tok) {
 
 static Token* include_file(Token* tok, char* path, Token* filename_tok) {
   // Check for "#pragma once"
-  if (hashmap_get(&pragma_once, path))
+  if (hashmap_get(&C(pragma_once), path))
     return tok;
 
   // If we read the same file before, and if the file was guarded
   // by the usual #ifndef ... #endif pattern, we may be able to
   // skip the file without opening it.
-  char* guard_name = hashmap_get(&include_guards, path);
-  if (guard_name && hashmap_get(&macros, guard_name))
+  char* guard_name = hashmap_get(&C(include_guards), path);
+  if (guard_name && hashmap_get(&C(macros), guard_name))
     return tok;
 
   Token* tok2 = tokenize_file(path);
@@ -814,7 +807,7 @@ static Token* include_file(Token* tok, char* path, Token* filename_tok) {
 
   guard_name = detect_include_guard(tok2);
   if (guard_name)
-    hashmap_put(&include_guards, path, guard_name);
+    hashmap_put(&C(include_guards), path, guard_name);
 
   return append(tok2, tok);
 }
@@ -927,32 +920,32 @@ static Token* preprocess2(Token* tok) {
     }
 
     if (equal(tok, "elif")) {
-      if (!cond_incl || cond_incl->ctx == IN_ELSE)
+      if (!C(cond_incl) || C(cond_incl)->ctx == IN_ELSE)
         error_tok(start, "stray #elif");
-      cond_incl->ctx = IN_ELIF;
+      C(cond_incl)->ctx = IN_ELIF;
 
-      if (!cond_incl->included && eval_const_expr(&tok, tok))
-        cond_incl->included = true;
+      if (!C(cond_incl)->included && eval_const_expr(&tok, tok))
+        C(cond_incl)->included = true;
       else
         tok = skip_cond_incl(tok);
       continue;
     }
 
     if (equal(tok, "else")) {
-      if (!cond_incl || cond_incl->ctx == IN_ELSE)
+      if (!C(cond_incl) || C(cond_incl)->ctx == IN_ELSE)
         error_tok(start, "stray #else");
-      cond_incl->ctx = IN_ELSE;
+      C(cond_incl)->ctx = IN_ELSE;
       tok = skip_line(tok->next);
 
-      if (cond_incl->included)
+      if (C(cond_incl)->included)
         tok = skip_cond_incl(tok);
       continue;
     }
 
     if (equal(tok, "endif")) {
-      if (!cond_incl)
+      if (!C(cond_incl))
         error_tok(start, "stray #endif");
-      cond_incl = cond_incl->next;
+      C(cond_incl) = C(cond_incl)->next;
       tok = skip_line(tok->next);
       continue;
     }
@@ -968,7 +961,7 @@ static Token* preprocess2(Token* tok) {
     }
 
     if (equal(tok, "pragma") && equal(tok->next, "once")) {
-      hashmap_put(&pragma_once, tok->file->name, (void*)1);
+      hashmap_put(&C(pragma_once), tok->file->name, (void*)1);
       tok = skip_line(tok->next->next);
       continue;
     }
@@ -1000,7 +993,7 @@ void define_macro(char* name, char* buf) {
 }
 
 void undef_macro(char* name) {
-  hashmap_delete(&macros, name);
+  hashmap_delete(&C(macros), name);
 }
 
 void define_function_macro(char* buf) {
@@ -1030,7 +1023,7 @@ static Token* line_macro(Token* tmpl) {
 
 // __COUNTER__ is expanded to serial values starting from 0.
 static Token* counter_macro(Token* tmpl) {
-  return new_num_token(counter_macro_i++, tmpl);
+  return new_num_token(C(counter_macro_i)++, tmpl);
 }
 
 // __TIMESTAMP__ is expanded to a string describing the last
@@ -1219,22 +1212,12 @@ static void join_adjacent_string_literals(Token* tok) {
 // Entry point function of the preprocessor.
 Token* preprocess(Token* tok) {
   tok = preprocess2(tok);
-  if (cond_incl)
-    error_tok(cond_incl->tok, "unterminated conditional directive");
+  if (C(cond_incl))
+    error_tok(C(cond_incl)->tok, "unterminated conditional directive");
   convert_pp_tokens(tok);
   join_adjacent_string_literals(tok);
 
   for (Token* t = tok; t; t = t->next)
     t->line_no += t->line_delta;
   return tok;
-}
-
-void preprocess_reset(void) {
-  macros = (HashMap){NULL, 0, 0};
-  cond_incl = NULL;
-  pragma_once = (HashMap){NULL, 0, 0};
-  include_next_idx = 0;
-  include_path_cache = (HashMap){NULL, 0, 0};
-  include_guards = (HashMap){NULL, 0, 0};
-  counter_macro_i = 0;
 }

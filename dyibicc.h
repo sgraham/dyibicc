@@ -616,16 +616,24 @@ extern DyibiccOutputFn output_fn;
 void codegen_reset(void);
 void link_reset(void);
 void parse_reset(void);
-void preprocess_reset(void);
-void tokenize_reset(void);
 bool compile_and_link(int argc, char** argv, LinkInfo* link_info);
 
+typedef struct CondIncl CondIncl;
 typedef struct CompilerState {
   // tokenize.c
   File* tokenize__current_file;  // Input file
   bool tokenize__at_bol;         // True if the current position is at the beginning of a line
   bool tokenize__has_space;      // True if the current position follows a space character
   HashMap tokenize__keyword_map;
+
+  // preprocess.c
+  HashMap preprocess__macros;
+  CondIncl* preprocess__cond_incl;
+  HashMap preprocess__pragma_once;
+  int preprocess__include_next_idx;
+  HashMap preprocess__include_path_cache;
+  HashMap preprocess__include_guards;
+  int preprocess__counter_macro_i;
 } CompilerState;
 
 extern CompilerState compiler_state;
