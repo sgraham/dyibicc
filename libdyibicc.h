@@ -18,3 +18,5 @@ typedef struct DyibiccLinkInfo {
 } DyibiccLinkInfo;
 
 bool dyibicc_compile_and_link(int argc, char** argv, DyibiccLinkInfo* link_info);
+
+void dyibicc_free_link_info_resources(DyibiccLinkInfo* link_info);

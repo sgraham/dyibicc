@@ -155,6 +155,8 @@
 //
 #include "dyibicc.h"
 
+CompilerState compiler_state;
+
 StringArray include_paths;
 
 char* base_file;
@@ -173,22 +175,27 @@ static bool opt_E = false;
 
 static void add_default_include_paths(char* argv0) {
 #if X64WIN
-  strarray_push(&include_paths, format("%s/include/win", dirname(bumpstrdup(argv0))));
-  strarray_push(&include_paths, format("%s/include/all", dirname(bumpstrdup(argv0))));
+  strarray_push(&include_paths,
+                format(AL_Link, "%s/include/win", dirname(bumpstrdup(argv0, AL_Link))), AL_Link);
+  strarray_push(&include_paths,
+                format(AL_Link, "%s/include/all", dirname(bumpstrdup(argv0, AL_Link))), AL_Link);
 
   strarray_push(&include_paths,
-                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.19041.0\\ucrt");
+                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.19041.0\\ucrt", AL_Link);
   strarray_push(&include_paths,
                 "C:\\Program Files\\Microsoft Visual "
-                "Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.34.31933\\include");
+                "Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.34.31933\\include",
+                AL_Link);
 #else
-  strarray_push(&include_paths, format("%s/include/linux", dirname(bumpstrdup(argv0))));
-  strarray_push(&include_paths, format("%s/include/all", dirname(bumpstrdup(argv0))));
+  strarray_push(&include_paths,
+                format(AL_Link, "%s/include/linux", dirname(bumpstrdup(argv0, AL_Link))), AL_Link);
+  strarray_push(&include_paths,
+                format(AL_Link, "%s/include/all", dirname(bumpstrdup(argv0, AL_Link))), AL_Link);
 
   // Add standard include paths.
-  strarray_push(&include_paths, "/usr/local/include");
-  strarray_push(&include_paths, "/usr/include/x86_64-linux-gnu");
-  strarray_push(&include_paths, "/usr/include");
+  strarray_push(&include_paths, "/usr/local/include", AL_Link);
+  strarray_push(&include_paths, "/usr/include/x86_64-linux-gnu", AL_Link);
+  strarray_push(&include_paths, "/usr/include", AL_Link);
 #endif
 }
 
@@ -217,7 +224,7 @@ static void parse_args(int argc, char** argv) {
 
   for (int i = 1; i < argc; i++) {
     if (!strncmp(argv[i], "-I", 2)) {
-      strarray_push(&include_paths, argv[i] + 2);
+      strarray_push(&include_paths, argv[i] + 2, AL_Link);
       continue;
     }
 
@@ -237,7 +244,7 @@ static void parse_args(int argc, char** argv) {
     if (argv[i][0] == '-' && argv[i][1] != '\0')
       error("unknown argument: %s", argv[i]);
 
-    strarray_push(&input_paths, argv[i]);
+    strarray_push(&input_paths, argv[i], AL_Link);
   }
 
   if (input_paths.len == 0)
@@ -249,25 +256,11 @@ static void parse_args(int argc, char** argv) {
 // All previously allocated pointers become invalidated. Command line arguments
 // are reparsed because of this, and will be identical to the last time.
 static void purge_all(void) {
-  bumpcalloc_reset();
   codegen_reset();
   link_reset();
   parse_reset();
   preprocess_reset();
   tokenize_reset();
-  input_paths = (StringArray){NULL, 0, 0};
-  include_paths = (StringArray){NULL, 0, 0};
-  opt_E = false;
-  base_file = NULL;
-  entry_point_override = NULL;
-}
-
-static void reinit_all(int argc, char* argv[]) {
-  bumpcalloc_init();
-  init_macros();
-
-  parse_args(argc, argv);
-  add_default_include_paths(argv[0]);
 }
 
 static Token* must_tokenize_file(char* path) {
@@ -289,11 +282,11 @@ static FILE* open_file(char* path) {
 
 // Replace file extension
 static char* replace_extn(char* tmpl, char* extn) {
-  char* filename = basename(bumpstrdup(tmpl));
+  char* filename = basename(bumpstrdup(tmpl, AL_Compile));
   char* dot = strrchr(filename, '.');
   if (dot)
     *dot = '\0';
-  return format("%s%s", filename, extn);
+  return format(AL_Compile, "%s%s", filename, extn);
 }
 
 static void print_tokens(Token* tok) {
@@ -310,21 +303,25 @@ static void print_tokens(Token* tok) {
 }
 
 bool dyibicc_compile_and_link(int argc, char** argv, DyibiccLinkInfo* link_info) {
+  alloc_init(AL_Link);
+
   bool result = false;
 
   if (!output_fn)
     output_fn = default_output_fn;
 
-  bumpcalloc_init();
   parse_args(argc, argv);
+  add_default_include_paths(argv[0]);
 
   // TODO: Can't use a strarray because it'll get purged.
   FILE* dyo_files[MAX_DYOS] = {0};
   int num_dyo_files = 0;
 
   for (int i = 0; i < input_paths.len; i++) {
+    alloc_init(AL_Compile);
+
     purge_all();
-    reinit_all(argc, argv);
+    init_macros();
     base_file = input_paths.data[i];
     char* dyo_output_file = replace_extn(base_file, ".dyo");
 
@@ -346,12 +343,16 @@ bool dyibicc_compile_and_link(int argc, char** argv, DyibiccLinkInfo* link_info)
     fclose(dyo_out);
 
     dyo_files[num_dyo_files++] = fopen(dyo_output_file, "rb");
+
+    alloc_reset(AL_Compile);
   }
 
   if (opt_E)
     return 0;
 
   result = link_dyos(dyo_files, (LinkInfo*)link_info);
+
+  alloc_reset(AL_Link);
 
   purge_all();
   return result;

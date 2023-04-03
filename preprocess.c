@@ -92,7 +92,7 @@ static Token* skip_line(Token* tok) {
 }
 
 static Token* copy_token(Token* tok) {
-  Token* t = bumpcalloc(1, sizeof(Token));
+  Token* t = bumpcalloc(1, sizeof(Token), AL_Compile);
   *t = *tok;
   t->next = NULL;
   return t;
@@ -106,7 +106,7 @@ static Token* new_eof(Token* tok) {
 }
 
 static Hideset* new_hideset(char* name) {
-  Hideset* hs = bumpcalloc(1, sizeof(Hideset));
+  Hideset* hs = bumpcalloc(1, sizeof(Hideset), AL_Compile);
   hs->name = name;
   return hs;
 }
@@ -205,7 +205,7 @@ static char* quote_string(char* str) {
     bufsize++;
   }
 
-  char* buf = bumpcalloc(1, bufsize);
+  char* buf = bumpcalloc(1, bufsize, AL_Compile);
   char* p = buf;
   *p++ = '"';
   for (int i = 0; str[i]; i++) {
@@ -239,7 +239,7 @@ static Token* copy_line(Token** rest, Token* tok) {
 }
 
 static Token* new_num_token(int val, Token* tmpl) {
-  char* buf = format("%d\n", val);
+  char* buf = format(AL_Compile, "%d\n", val);
   return tokenize(new_file(tmpl->file->name, buf));
 }
 
@@ -308,7 +308,7 @@ static long eval_const_expr(Token** rest, Token* tok) {
 }
 
 static CondIncl* push_cond_incl(Token* tok, bool included) {
-  CondIncl* ci = bumpcalloc(1, sizeof(CondIncl));
+  CondIncl* ci = bumpcalloc(1, sizeof(CondIncl), AL_Compile);
   ci->next = cond_incl;
   ci->ctx = IN_THEN;
   ci->tok = tok;
@@ -324,7 +324,7 @@ static Macro* find_macro(Token* tok) {
 }
 
 static Macro* add_macro(char* name, bool is_objlike, Token* body) {
-  Macro* m = bumpcalloc(1, sizeof(Macro));
+  Macro* m = bumpcalloc(1, sizeof(Macro), AL_Compile);
   m->name = name;
   m->is_objlike = is_objlike;
   m->body = body;
@@ -350,13 +350,13 @@ static MacroParam* read_macro_params(Token** rest, Token* tok, char** va_args_na
       error_tok(tok, "expected an identifier");
 
     if (equal(tok->next, "...")) {
-      *va_args_name = bumpstrndup(tok->loc, tok->len);
+      *va_args_name = bumpstrndup(tok->loc, tok->len, AL_Compile);
       *rest = skip(tok->next->next, ")");
       return head.next;
     }
 
-    MacroParam* m = bumpcalloc(1, sizeof(MacroParam));
-    m->name = bumpstrndup(tok->loc, tok->len);
+    MacroParam* m = bumpcalloc(1, sizeof(MacroParam), AL_Compile);
+    m->name = bumpstrndup(tok->loc, tok->len, AL_Compile);
     cur = cur->next = m;
     tok = tok->next;
   }
@@ -368,7 +368,7 @@ static MacroParam* read_macro_params(Token** rest, Token* tok, char** va_args_na
 static void read_macro_definition(Token** rest, Token* tok) {
   if (tok->kind != TK_IDENT)
     error_tok(tok, "macro name must be an identifier");
-  char* name = bumpstrndup(tok->loc, tok->len);
+  char* name = bumpstrndup(tok->loc, tok->len, AL_Compile);
   tok = tok->next;
 
   if (!tok->has_space && equal(tok, "(")) {
@@ -410,7 +410,7 @@ static MacroArg* read_macro_arg_one(Token** rest, Token* tok, bool read_rest) {
 
   cur->next = new_eof(tok);
 
-  MacroArg* arg = bumpcalloc(1, sizeof(MacroArg));
+  MacroArg* arg = bumpcalloc(1, sizeof(MacroArg), AL_Compile);
   arg->tok = head.next;
   *rest = tok;
   return arg;
@@ -434,7 +434,7 @@ static MacroArg* read_macro_args(Token** rest, Token* tok, MacroParam* params, c
   if (va_args_name) {
     MacroArg* arg;
     if (equal(tok, ")")) {
-      arg = bumpcalloc(1, sizeof(MacroArg));
+      arg = bumpcalloc(1, sizeof(MacroArg), AL_Compile);
       arg->tok = new_eof(tok);
     } else {
       if (pp != params)
@@ -471,7 +471,7 @@ static char* join_tokens(Token* tok, Token* end) {
     len += t->len;
   }
 
-  char* buf = bumpcalloc(1, len);
+  char* buf = bumpcalloc(1, len, AL_Compile);
 
   // Copy token texts.
   int pos = 0;
@@ -498,7 +498,7 @@ static Token* stringize(Token* hash, Token* arg) {
 // Concatenate two tokens to create a new token.
 static Token* paste(Token* lhs, Token* rhs) {
   // Paste the two tokens.
-  char* buf = format("%.*s%.*s", lhs->len, lhs->loc, rhs->len, rhs->loc);
+  char* buf = format(AL_Compile, "%.*s%.*s", lhs->len, lhs->loc, rhs->len, rhs->loc);
 
   // Tokenize the resulting string.
   Token* tok = tokenize(new_file(lhs->file->name, buf));
@@ -697,7 +697,7 @@ char* search_include_paths(char* filename) {
 
   // Search a file from the include paths.
   for (int i = 0; i < include_paths.len; i++) {
-    char* path = format("%s/%s", include_paths.data[i], filename);
+    char* path = format(AL_Compile, "%s/%s", include_paths.data[i], filename);
     if (!file_exists(path))
       continue;
     hashmap_put(&include_path_cache, filename, path);
@@ -709,7 +709,7 @@ char* search_include_paths(char* filename) {
 
 static char* search_include_next(char* filename) {
   for (; include_next_idx < include_paths.len; include_next_idx++) {
-    char* path = format("%s/%s", include_paths.data[include_next_idx], filename);
+    char* path = format(AL_Compile, "%s/%s", include_paths.data[include_next_idx], filename);
     if (file_exists(path))
       return path;
   }
@@ -727,7 +727,7 @@ static char* read_include_filename(Token** rest, Token* tok, bool* is_dquote) {
     // So we don't want to use token->str.
     *is_dquote = true;
     *rest = skip_line(tok->next);
-    return bumpstrndup(tok->loc + 1, tok->len - 2);
+    return bumpstrndup(tok->loc + 1, tok->len - 2, AL_Compile);
   }
 
   // Pattern 2: #include <foo.h>
@@ -772,7 +772,7 @@ static char* detect_include_guard(Token* tok) {
   if (tok->kind != TK_IDENT)
     return NULL;
 
-  char* macro = bumpstrndup(tok->loc, tok->len);
+  char* macro = bumpstrndup(tok->loc, tok->len, AL_Compile);
   tok = tok->next;
 
   if (!is_hash(tok) || !equal(tok->next, "define") || !equal(tok->next->next, macro))
@@ -865,7 +865,8 @@ static Token* preprocess2(Token* tok) {
       char* filename = read_include_filename(&tok, tok->next, &is_dquote);
 
       if (filename[0] != '/' && is_dquote) {
-        char* path = format("%s/%s", dirname(bumpstrdup(start->file->name)), filename);
+        char* path = format(AL_Compile, "%s/%s", dirname(bumpstrdup(start->file->name, AL_Compile)),
+                            filename);
         if (file_exists(path)) {
           tok = include_file(tok, path, start->next->next);
           continue;
@@ -894,7 +895,7 @@ static Token* preprocess2(Token* tok) {
       tok = tok->next;
       if (tok->kind != TK_IDENT)
         error_tok(tok, "macro name must be an identifier");
-      undef_macro(bumpstrndup(tok->loc, tok->len));
+      undef_macro(bumpstrndup(tok->loc, tok->len, AL_Compile));
       tok = skip_line(tok->next);
       continue;
     }
@@ -1199,7 +1200,7 @@ static void join_adjacent_string_literals(Token* tok) {
     for (Token* t = tok1->next; t != tok2; t = t->next)
       len = len + t->ty->array_len - 1;
 
-    char* buf = bumpcalloc(tok1->ty->base->size, len);
+    char* buf = bumpcalloc(tok1->ty->base->size, len, AL_Compile);
 
     int i = 0;
     for (Token* t = tok1; t != tok2; t = t->next) {

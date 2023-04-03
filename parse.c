@@ -165,7 +165,7 @@ static int align_down(int n, int align) {
 }
 
 static void enter_scope(void) {
-  Scope* sc = bumpcalloc(1, sizeof(Scope));
+  Scope* sc = bumpcalloc(1, sizeof(Scope), AL_Compile);
   sc->next = scope;
   scope = sc;
 }
@@ -194,7 +194,7 @@ static Type* find_tag(Token* tok) {
 }
 
 static Node* new_node(NodeKind kind, Token* tok) {
-  Node* node = bumpcalloc(1, sizeof(Node));
+  Node* node = bumpcalloc(1, sizeof(Node), AL_Compile);
   node->kind = kind;
   node->tok = tok;
   return node;
@@ -248,7 +248,7 @@ static Node* new_vla_ptr(Obj* var, Token* tok) {
 Node* new_cast(Node* expr, Type* ty) {
   add_type(expr);
 
-  Node* node = bumpcalloc(1, sizeof(Node));
+  Node* node = bumpcalloc(1, sizeof(Node), AL_Compile);
   node->kind = ND_CAST;
   node->tok = expr->tok;
   node->lhs = expr;
@@ -257,13 +257,13 @@ Node* new_cast(Node* expr, Type* ty) {
 }
 
 static VarScope* push_scope(char* name) {
-  VarScope* sc = bumpcalloc(1, sizeof(VarScope));
+  VarScope* sc = bumpcalloc(1, sizeof(VarScope), AL_Compile);
   hashmap_put(&scope->vars, name, sc);
   return sc;
 }
 
 static Initializer* new_initializer(Type* ty, bool is_flexible) {
-  Initializer* init = bumpcalloc(1, sizeof(Initializer));
+  Initializer* init = bumpcalloc(1, sizeof(Initializer), AL_Compile);
   init->ty = ty;
 
   if (ty->kind == TY_ARRAY) {
@@ -272,7 +272,7 @@ static Initializer* new_initializer(Type* ty, bool is_flexible) {
       return init;
     }
 
-    init->children = bumpcalloc(ty->array_len, sizeof(Initializer*));
+    init->children = bumpcalloc(ty->array_len, sizeof(Initializer*), AL_Compile);
     for (int i = 0; i < ty->array_len; i++)
       init->children[i] = new_initializer(ty->base, false);
     return init;
@@ -284,11 +284,11 @@ static Initializer* new_initializer(Type* ty, bool is_flexible) {
     for (Member* mem = ty->members; mem; mem = mem->next)
       len++;
 
-    init->children = bumpcalloc(len, sizeof(Initializer*));
+    init->children = bumpcalloc(len, sizeof(Initializer*), AL_Compile);
 
     for (Member* mem = ty->members; mem; mem = mem->next) {
       if (is_flexible && ty->is_flexible && !mem->next) {
-        Initializer* child = bumpcalloc(1, sizeof(Initializer));
+        Initializer* child = bumpcalloc(1, sizeof(Initializer), AL_Compile);
         child->ty = mem->ty;
         child->is_flexible = true;
         init->children[mem->idx] = child;
@@ -303,7 +303,7 @@ static Initializer* new_initializer(Type* ty, bool is_flexible) {
 }
 
 static Obj* new_var(char* name, Type* ty) {
-  Obj* var = bumpcalloc(1, sizeof(Obj));
+  Obj* var = bumpcalloc(1, sizeof(Obj), AL_Compile);
   var->name = name;
   var->ty = ty;
   var->align = ty->align;
@@ -329,7 +329,7 @@ static Obj* new_gvar(char* name, Type* ty) {
 }
 
 static char* new_unique_name(void) {
-  return format("L..%d", unique_name_id++);
+  return format(AL_Compile, "L..%d", unique_name_id++);
 }
 
 static Obj* new_anon_gvar(Type* ty) {
@@ -346,7 +346,7 @@ static Obj* new_string_literal(char* p, Type* ty) {
 static char* get_ident(Token* tok) {
   if (tok->kind != TK_IDENT)
     error_tok(tok, "expected an identifier");
-  return bumpstrndup(tok->loc, tok->len);
+  return bumpstrndup(tok->loc, tok->len, AL_Compile);
 }
 
 static Type* find_typedef(Token* tok) {
@@ -1334,7 +1334,7 @@ static Type* copy_struct_type(Type* ty) {
   Member head = {0};
   Member* cur = &head;
   for (Member* mem = ty->members; mem; mem = mem->next) {
-    Member* m = bumpcalloc(1, sizeof(Member));
+    Member* m = bumpcalloc(1, sizeof(Member), AL_Compile);
     *m = *mem;
     cur = cur->next = m;
   }
@@ -1524,7 +1524,7 @@ static Relocation* write_gvar_data(Relocation* cur,
     return cur;
   }
 
-  Relocation* rel = bumpcalloc(1, sizeof(Relocation));
+  Relocation* rel = bumpcalloc(1, sizeof(Relocation), AL_Compile);
   assert(!(label && pc_label));  // Both shouldn't be set.
   rel->offset = offset;
   rel->data_label = label;
@@ -1542,7 +1542,7 @@ static void gvar_initializer(Token** rest, Token* tok, Obj* var) {
   Initializer* init = initializer(rest, tok, var->ty, &var->ty);
 
   Relocation head = {0};
-  char* buf = bumpcalloc(1, var->ty->size);
+  char* buf = bumpcalloc(1, var->ty->size, AL_Compile);
   write_gvar_data(&head, init, var->ty, buf, 0);
   var->init_data = buf;
   var->rel = head.next;
@@ -1832,7 +1832,7 @@ static Node* stmt(Token** rest, Token* tok) {
 
   if (tok->kind == TK_IDENT && equal(tok->next, ":")) {
     Node* node = new_node(ND_LABEL, tok);
-    node->label = bumpstrndup(tok->loc, tok->len);
+    node->label = bumpstrndup(tok->loc, tok->len, AL_Compile);
     node->unique_pc_label = codegen_pclabel();
     node->lhs = stmt(rest, tok->next->next);
     node->goto_next = labels;
@@ -2630,7 +2630,7 @@ static void struct_members(Token** rest, Token* tok, Type* ty) {
 
     // Anonymous struct member
     if ((basety->kind == TY_STRUCT || basety->kind == TY_UNION) && consume(&tok, tok, ";")) {
-      Member* mem = bumpcalloc(1, sizeof(Member));
+      Member* mem = bumpcalloc(1, sizeof(Member), AL_Compile);
       mem->ty = basety;
       mem->idx = idx++;
       mem->align = attr.align ? attr.align : mem->ty->align;
@@ -2644,7 +2644,7 @@ static void struct_members(Token** rest, Token* tok, Type* ty) {
         tok = skip(tok, ",");
       first = false;
 
-      Member* mem = bumpcalloc(1, sizeof(Member));
+      Member* mem = bumpcalloc(1, sizeof(Member), AL_Compile);
       mem->ty = declarator(&tok, tok, basety);
       mem->name = mem->ty->name;
       mem->idx = idx++;
@@ -3162,7 +3162,7 @@ static Node* primary(Token** rest, Token* tok) {
     // For "static inline" function
     if (sc && sc->var && sc->var->is_function) {
       if (current_fn)
-        strarray_push(&current_fn->refs, sc->var->name);
+        strarray_push(&current_fn->refs, sc->var->name, AL_Compile);
       else
         sc->var->is_root = true;
     }

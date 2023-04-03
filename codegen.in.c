@@ -226,7 +226,8 @@ static void gen_addr(Node* node) {
           ///| lea rax, [=>node->var->dasm_entry_label]
         } else {
           int fixup_location = codegen_pclabel();
-          strintarray_push(&import_fixups, (StringInt){node->var->name, fixup_location});
+          strintarray_push(&import_fixups, (StringInt){node->var->name, fixup_location},
+                           AL_Compile);
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4310)  // dynasm casts the top and bottom of the 64bit arg
@@ -242,7 +243,7 @@ static void gen_addr(Node* node) {
 
       // Global variable
       int fixup_location = codegen_pclabel();
-      strintarray_push(&data_fixups, (StringInt){node->var->name, fixup_location});
+      strintarray_push(&data_fixups, (StringInt){node->var->name, fixup_location}, AL_Compile);
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4310)  // dynasm casts the top and bottom of the 64bit arg
@@ -2187,14 +2188,6 @@ static void emit_data(Obj* prog) {
     int align =
         (var->ty->kind == TY_ARRAY && var->ty->size >= 16) ? MAX(16, var->align) : var->align;
 
-    // Common symbol
-    // TODO: Currently forcing -fno-common because... I don't really understand
-    // common, apparently.
-    // if (false && var->is_tentative && !var->is_static) {
-    // println("  common %s %d:%d", var->name, var->ty->size, align);
-    // continue;
-    //}
-
     write_dyo_initialized_data(dyo_file, var->ty->size, align, var->is_static, var->is_rodata,
                                var->name);
 
@@ -2218,13 +2211,14 @@ static void emit_data(Obj* prog) {
           } else {
             int file_loc;
             write_dyo_initializer_code_relocation(dyo_file, -1, rel->addend, &file_loc);
-            intintarray_push(&pending_code_pclabels, (IntInt){file_loc, *rel->code_label});
+            intintarray_push(&pending_code_pclabels, (IntInt){file_loc, *rel->code_label},
+                             AL_Compile);
           }
 
           rel = rel->next;
           pos += 8;
         } else {
-          bytearray_push(&bytes, var->init_data[pos]);
+          bytearray_push(&bytes, var->init_data[pos], AL_Compile);
           ++pos;
         }
       }
