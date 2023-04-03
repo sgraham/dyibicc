@@ -5,13 +5,10 @@
 **/*.dyo
 /tmp*
 x.bat
-/thirdparty
-/dyibicc
+/third_party
 /test/*.exe
-/stage2
 .vs/
 tags
-objconv.exe
 test/x.c
 minilua
 codegen.linux.c

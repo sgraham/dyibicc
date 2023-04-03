@@ -14,7 +14,7 @@ all: dyibicc.exe dumpdyo.exe
 dyibicc.exe: $(OBJS)
 	$(CC) $(CFLAGS) $** /link /out:$@ $(LDFLAGS)
 
-$(OBJS): dyibicc.h
+$(OBJS): dyibicc.h libdyibicc.h
 
 minilua.exe: dynasm/minilua.c
 	$(CC) $(CFLAGS) /wd4132 /wd4324 $** /link /out:$@

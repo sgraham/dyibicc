@@ -11,12 +11,12 @@
 
 KHASH_SET_INIT_INT64(voidp)
 
-static void* (*user_runtime_function_callback)(char*) = NULL;
+static DyibiccFunctionLookupFn  user_runtime_function_callback = NULL;
 
 #if X64WIN
 static HashMap runtime_function_map;
 
-void set_user_runtime_function_callback(void* (*f)(char*)) {
+void dyibicc_set_user_runtime_function_callback(DyibiccFunctionLookupFn f) {
   user_runtime_function_callback = f;
 }
 
@@ -143,7 +143,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           entry_point_offset = *(unsigned int*)&buf[0];
         } else if (type == kTypeX64Code) {
           unsigned int page_sized = (unsigned int)align_to_u(size, page_size);
-          // fprintf(stderr, "code %d, allocating %d\n", size, page_sized);
+          // logdbg("code %d, allocating %d\n", size, page_sized);
           assert(num_dyos < MAX_DYOS);
           li.code[num_dyos].base_address = allocate_writable_memory(page_sized);
           li.code[num_dyos].size = page_sized;
@@ -282,7 +282,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           if (target_address == NULL) {
             target_address = symbol_lookup(strings.data[string_record_index]);
             if (target_address == NULL) {
-              fprintf(stderr, "undefined symbol: %s\n", strings.data[string_record_index]);
+              logerr("undefined symbol: %s\n", strings.data[string_record_index]);
               goto fail;
             }
           }
@@ -308,7 +308,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
             continue;
 
           if (!current_data_base) {
-            fprintf(stderr, "init data not allocated\n");
+            logerr("init data not allocated\n");
             goto fail;
           }
           current_data_pointer = current_data_base;
@@ -322,7 +322,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           if (!target_address) {
             target_address = hashmap_get(&li.global_data, strings.data[string_record_index]);
             if (!target_address) {
-              fprintf(stderr, "undefined symbol: %s\n", strings.data[string_record_index]);
+              logerr("undefined symbol: %s\n", strings.data[string_record_index]);
               goto fail;
             }
           }
@@ -340,7 +340,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
 
           assert(current_data_base);
           if (current_data_pointer + size > current_data_end) {
-            fprintf(stderr, "initializer overrun bytes\n");
+            logerr("initializer overrun bytes\n");
             abort();
           }
           memcpy(current_data_pointer, buf, size);
@@ -357,7 +357,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           // rather than specified as an offset.
           assert(current_data_base);
           if (current_data_pointer + 8 > current_data_end) {
-            fprintf(stderr, "initializer overrun reloc\n");
+            logerr("initializer overrun reloc\n");
             abort();
           }
           unsigned int name_index = *(unsigned int*)&buf[0];
@@ -367,7 +367,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           if (!target_address) {
             target_address = hashmap_get(&li.global_data, strings.data[name_index]);
             if (!target_address) {
-              fprintf(stderr, "undefined symbol: %s\n", strings.data[name_index]);
+              logerr("undefined symbol: %s\n", strings.data[name_index]);
               goto fail;
             }
           }
@@ -383,7 +383,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
 
           assert(current_data_base);
           if (current_data_pointer + 8 > current_data_end) {
-            fprintf(stderr, "initializer overrun reloc\n");
+            logerr("initializer overrun reloc\n");
             abort();
           }
           int offset = *(unsigned int*)&buf[0];

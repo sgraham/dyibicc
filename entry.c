@@ -1,8 +1,11 @@
-#include "dyibicc.h"
+#include <stdio.h>
+
+#include "libdyibicc.h"
 
 int main(int argc, char** argv) {
-  LinkInfo link_info = {0};
-  if (compile_and_link(argc, argv, &link_info)) {
+  DyibiccLinkInfo link_info = {0};
+
+  if (dyibicc_compile_and_link(argc, argv, &link_info)) {
     if (link_info.entry_point) {
       int (*p)() = (int (*)())link_info.entry_point;
       int result = p();

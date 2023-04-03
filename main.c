@@ -160,6 +160,14 @@ StringArray include_paths;
 char* base_file;
 char* entry_point_override;
 
+static int default_output_fn(int level, const char* fmt, va_list ap) {
+  FILE* output_to = stdout;
+  if (level >= 2)
+    output_to = stderr;
+  int ret = vfprintf(output_to, fmt, ap);
+  return ret;
+}
+
 static StringArray input_paths;
 static bool opt_E = false;
 
@@ -185,7 +193,7 @@ static void add_default_include_paths(char* argv0) {
 }
 
 static void usage(int status) {
-  fprintf(stderr, "dyibicc [-E] [-e symbolname] [-I <path>] <file0> [<file1>...]\n");
+  logerr("dyibicc [-E] [-e symbolname] [-I <path>] <file0> [<file1>...]\n");
   exit(status);
 }
 
@@ -240,7 +248,7 @@ static void parse_args(int argc, char** argv) {
 // clears all memory that was calloc'd in a previous iteration of the compiler.
 // All previously allocated pointers become invalidated. Command line arguments
 // are reparsed because of this, and will be identical to the last time.
-void purge_and_reset_all(int argc, char* argv[]) {
+static void purge_all(void) {
   bumpcalloc_reset();
   codegen_reset();
   link_reset();
@@ -251,7 +259,10 @@ void purge_and_reset_all(int argc, char* argv[]) {
   include_paths = (StringArray){NULL, 0, 0};
   opt_E = false;
   base_file = NULL;
+  entry_point_override = NULL;
+}
 
+static void reinit_all(int argc, char* argv[]) {
   bumpcalloc_init();
   init_macros();
 
@@ -289,16 +300,21 @@ static void print_tokens(Token* tok) {
   int line = 1;
   for (; tok->kind != TK_EOF; tok = tok->next) {
     if (line > 1 && tok->at_bol)
-      fprintf(stdout, "\n");
+      logout("\n");
     if (tok->has_space && !tok->at_bol)
-      fprintf(stdout, " ");
-    fprintf(stdout, "%.*s", tok->len, tok->loc);
+      logout(" ");
+    logout("%.*s", tok->len, tok->loc);
     line++;
   }
-  fprintf(stdout, "\n");
+  logout("\n");
 }
 
-bool compile_and_link(int argc, char** argv, LinkInfo* link_info) {
+bool dyibicc_compile_and_link(int argc, char** argv, DyibiccLinkInfo* link_info) {
+  bool result = false;
+
+  if (!output_fn)
+    output_fn = default_output_fn;
+
   bumpcalloc_init();
   parse_args(argc, argv);
 
@@ -307,7 +323,8 @@ bool compile_and_link(int argc, char** argv, LinkInfo* link_info) {
   int num_dyo_files = 0;
 
   for (int i = 0; i < input_paths.len; i++) {
-    purge_and_reset_all(argc, argv);
+    purge_all();
+    reinit_all(argc, argv);
     base_file = input_paths.data[i];
     char* dyo_output_file = replace_extn(base_file, ".dyo");
 
@@ -334,7 +351,12 @@ bool compile_and_link(int argc, char** argv, LinkInfo* link_info) {
   if (opt_E)
     return 0;
 
-  bool result = link_dyos(dyo_files, link_info);
-  bumpcalloc_reset();
+  result = link_dyos(dyo_files, (LinkInfo*)link_info);
+
+  purge_all();
   return result;
+}
+
+void dyibicc_set_normal_output_function(DyibiccOutputFn f) {
+  output_fn = f;
 }

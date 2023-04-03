@@ -3430,7 +3430,7 @@ Obj* parse(Token* tok) {
   globals = NULL;
 
   while (tok->kind != TK_EOF) {
-    // fprintf(stderr, "%s:%d\n", tok->filename, tok->line_no);
+    // logerr("%s:%d\n", tok->filename, tok->line_no);
     VarAttr attr = {0};
     Type* basety = declspec(&tok, tok, &attr);
 

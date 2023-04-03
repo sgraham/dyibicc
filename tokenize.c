@@ -30,16 +30,16 @@ static void verror_at(char* filename, char* input, int line_no, char* loc, char*
     end++;
 
   // Print out the line.
-  int indent = fprintf(stderr, "%s:%d: ", filename, line_no);
-  fprintf(stderr, "%.*s\n", (int)(end - line), line);
+  int indent = logerr("%s:%d: ", filename, line_no);
+  logerr("%.*s\n", (int)(end - line), line);
 
   // Show the error message.
   int pos = display_width(line, (int)(loc - line)) + indent;
 
-  fprintf(stderr, "%*s", pos, "");  // print pos spaces.
-  fprintf(stderr, "^ ");
-  vfprintf(stderr, fmt, ap);
-  fprintf(stderr, "\n");
+  logerr("%*s", pos, "");  // print pos spaces.
+  logerr("^ ");
+  output_fn(2, fmt, ap);
+  logerr("\n");
 }
 
 void error_at(char* loc, char* fmt, ...) {
@@ -678,7 +678,7 @@ Token* tokenize(File* file) {
 // Returns the contents of a given file. Doesn't support '-' for reading from
 // stdin.
 static char* read_file(char* path) {
-  // fprintf(stderr, "reading \"%s\"\n", path);
+  // logerr("reading \"%s\"\n", path);
   FILE* fp = fopen(path, "rb");
   if (!fp) {
     return NULL;

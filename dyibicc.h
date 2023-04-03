@@ -14,6 +14,8 @@
 #include <sys/types.h>
 #include <time.h>
 
+#include "libdyibicc.h"
+
 #ifdef _MSC_VER
 #define NORETURN __declspec(noreturn)
 #define strdup _strdup
@@ -148,6 +150,10 @@ Token* tokenize(File* file);
 Token* tokenize_file(char* filename);
 
 #define unreachable() error("internal error at %s:%d", __FILE__, __LINE__)
+
+int logdbg(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+int logout(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+int logerr(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 
 //
 // preprocess.c
@@ -578,8 +584,10 @@ typedef struct LinkInfo {
   HashMap global_data;
   HashMap per_dyo_data[MAX_DYOS];
 } LinkInfo;
+static_assert(sizeof(LinkInfo) < 4096, "private size larger than 4k");
+static_assert(sizeof(DyibiccLinkInfo) == 4096, "public size not 4k");
+static_assert(sizeof(LinkInfo) <= sizeof(DyibiccLinkInfo), "private size larger than public");
 bool link_dyos(FILE** dyo_files, LinkInfo* link_info);
-void set_user_runtime_function_callback(void* (*f)(char*));
 
 //
 // main.c
@@ -588,6 +596,7 @@ void set_user_runtime_function_callback(void* (*f)(char*));
 extern StringArray include_paths;
 extern char* base_file;
 extern char* entry_point_override;
+extern DyibiccOutputFn output_fn;
 
 void bumpcalloc_reset(void);
 void codegen_reset(void);

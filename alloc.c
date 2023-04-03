@@ -32,8 +32,8 @@ static char* current_alloc_pointer;
 void error(char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  vfprintf(stderr, fmt, ap);
-  fprintf(stderr, "\n");
+  output_fn(2, fmt, ap);
+  logerr("\n");
   exit(1);
 }
 

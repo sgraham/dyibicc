@@ -1,5 +1,7 @@
 #include "dyibicc.h"
 
+DyibiccOutputFn output_fn;
+
 char* bumpstrndup(const char* s, size_t n) {
   size_t l = strnlen(s, n);
   char* d = bumpcalloc(1, l + 1);
@@ -137,4 +139,28 @@ char* format(char* fmt, ...) {
   vsprintf(buf, fmt, ap);
   va_end(ap);
   return bumpstrdup(buf);
+}
+
+int logdbg(const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  int ret = output_fn(0, fmt, ap);
+  va_end(ap);
+  return ret;
+}
+
+int logout(const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  int ret = output_fn(1, fmt, ap);
+  va_end(ap);
+  return ret;
+}
+
+int logerr(const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  int ret = output_fn(2, fmt, ap);
+  va_end(ap);
+  return ret;
 }

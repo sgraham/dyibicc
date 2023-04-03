@@ -14,7 +14,7 @@ dyibicc: $(OBJS)
 dumpdyo: dumpdyo.o dyo.o hashmap.o alloc.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-$(OBJS): dyibicc.h
+$(OBJS): dyibicc.h libdyibicc.h
 
 minilua: dynasm/minilua.c
 	$(CC) $(CFLAGS) -o $@ $^ -lm
