@@ -2187,14 +2187,6 @@ static void emit_data(Obj* prog) {
     int align =
         (var->ty->kind == TY_ARRAY && var->ty->size >= 16) ? MAX(16, var->align) : var->align;
 
-    // Common symbol
-    // TODO: Currently forcing -fno-common because... I don't really understand
-    // common, apparently.
-    // if (false && var->is_tentative && !var->is_static) {
-    // println("  common %s %d:%d", var->name, var->ty->size, align);
-    // continue;
-    //}
-
     write_dyo_initialized_data(dyo_file, var->ty->size, align, var->is_static, var->is_rodata,
                                var->name);
 

@@ -11,7 +11,7 @@
 
 KHASH_SET_INIT_INT64(voidp)
 
-static DyibiccFunctionLookupFn  user_runtime_function_callback = NULL;
+static DyibiccFunctionLookupFn user_runtime_function_callback = NULL;
 
 #if X64WIN
 static HashMap runtime_function_map;
@@ -190,8 +190,18 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
 
           // The keys need to be strdup'd to stick around for subsequent links.
           if (is_static) {
+            void* prev = hashmap_get(&li.per_dyo_data[num_dyos], strings.data[name_index]);
+            if (prev) {
+              logerr("duplicate symbol: %s\n", strings.data[name_index]);
+              goto fail;
+            }
             hashmap_put(&li.per_dyo_data[num_dyos], strdup(strings.data[name_index]), global_data);
           } else {
+            void* prev = hashmap_get(&li.global_data, strings.data[name_index]);
+            if (prev) {
+              logerr("duplicate symbol: %s\n", strings.data[name_index]);
+              goto fail;
+            }
             hashmap_put(&li.global_data, strdup(strings.data[name_index]), global_data);
           }
 
@@ -412,6 +422,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
     }
   }
 
+  kh_destroy(voidp, created_this_update);
   li.num_dyos = num_dyos;
   *link_info = li;
   return true;

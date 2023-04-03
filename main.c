@@ -310,8 +310,6 @@ static void print_tokens(Token* tok) {
 }
 
 bool dyibicc_compile_and_link(int argc, char** argv, DyibiccLinkInfo* link_info) {
-  bool result = false;
-
   if (!output_fn)
     output_fn = default_output_fn;
 
@@ -349,14 +347,20 @@ bool dyibicc_compile_and_link(int argc, char** argv, DyibiccLinkInfo* link_info)
   }
 
   if (opt_E)
-    return 0;
+    return true;
 
-  result = link_dyos(dyo_files, (LinkInfo*)link_info);
-
-  purge_all();
-  return result;
+  return link_dyos(dyo_files, (LinkInfo*)link_info);
 }
 
 void dyibicc_set_normal_output_function(DyibiccOutputFn f) {
   output_fn = f;
+}
+
+void dyibicc_free_link_info_resources(DyibiccLinkInfo* link_info) {
+  LinkInfo* li = (LinkInfo*)link_info;
+
+  hashmap_free(&li->global_data, free, aligned_free);
+  for (int i = 0; i < li->num_dyos; ++i) {
+    hashmap_free(&li->per_dyo_data[i], free, aligned_free);
+  }
 }

@@ -21,7 +21,7 @@ util.c
 #   TLS not implemented
 #
 # test/commonsym.c
-#   currently passes, but I thought I disabled support, so need to investigate.
+#   Intentionally disabled for now.
 #
 TEST_SRCS=\
 test/alignof.c \
@@ -32,7 +32,6 @@ test/attribute.c \
 test/bitfield.c \
 test/builtin.c \
 test/cast.c \
-test/commonsym.c \
 test/compat.c \
 test/complit.c \
 test/const.c \

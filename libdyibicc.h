@@ -7,14 +7,28 @@
 // level == 1 regular user message
 // level == 2 error
 typedef int (*DyibiccOutputFn)(int level, const char* fmt, va_list ap);
-void dyibicc_set_output_function(DyibiccOutputFn f);
 
-typedef void* (*DyibiccFunctionLookupFn)(const char*);
-void dyibicc_set_user_runtime_function_callback(DyibiccFunctionLookupFn f);
+// Returns the address of a function by name.
+typedef void* (*DyibiccFunctionLookupFn)(const char* name);
 
-typedef struct DyibiccLinkInfo {
-  void* entry_point;
-  char private_data[4088];
-} DyibiccLinkInfo;
+typedef void (*DyibiccEntryPointFn)(void);
 
-bool dyibicc_compile_and_link(int argc, char** argv, DyibiccLinkInfo* link_info);
+typedef struct DyibiccEnviromentData {
+  const char** include_paths;
+  const char** files;
+  const char* entry_point_name;
+  const char* cache_directory;
+  DyibiccFunctionLookupFn get_function_address;
+  DyibiccOutputFn output_function;
+} DyibiccEnviromentData;
+
+typedef struct DyibiccContext {
+  DyibiccEntryPointFn entry_point;
+  // Additional internal data allocated here.
+} DyibiccContext;
+
+DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data);
+
+bool dyibicc_update(DyibiccContext* context);
+
+void dyibicc_free(DyibiccContext* context);

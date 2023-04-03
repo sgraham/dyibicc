@@ -54,6 +54,9 @@ static void rehash(HashMap* map) {
   }
 
   assert(map2.used == nkeys);
+  if (map2.global_alloc) {
+    free(map->buckets);
+  }
   *map = map2;
 }
 
@@ -112,6 +115,20 @@ static HashEntry* get_or_insert_entry(HashMap* map, char* key, int keylen) {
     }
   }
   unreachable();
+}
+
+void hashmap_free(HashMap* map, void (*key_free)(void*), void (*value_free)(void*)) {
+  if (!map->global_alloc)
+    return;
+
+  for (int i = 0; i < map->capacity; i++) {
+    HashEntry* ent = &map->buckets[i];
+    if (ent->key && ent->key != TOMBSTONE) {
+      key_free(ent->key);
+      value_free(ent->val);
+    }
+  }
+  free(map->buckets);
 }
 
 void* hashmap_get(HashMap* map, char* key) {
