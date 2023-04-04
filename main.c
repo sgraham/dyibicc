@@ -155,12 +155,8 @@
 //
 #include "dyibicc.h"
 
-CompilerState compiler_state;
-
-StringArray include_paths;
-
-char* base_file;
-char* entry_point_override;
+#define C(x) compiler_state.main__##x
+#define L(x) linker_state.main__##x
 
 static int default_output_fn(int level, const char* fmt, va_list ap) {
   FILE* output_to = stdout;
@@ -170,32 +166,29 @@ static int default_output_fn(int level, const char* fmt, va_list ap) {
   return ret;
 }
 
-static StringArray input_paths;
-static bool opt_E = false;
-
 static void add_default_include_paths(char* argv0) {
 #if X64WIN
-  strarray_push(&include_paths,
+  strarray_push(&L(include_paths),
                 format(AL_Link, "%s/include/win", dirname(bumpstrdup(argv0, AL_Link))), AL_Link);
-  strarray_push(&include_paths,
+  strarray_push(&L(include_paths),
                 format(AL_Link, "%s/include/all", dirname(bumpstrdup(argv0, AL_Link))), AL_Link);
 
-  strarray_push(&include_paths,
+  strarray_push(&L(include_paths),
                 "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.19041.0\\ucrt", AL_Link);
-  strarray_push(&include_paths,
+  strarray_push(&L(include_paths),
                 "C:\\Program Files\\Microsoft Visual "
                 "Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.34.31933\\include",
                 AL_Link);
 #else
-  strarray_push(&include_paths,
+  strarray_push(&L(include_paths),
                 format(AL_Link, "%s/include/linux", dirname(bumpstrdup(argv0, AL_Link))), AL_Link);
-  strarray_push(&include_paths,
+  strarray_push(&L(include_paths),
                 format(AL_Link, "%s/include/all", dirname(bumpstrdup(argv0, AL_Link))), AL_Link);
 
   // Add standard include paths.
-  strarray_push(&include_paths, "/usr/local/include", AL_Link);
-  strarray_push(&include_paths, "/usr/include/x86_64-linux-gnu", AL_Link);
-  strarray_push(&include_paths, "/usr/include", AL_Link);
+  strarray_push(&L(include_paths), "/usr/local/include", AL_Link);
+  strarray_push(&L(include_paths), "/usr/include/x86_64-linux-gnu", AL_Link);
+  strarray_push(&L(include_paths), "/usr/include", AL_Link);
 #endif
 }
 
@@ -224,17 +217,17 @@ static void parse_args(int argc, char** argv) {
 
   for (int i = 1; i < argc; i++) {
     if (!strncmp(argv[i], "-I", 2)) {
-      strarray_push(&include_paths, argv[i] + 2, AL_Link);
+      strarray_push(&L(include_paths), argv[i] + 2, AL_Link);
       continue;
     }
 
     if (!strncmp(argv[i], "-e", 2)) {
-      entry_point_override = argv[i] + 2;
+      C(entry_point_override) = argv[i] + 2;
       continue;
     }
 
     if (!strcmp(argv[i], "-E")) {
-      opt_E = true;
+      L(opt_E) = true;
       continue;
     }
 
@@ -244,10 +237,10 @@ static void parse_args(int argc, char** argv) {
     if (argv[i][0] == '-' && argv[i][1] != '\0')
       error("unknown argument: %s", argv[i]);
 
-    strarray_push(&input_paths, argv[i], AL_Link);
+    strarray_push(&L(input_paths), argv[i], AL_Link);
   }
 
-  if (input_paths.len == 0)
+  if (L(input_paths).len == 0)
     error("no input files");
 }
 
@@ -301,22 +294,22 @@ bool dyibicc_compile_and_link(int argc, char** argv, DyibiccLinkInfo* link_info)
   parse_args(argc, argv);
   add_default_include_paths(argv[0]);
 
-  // TODO: Make a FILEArray and use AL_Link here.
+  // TODO: Make a FILEArray and use AL_Link here. replace_extn to AL_Link.
   FILE* dyo_files[MAX_DYOS] = {0};
   int num_dyo_files = 0;
 
-  for (int i = 0; i < input_paths.len; i++) {
+  for (int i = 0; i < L(input_paths).len; i++) {
     alloc_init(AL_Compile);
 
     init_macros();
-    base_file = input_paths.data[i];
-    char* dyo_output_file = replace_extn(base_file, ".dyo");
+    C(base_file) = L(input_paths).data[i];
+    char* dyo_output_file = replace_extn(C(base_file), ".dyo");
 
-    Token* tok = must_tokenize_file(base_file);
+    Token* tok = must_tokenize_file(C(base_file));
     tok = preprocess(tok);
 
     // If -E is given, print out preprocessed C code as a result.
-    if (opt_E) {
+    if (L(opt_E)) {
       print_tokens(tok);
       continue;
     }
@@ -332,11 +325,9 @@ bool dyibicc_compile_and_link(int argc, char** argv, DyibiccLinkInfo* link_info)
     dyo_files[num_dyo_files++] = fopen(dyo_output_file, "rb");
 
     alloc_reset(AL_Compile);
-
-    memset(&compiler_state, 0, sizeof(compiler_state));
   }
 
-  if (opt_E)
+  if (L(opt_E))
     return 0;
 
   result = link_dyos(dyo_files, (LinkInfo*)link_info);

@@ -2410,7 +2410,8 @@ static void emit_text(Obj* prog) {
       C(dasm_label_main_entry) = fn->dasm_entry_label;
     }
 
-    if (entry_point_override && strcmp(fn->name, entry_point_override) == 0) {
+    if (compiler_state.main__entry_point_override &&
+        strcmp(fn->name, compiler_state.main__entry_point_override) == 0) {
       C(dasm_label_main_entry) = fn->dasm_entry_label;
     }
 

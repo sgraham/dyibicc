@@ -7,7 +7,7 @@
 #include <unistd.h>
 #endif
 
-#define C(x) compiler_state.link__##x
+#define L(x) linker_state.link__##x
 
 #include "khash.h"
 
@@ -20,9 +20,9 @@ void dyibicc_set_user_runtime_function_callback(DyibiccFunctionLookupFn f) {
 }
 
 static void* get_standard_runtime_function(char* name) {
-  if (C(runtime_function_map).capacity == 0) {
-    C(runtime_function_map).alloc_lifetime = AL_Link;
-#define X(func) hashmap_put(&C(runtime_function_map), #func, (void*)&func)
+  if (L(runtime_function_map).capacity == 0) {
+    L(runtime_function_map).alloc_lifetime = AL_Link;
+#define X(func) hashmap_put(&L(runtime_function_map), #func, (void*)&func)
 #if X64WIN
     X(CloseHandle);
     X(CreateThread);
@@ -59,7 +59,7 @@ static void* get_standard_runtime_function(char* name) {
 #undef X
   }
 
-  return hashmap_get(&C(runtime_function_map), name);
+  return hashmap_get(&L(runtime_function_map), name);
 }
 
 static void* symbol_lookup(char* name) {

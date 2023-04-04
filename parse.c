@@ -71,7 +71,6 @@ struct InitDesg {
   Obj* var;
 };
 
-
 static bool is_typename(Token* tok);
 static Type* declspec(Token** rest, Token* tok, VarAttr* attr);
 static Type* typename(Token** rest, Token* tok);

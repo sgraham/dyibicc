@@ -24,10 +24,9 @@ void __asan_unpoison_memory_region(void const volatile* addr, size_t size);
 #endif
 
 #define NUM_BUMP_HEAPS (AL_Link + 1)
-static char* allmem[NUM_BUMP_HEAPS];
-static char* current_alloc_pointer[NUM_BUMP_HEAPS];
 
-#define HEAP_SIZE (256 << 20)
+CompilerState compiler_state;
+LinkerState linker_state;
 
 // Reports an error and exit.
 void error(char* fmt, ...) {
@@ -38,20 +37,50 @@ void error(char* fmt, ...) {
   exit(1);
 }
 
-void alloc_init(AllocLifetime i) {
-  assert(i < NUM_BUMP_HEAPS);
-  assert(!allmem[i]);
-  allmem[i] = allocate_writable_memory(HEAP_SIZE);
-  current_alloc_pointer[i] = allmem[i];
-  ASAN_POISON_MEMORY_REGION(allmem[i], HEAP_SIZE);
+#define ALLOC_INIT(state)                                                      \
+  do {                                                                         \
+    ASAN_UNPOISON_MEMORY_REGION(state.alloc__heap, sizeof(state.alloc__heap)); \
+    memset(&state, 0, sizeof(state));                                          \
+    state.alloc__current_alloc_pointer = state.alloc__heap;                    \
+    ASAN_POISON_MEMORY_REGION(state.alloc__heap, sizeof(state.alloc__heap));   \
+  } while (0)
+
+// This 0xdd fill could be debug-only.
+#define ALLOC_RESET(state)                                                     \
+  do {                                                                         \
+    ASAN_UNPOISON_MEMORY_REGION(state.alloc__heap, sizeof(state.alloc__heap)); \
+    memset(&state, 0xdd, sizeof(state));                                       \
+    state.alloc__current_alloc_pointer = NULL;                                 \
+    ASAN_POISON_MEMORY_REGION(state.alloc__heap, sizeof(state.alloc__heap));   \
+  } while (0)
+
+#define ALLOC_BUMP(ret, state)                                                                \
+  do {                                                                                        \
+    ret = state.alloc__current_alloc_pointer;                                                 \
+    state.alloc__current_alloc_pointer += toalloc;                                            \
+    if (state.alloc__current_alloc_pointer > state.alloc__heap + sizeof(state.alloc__heap)) { \
+      error("heap exhausted");                                                                \
+    }                                                                                         \
+  } while (0)
+
+void alloc_init(AllocLifetime lifetime) {
+  assert(lifetime < NUM_BUMP_HEAPS);
+  if (lifetime == AL_Compile)
+    ALLOC_INIT(compiler_state);
+  else if (lifetime == AL_Link)
+    ALLOC_INIT(linker_state);
+  else
+    unreachable();
 }
 
-void alloc_reset(AllocLifetime i) {
-  assert(i < NUM_BUMP_HEAPS);
-  free_executable_memory(allmem[i], HEAP_SIZE);
-  ASAN_POISON_MEMORY_REGION(allmem[i], HEAP_SIZE);
-  allmem[i] = NULL;
-  current_alloc_pointer[i] = NULL;
+void alloc_reset(AllocLifetime lifetime) {
+  assert(lifetime < NUM_BUMP_HEAPS);
+  if (lifetime == AL_Compile)
+    ALLOC_RESET(compiler_state);
+  else if (lifetime == AL_Link)
+    ALLOC_RESET(linker_state);
+  else
+    unreachable();
 }
 
 void* bumpcalloc(size_t num, size_t size, AllocLifetime lifetime) {
@@ -60,15 +89,17 @@ void* bumpcalloc(size_t num, size_t size, AllocLifetime lifetime) {
   }
 
   assert(lifetime < NUM_BUMP_HEAPS);
-
   size_t toalloc = align_to_u(num * size, 8);
-  char* ret = current_alloc_pointer[lifetime];
-  current_alloc_pointer[lifetime] += toalloc;
-  if (current_alloc_pointer[lifetime] > allmem[lifetime] + HEAP_SIZE) {
-    error("heap exhausted");
-  }
+  char* ret;
+  if (lifetime == AL_Compile)
+    ALLOC_BUMP(ret, compiler_state);
+  else if (lifetime == AL_Link)
+    ALLOC_BUMP(ret, linker_state);
+  else
+    unreachable();
+
   ASAN_UNPOISON_MEMORY_REGION(ret, toalloc);
-  memset(ret, 0, toalloc);
+
   return ret;
 }
 

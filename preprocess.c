@@ -689,8 +689,8 @@ char* search_include_paths(char* filename) {
     return cached;
 
   // Search a file from the include paths.
-  for (int i = 0; i < include_paths.len; i++) {
-    char* path = format(AL_Compile, "%s/%s", include_paths.data[i], filename);
+  for (int i = 0; i < linker_state.main__include_paths.len; i++) {
+    char* path = format(AL_Compile, "%s/%s", linker_state.main__include_paths.data[i], filename);
     if (!file_exists(path))
       continue;
     hashmap_put(&C(include_path_cache), filename, path);
@@ -701,8 +701,9 @@ char* search_include_paths(char* filename) {
 }
 
 static char* search_include_next(char* filename) {
-  for (; C(include_next_idx) < include_paths.len; C(include_next_idx)++) {
-    char* path = format(AL_Compile, "%s/%s", include_paths.data[C(include_next_idx)], filename);
+  for (; C(include_next_idx) < linker_state.main__include_paths.len; C(include_next_idx)++) {
+    char* path = format(AL_Compile, "%s/%s",
+                        linker_state.main__include_paths.data[C(include_next_idx)], filename);
     if (file_exists(path))
       return path;
   }
@@ -1034,7 +1035,7 @@ static Token* timestamp_macro(Token* tmpl) {
 }
 
 static Token* base_file_macro(Token* tmpl) {
-  return new_str_token(base_file, tmpl);
+  return new_str_token(compiler_state.main__base_file, tmpl);
 }
 
 // __DATE__ is expanded to the current date, e.g. "May 17 2020".

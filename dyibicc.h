@@ -608,16 +608,13 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info);
 // main.c
 //
 
-extern StringArray include_paths;
-extern char* base_file;
-extern char* entry_point_override;
 extern DyibiccOutputFn output_fn;
 
 bool compile_and_link(int argc, char** argv, LinkInfo* link_info);
 
-
 //
-// Entire compiler state in one struct for clearing, esp. after longjmp.
+// Entire compiler state in one struct and linker in a second for clearing, esp.
+// after longjmp. There should be no globals outside of these structures.
 //
 
 typedef struct CondIncl CondIncl;
@@ -679,8 +676,26 @@ typedef struct CompilerState {
   StringIntArray codegen__data_fixups;
   IntIntArray codegen__pending_code_pclabels;
 
-  // link.c
-  HashMap link__runtime_function_map;
+  // main.c
+  char* main__base_file;
+  char* main__entry_point_override;
+
+  char alloc__heap[256 << 20];
+  char* alloc__current_alloc_pointer;
 } CompilerState;
 
+typedef struct LinkerState {
+  // link.c
+  HashMap link__runtime_function_map;
+
+  // main.c
+  bool main__opt_E;
+  StringArray main__include_paths;
+  StringArray main__input_paths;
+
+  char alloc__heap[128 << 20];
+  char* alloc__current_alloc_pointer;
+} LinkerState;
+
 extern CompilerState compiler_state;
+extern LinkerState linker_state;
