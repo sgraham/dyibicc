@@ -18,8 +18,6 @@
 
 #include "dyibicc.h"
 
-#define C(x) compiler_state.parse__##x
-
 // Scope for local variables, global variables, typedefs
 // or enum constants
 typedef struct {
@@ -28,6 +26,17 @@ typedef struct {
   Type* enum_ty;
   int enum_val;
 } VarScope;
+
+// Represents a block scope.
+typedef struct Scope Scope;
+struct Scope {
+  Scope* next;
+
+  // C has two block scopes; one is for variables/typedefs and
+  // the other is for struct/union/enum tags.
+  HashMap vars;
+  HashMap tags;
+};
 
 // Variable attributes such as typedef or extern.
 typedef struct {
@@ -70,6 +79,36 @@ struct InitDesg {
   Member* member;
   Obj* var;
 };
+
+// All local variable instances created during parsing are
+// accumulated to this list.
+static Obj* locals;
+
+// Likewise, global variables are accumulated to this list.
+static Obj* globals;
+
+static Scope* scope = &(Scope){0};
+
+// Points to the function object the parser is currently parsing.
+static Obj* current_fn;
+
+// Lists of all goto statements and labels in the curent function.
+static Node* gotos;
+static Node* labels;
+
+// Current "goto" and "continue" jump targets.
+static int brk_pc_label;
+static int cont_pc_label;
+
+// Points to a node representing a switch if we are parsing
+// a switch statement. Otherwise, NULL.
+static Node* current_switch;
+
+static Obj* builtin_alloca;
+
+static int unique_name_id;
+
+static HashMap typename_map;
 
 static bool is_typename(Token* tok);
 static Type* declspec(Token** rest, Token* tok, VarAttr* attr);
@@ -126,18 +165,18 @@ static int align_down(int n, int align) {
 }
 
 static void enter_scope(void) {
-  Scope* sc = bumpcalloc(1, sizeof(Scope), AL_Compile);
-  sc->next = C(scope);
-  C(scope) = sc;
+  Scope* sc = bumpcalloc(1, sizeof(Scope));
+  sc->next = scope;
+  scope = sc;
 }
 
 static void leave_scope(void) {
-  C(scope) = C(scope)->next;
+  scope = scope->next;
 }
 
 // Find a variable by name.
 static VarScope* find_var(Token* tok) {
-  for (Scope* sc = C(scope); sc; sc = sc->next) {
+  for (Scope* sc = scope; sc; sc = sc->next) {
     VarScope* sc2 = hashmap_get2(&sc->vars, tok->loc, tok->len);
     if (sc2)
       return sc2;
@@ -146,7 +185,7 @@ static VarScope* find_var(Token* tok) {
 }
 
 static Type* find_tag(Token* tok) {
-  for (Scope* sc = C(scope); sc; sc = sc->next) {
+  for (Scope* sc = scope; sc; sc = sc->next) {
     Type* ty = hashmap_get2(&sc->tags, tok->loc, tok->len);
     if (ty)
       return ty;
@@ -155,7 +194,7 @@ static Type* find_tag(Token* tok) {
 }
 
 static Node* new_node(NodeKind kind, Token* tok) {
-  Node* node = bumpcalloc(1, sizeof(Node), AL_Compile);
+  Node* node = bumpcalloc(1, sizeof(Node));
   node->kind = kind;
   node->tok = tok;
   return node;
@@ -209,7 +248,7 @@ static Node* new_vla_ptr(Obj* var, Token* tok) {
 Node* new_cast(Node* expr, Type* ty) {
   add_type(expr);
 
-  Node* node = bumpcalloc(1, sizeof(Node), AL_Compile);
+  Node* node = bumpcalloc(1, sizeof(Node));
   node->kind = ND_CAST;
   node->tok = expr->tok;
   node->lhs = expr;
@@ -218,13 +257,13 @@ Node* new_cast(Node* expr, Type* ty) {
 }
 
 static VarScope* push_scope(char* name) {
-  VarScope* sc = bumpcalloc(1, sizeof(VarScope), AL_Compile);
-  hashmap_put(&C(scope)->vars, name, sc);
+  VarScope* sc = bumpcalloc(1, sizeof(VarScope));
+  hashmap_put(&scope->vars, name, sc);
   return sc;
 }
 
 static Initializer* new_initializer(Type* ty, bool is_flexible) {
-  Initializer* init = bumpcalloc(1, sizeof(Initializer), AL_Compile);
+  Initializer* init = bumpcalloc(1, sizeof(Initializer));
   init->ty = ty;
 
   if (ty->kind == TY_ARRAY) {
@@ -233,7 +272,7 @@ static Initializer* new_initializer(Type* ty, bool is_flexible) {
       return init;
     }
 
-    init->children = bumpcalloc(ty->array_len, sizeof(Initializer*), AL_Compile);
+    init->children = bumpcalloc(ty->array_len, sizeof(Initializer*));
     for (int i = 0; i < ty->array_len; i++)
       init->children[i] = new_initializer(ty->base, false);
     return init;
@@ -245,11 +284,11 @@ static Initializer* new_initializer(Type* ty, bool is_flexible) {
     for (Member* mem = ty->members; mem; mem = mem->next)
       len++;
 
-    init->children = bumpcalloc(len, sizeof(Initializer*), AL_Compile);
+    init->children = bumpcalloc(len, sizeof(Initializer*));
 
     for (Member* mem = ty->members; mem; mem = mem->next) {
       if (is_flexible && ty->is_flexible && !mem->next) {
-        Initializer* child = bumpcalloc(1, sizeof(Initializer), AL_Compile);
+        Initializer* child = bumpcalloc(1, sizeof(Initializer));
         child->ty = mem->ty;
         child->is_flexible = true;
         init->children[mem->idx] = child;
@@ -264,7 +303,7 @@ static Initializer* new_initializer(Type* ty, bool is_flexible) {
 }
 
 static Obj* new_var(char* name, Type* ty) {
-  Obj* var = bumpcalloc(1, sizeof(Obj), AL_Compile);
+  Obj* var = bumpcalloc(1, sizeof(Obj));
   var->name = name;
   var->ty = ty;
   var->align = ty->align;
@@ -275,22 +314,22 @@ static Obj* new_var(char* name, Type* ty) {
 static Obj* new_lvar(char* name, Type* ty) {
   Obj* var = new_var(name, ty);
   var->is_local = true;
-  var->next = C(locals);
-  C(locals) = var;
+  var->next = locals;
+  locals = var;
   return var;
 }
 
 static Obj* new_gvar(char* name, Type* ty) {
   Obj* var = new_var(name, ty);
-  var->next = C(globals);
+  var->next = globals;
   var->is_static = true;
   var->is_definition = true;
-  C(globals) = var;
+  globals = var;
   return var;
 }
 
 static char* new_unique_name(void) {
-  return format(AL_Compile, "L..%d", C(unique_name_id)++);
+  return format("L..%d", unique_name_id++);
 }
 
 static Obj* new_anon_gvar(Type* ty) {
@@ -307,7 +346,7 @@ static Obj* new_string_literal(char* p, Type* ty) {
 static char* get_ident(Token* tok) {
   if (tok->kind != TK_IDENT)
     error_tok(tok, "expected an identifier");
-  return bumpstrndup(tok->loc, tok->len, AL_Compile);
+  return bumpstrndup(tok->loc, tok->len);
 }
 
 static Type* find_typedef(Token* tok) {
@@ -320,7 +359,7 @@ static Type* find_typedef(Token* tok) {
 }
 
 static void push_tag_scope(Token* tok, Type* ty) {
-  hashmap_put2(&C(scope)->tags, tok->loc, tok->len, ty);
+  hashmap_put2(&scope->tags, tok->loc, tok->len, ty);
 }
 
 // declspec = ("void" | "_Bool" | "char" | "short" | "int" | "long"
@@ -835,9 +874,9 @@ static Node* compute_vla_size(Type* ty, Token* tok) {
 }
 
 static Node* new_alloca(Node* sz) {
-  Node* node = new_unary(ND_FUNCALL, new_var_node(C(builtin_alloca), sz->tok), sz->tok);
-  node->func_ty = C(builtin_alloca)->ty;
-  node->ty = C(builtin_alloca)->ty->return_ty;
+  Node* node = new_unary(ND_FUNCALL, new_var_node(builtin_alloca, sz->tok), sz->tok);
+  node->func_ty = builtin_alloca->ty;
+  node->ty = builtin_alloca->ty->return_ty;
   node->args = sz;
   add_type(sz);
   return node;
@@ -1295,7 +1334,7 @@ static Type* copy_struct_type(Type* ty) {
   Member head = {0};
   Member* cur = &head;
   for (Member* mem = ty->members; mem; mem = mem->next) {
-    Member* m = bumpcalloc(1, sizeof(Member), AL_Compile);
+    Member* m = bumpcalloc(1, sizeof(Member));
     *m = *mem;
     cur = cur->next = m;
   }
@@ -1485,7 +1524,7 @@ static Relocation* write_gvar_data(Relocation* cur,
     return cur;
   }
 
-  Relocation* rel = bumpcalloc(1, sizeof(Relocation), AL_Compile);
+  Relocation* rel = bumpcalloc(1, sizeof(Relocation));
   assert(!(label && pc_label));  // Both shouldn't be set.
   rel->offset = offset;
   rel->data_label = label;
@@ -1503,7 +1542,7 @@ static void gvar_initializer(Token** rest, Token* tok, Obj* var) {
   Initializer* init = initializer(rest, tok, var->ty, &var->ty);
 
   Relocation head = {0};
-  char* buf = bumpcalloc(1, var->ty->size, AL_Compile);
+  char* buf = bumpcalloc(1, var->ty->size);
   write_gvar_data(&head, init, var->ty, buf, 0);
   var->init_data = buf;
   var->rel = head.next;
@@ -1511,7 +1550,7 @@ static void gvar_initializer(Token** rest, Token* tok, Obj* var) {
 
 // Returns true if a given token represents a type.
 static bool is_typename(Token* tok) {
-  if (C(typename_map).capacity == 0) {
+  if (typename_map.capacity == 0) {
     static char* kw[] = {
       "void",
       "_Bool",
@@ -1549,10 +1588,10 @@ static bool is_typename(Token* tok) {
     };
 
     for (size_t i = 0; i < sizeof(kw) / sizeof(*kw); i++)
-      hashmap_put(&C(typename_map), kw[i], (void*)1);
+      hashmap_put(&typename_map, kw[i], (void*)1);
   }
 
-  return hashmap_get2(&C(typename_map), tok->loc, tok->len) || find_typedef(tok);
+  return hashmap_get2(&typename_map, tok->loc, tok->len) || find_typedef(tok);
 }
 
 // asm-stmt = "asm" ("volatile" | "inline")* "(" string-literal ")"
@@ -1596,9 +1635,9 @@ static Node* stmt(Token** rest, Token* tok) {
     *rest = skip(tok, ";");
 
     add_type(exp);
-    Type* ty = C(current_fn)->ty->return_ty;
+    Type* ty = current_fn->ty->return_ty;
     if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
-      exp = new_cast(exp, C(current_fn)->ty->return_ty);
+      exp = new_cast(exp, current_fn->ty->return_ty);
 
     node->lhs = exp;
     return node;
@@ -1622,23 +1661,23 @@ static Node* stmt(Token** rest, Token* tok) {
     node->cond = expr(&tok, tok);
     tok = skip(tok, ")");
 
-    Node* sw = C(current_switch);
-    C(current_switch) = node;
+    Node* sw = current_switch;
+    current_switch = node;
 
-    int brk_pc = C(brk_pc_label);
-    C(brk_pc_label) = node->brk_pc_label = codegen_pclabel();
+    int brk_pc = brk_pc_label;
+    brk_pc_label = node->brk_pc_label = codegen_pclabel();
 
     node->then = stmt(rest, tok);
 
-    C(current_switch) = sw;
+    current_switch = sw;
 
-    C(brk_pc_label) = brk_pc;
+    brk_pc_label = brk_pc;
 
     return node;
   }
 
   if (equal(tok, "case")) {
-    if (!C(current_switch))
+    if (!current_switch)
       error_tok(tok, "stray case");
 
     Node* node = new_node(ND_CASE, tok);
@@ -1660,13 +1699,13 @@ static Node* stmt(Token** rest, Token* tok) {
     node->lhs = stmt(rest, tok);
     node->begin = begin;
     node->end = end;
-    node->case_next = C(current_switch)->case_next;
-    C(current_switch)->case_next = node;
+    node->case_next = current_switch->case_next;
+    current_switch->case_next = node;
     return node;
   }
 
   if (equal(tok, "default")) {
-    if (!C(current_switch))
+    if (!current_switch)
       error_tok(tok, "stray default");
 
     Node* node = new_node(ND_CASE, tok);
@@ -1674,7 +1713,7 @@ static Node* stmt(Token** rest, Token* tok) {
     node->label = new_unique_name();
     node->pc_label = codegen_pclabel();
     node->lhs = stmt(rest, tok);
-    C(current_switch)->default_case = node;
+    current_switch->default_case = node;
     return node;
   }
 
@@ -1684,10 +1723,10 @@ static Node* stmt(Token** rest, Token* tok) {
 
     enter_scope();
 
-    int brk_pc = C(brk_pc_label);
-    int cont_pc = C(cont_pc_label);
-    C(brk_pc_label) = node->brk_pc_label = codegen_pclabel();
-    C(cont_pc_label) = node->cont_pc_label = codegen_pclabel();
+    int brk_pc = brk_pc_label;
+    int cont_pc = cont_pc_label;
+    brk_pc_label = node->brk_pc_label = codegen_pclabel();
+    cont_pc_label = node->cont_pc_label = codegen_pclabel();
 
     if (is_typename(tok)) {
       Type* basety = declspec(&tok, tok, NULL);
@@ -1708,8 +1747,8 @@ static Node* stmt(Token** rest, Token* tok) {
 
     leave_scope();
 
-    C(brk_pc_label) = brk_pc;
-    C(cont_pc_label) = cont_pc;
+    brk_pc_label = brk_pc;
+    cont_pc_label = cont_pc;
 
     return node;
   }
@@ -1720,30 +1759,30 @@ static Node* stmt(Token** rest, Token* tok) {
     node->cond = expr(&tok, tok);
     tok = skip(tok, ")");
 
-    int brk_pc = C(brk_pc_label);
-    int cont_pc = C(cont_pc_label);
-    C(brk_pc_label) = node->brk_pc_label = codegen_pclabel();
-    C(cont_pc_label) = node->cont_pc_label = codegen_pclabel();
+    int brk_pc = brk_pc_label;
+    int cont_pc = cont_pc_label;
+    brk_pc_label = node->brk_pc_label = codegen_pclabel();
+    cont_pc_label = node->cont_pc_label = codegen_pclabel();
 
     node->then = stmt(rest, tok);
 
-    C(brk_pc_label) = brk_pc;
-    C(cont_pc_label) = cont_pc;
+    brk_pc_label = brk_pc;
+    cont_pc_label = cont_pc;
     return node;
   }
 
   if (equal(tok, "do")) {
     Node* node = new_node(ND_DO, tok);
 
-    int brk_pc = C(brk_pc_label);
-    int cont_pc = C(cont_pc_label);
-    C(brk_pc_label) = node->brk_pc_label = codegen_pclabel();
-    C(cont_pc_label) = node->cont_pc_label = codegen_pclabel();
+    int brk_pc = brk_pc_label;
+    int cont_pc = cont_pc_label;
+    brk_pc_label = node->brk_pc_label = codegen_pclabel();
+    cont_pc_label = node->cont_pc_label = codegen_pclabel();
 
     node->then = stmt(&tok, tok->next);
 
-    C(brk_pc_label) = brk_pc;
-    C(cont_pc_label) = cont_pc;
+    brk_pc_label = brk_pc;
+    cont_pc_label = cont_pc;
 
     tok = skip(tok, "while");
     tok = skip(tok, "(");
@@ -1767,37 +1806,37 @@ static Node* stmt(Token** rest, Token* tok) {
 
     Node* node = new_node(ND_GOTO, tok);
     node->label = get_ident(tok->next);
-    node->goto_next = C(gotos);
-    C(gotos) = node;
+    node->goto_next = gotos;
+    gotos = node;
     *rest = skip(tok->next->next, ";");
     return node;
   }
 
   if (equal(tok, "break")) {
-    if (!C(brk_pc_label))
+    if (!brk_pc_label)
       error_tok(tok, "stray break");
     Node* node = new_node(ND_GOTO, tok);
-    node->unique_pc_label = C(brk_pc_label);
+    node->unique_pc_label = brk_pc_label;
     *rest = skip(tok->next, ";");
     return node;
   }
 
   if (equal(tok, "continue")) {
-    if (!C(cont_pc_label))
+    if (!cont_pc_label)
       error_tok(tok, "stray continue");
     Node* node = new_node(ND_GOTO, tok);
-    node->unique_pc_label = C(cont_pc_label);
+    node->unique_pc_label = cont_pc_label;
     *rest = skip(tok->next, ";");
     return node;
   }
 
   if (tok->kind == TK_IDENT && equal(tok->next, ":")) {
     Node* node = new_node(ND_LABEL, tok);
-    node->label = bumpstrndup(tok->loc, tok->len, AL_Compile);
+    node->label = bumpstrndup(tok->loc, tok->len);
     node->unique_pc_label = codegen_pclabel();
     node->lhs = stmt(rest, tok->next->next);
-    node->goto_next = C(labels);
-    C(labels) = node;
+    node->goto_next = labels;
+    labels = node;
     return node;
   }
 
@@ -2569,8 +2608,8 @@ static Node* unary(Token** rest, Token* tok) {
   if (equal(tok, "&&")) {
     Node* node = new_node(ND_LABEL_VAL, tok);
     node->label = get_ident(tok->next);
-    node->goto_next = C(gotos);
-    C(gotos) = node;
+    node->goto_next = gotos;
+    gotos = node;
     *rest = tok->next->next;
     return node;
   }
@@ -2591,7 +2630,7 @@ static void struct_members(Token** rest, Token* tok, Type* ty) {
 
     // Anonymous struct member
     if ((basety->kind == TY_STRUCT || basety->kind == TY_UNION) && consume(&tok, tok, ";")) {
-      Member* mem = bumpcalloc(1, sizeof(Member), AL_Compile);
+      Member* mem = bumpcalloc(1, sizeof(Member));
       mem->ty = basety;
       mem->idx = idx++;
       mem->align = attr.align ? attr.align : mem->ty->align;
@@ -2605,7 +2644,7 @@ static void struct_members(Token** rest, Token* tok, Type* ty) {
         tok = skip(tok, ",");
       first = false;
 
-      Member* mem = bumpcalloc(1, sizeof(Member), AL_Compile);
+      Member* mem = bumpcalloc(1, sizeof(Member));
       mem->ty = declarator(&tok, tok, basety);
       mem->name = mem->ty->name;
       mem->idx = idx++;
@@ -2699,7 +2738,7 @@ static Type* struct_union_decl(Token** rest, Token* tok) {
   if (tag) {
     // If this is a redefinition, overwrite a previous type.
     // Otherwise, register the struct type.
-    Type* ty2 = hashmap_get2(&C(scope)->tags, tag->loc, tag->len);
+    Type* ty2 = hashmap_get2(&scope->tags, tag->loc, tag->len);
     if (ty2) {
       *ty2 = *ty;
       return ty2;
@@ -2847,7 +2886,7 @@ static Node* postfix(Token** rest, Token* tok) {
     Type* ty = typename(&tok, tok->next);
     tok = skip(tok, ")");
 
-    if (C(scope)->next == NULL) {
+    if (scope->next == NULL) {
       Obj* var = new_anon_gvar(ty);
       gvar_initializer(rest, tok, var);
       return new_var_node(var, start);
@@ -3122,8 +3161,8 @@ static Node* primary(Token** rest, Token* tok) {
 
     // For "static inline" function
     if (sc && sc->var && sc->var->is_function) {
-      if (C(current_fn))
-        strarray_push(&C(current_fn)->refs, sc->var->name, AL_Compile);
+      if (current_fn)
+        strarray_push(&current_fn->refs, sc->var->name);
       else
         sc->var->is_root = true;
     }
@@ -3201,8 +3240,8 @@ static void create_param_lvars(Type* param) {
 // can refer a label that appears later in the function.
 // So, we need to do this after we parse the entire function.
 static void resolve_goto_labels(void) {
-  for (Node* x = C(gotos); x; x = x->goto_next) {
-    for (Node* y = C(labels); y; y = y->goto_next) {
+  for (Node* x = gotos; x; x = x->goto_next) {
+    for (Node* y = labels; y; y = y->goto_next) {
       if (!strcmp(x->label, y->label)) {
         x->unique_pc_label = y->unique_pc_label;
         break;
@@ -3213,11 +3252,11 @@ static void resolve_goto_labels(void) {
       error_tok(x->tok->next, "use of undeclared label");
   }
 
-  C(gotos) = C(labels) = NULL;
+  gotos = labels = NULL;
 }
 
 static Obj* find_func(char* name) {
-  Scope* sc = C(scope);
+  Scope* sc = scope;
   while (sc->next)
     sc = sc->next;
 
@@ -3268,8 +3307,8 @@ static Token* function(Token* tok, Type* basety, VarAttr* attr) {
   if (consume(&tok, tok, ";"))
     return tok;
 
-  C(current_fn) = fn;
-  C(locals) = NULL;
+  current_fn = fn;
+  locals = NULL;
   enter_scope();
   create_param_lvars(ty->params);
 
@@ -3286,7 +3325,7 @@ static Token* function(Token* tok, Type* basety, VarAttr* attr) {
     new_lvar("", pointer_to(rty));
   }
 
-  fn->params = C(locals);
+  fn->params = locals;
 
 #if !X64WIN
   if (ty->is_variadic)
@@ -3307,7 +3346,7 @@ static Token* function(Token* tok, Type* basety, VarAttr* attr) {
       new_string_literal(fn->name, array_of(ty_char, (int)strlen(fn->name) + 1));
 
   fn->body = compound_stmt(&tok, tok);
-  fn->locals = C(locals);
+  fn->locals = locals;
   leave_scope();
   resolve_goto_labels();
   return tok;
@@ -3356,14 +3395,14 @@ static void scan_globals(void) {
   Obj head;
   Obj* cur = &head;
 
-  for (Obj* var = C(globals); var; var = var->next) {
+  for (Obj* var = globals; var; var = var->next) {
     if (!var->is_tentative) {
       cur = cur->next = var;
       continue;
     }
 
     // Find another definition of the same identifier.
-    Obj* var2 = C(globals);
+    Obj* var2 = globals;
     for (; var2; var2 = var2->next)
       if (var != var2 && var2->is_definition && !strcmp(var->name, var2->name))
         break;
@@ -3375,22 +3414,20 @@ static void scan_globals(void) {
   }
 
   cur->next = NULL;
-  C(globals) = head.next;
+  globals = head.next;
 }
 
 static void declare_builtin_functions(void) {
   Type* ty = func_type(pointer_to(ty_void));
   ty->params = copy_type(ty_int);
-  C(builtin_alloca) = new_gvar("alloca", ty);
-  C(builtin_alloca)->is_definition = false;
+  builtin_alloca = new_gvar("alloca", ty);
+  builtin_alloca->is_definition = false;
 }
 
 // program = (typedef | function-definition | global-variable)*
 Obj* parse(Token* tok) {
-  C(scope) = &C(empty_scope);
-
   declare_builtin_functions();
-  C(globals) = NULL;
+  globals = NULL;
 
   while (tok->kind != TK_EOF) {
     // logerr("%s:%d\n", tok->filename, tok->line_no);
@@ -3413,11 +3450,28 @@ Obj* parse(Token* tok) {
     tok = global_variable(tok, basety, &attr);
   }
 
-  for (Obj* var = C(globals); var; var = var->next)
+  for (Obj* var = globals; var; var = var->next)
     if (var->is_root)
       mark_live(var);
 
   // Remove redundant tentative definitions.
   scan_globals();
-  return C(globals);
+  return globals;
+}
+
+void parse_reset(void) {
+  locals = NULL;
+  globals = NULL;
+  scope->next = NULL;
+  scope->vars = (HashMap){NULL, 0, 0};
+  scope->tags = (HashMap){NULL, 0, 0};
+  current_fn = NULL;
+  gotos = NULL;
+  labels = NULL;
+  brk_pc_label = 0;
+  cont_pc_label = 0;
+  current_switch = NULL;
+  builtin_alloca = NULL;
+  unique_name_id = 0;
+  typename_map = (HashMap){NULL, 0, 0};
 }

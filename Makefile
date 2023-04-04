@@ -1,7 +1,7 @@
 include makefile.shared
 
 CC=clang
-CFLAGS=-std=c11 -O0 -fsanitize=address -g -fno-common -Wall -Werror -Wno-switch -pthread
+CFLAGS=-std=c11 -g -fno-common -Wall -Werror -Wno-switch -pthread
 # -O1 -fsanitize=address
 
 SRCS += codegen.linux.c

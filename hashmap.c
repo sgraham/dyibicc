@@ -39,21 +39,21 @@ static void rehash(HashMap* map) {
 
   // Create a new hashmap and copy all key-values.
   HashMap map2 = {0};
-  map2.buckets = bumpcalloc(cap, sizeof(HashEntry), map->alloc_lifetime);
+  map2.global_alloc = map->global_alloc;
+  if (map2.global_alloc) {
+    map2.buckets = calloc(cap, sizeof(HashEntry));
+  } else {
+    map2.buckets = bumpcalloc(cap, sizeof(HashEntry));
+  }
   map2.capacity = cap;
-  map2.alloc_lifetime = map->alloc_lifetime;
 
   for (int i = 0; i < map->capacity; i++) {
     HashEntry* ent = &map->buckets[i];
-    if (ent->key && ent->key != TOMBSTONE) {
+    if (ent->key && ent->key != TOMBSTONE)
       hashmap_put2(&map2, ent->key, ent->keylen, ent->val);
-    }
   }
 
   assert(map2.used == nkeys);
-  if (map->alloc_lifetime == AL_Manual) {
-    alloc_free(map->buckets, map->alloc_lifetime);
-  }
   *map = map2;
 }
 
@@ -80,7 +80,11 @@ static HashEntry* get_entry(HashMap* map, char* key, int keylen) {
 
 static HashEntry* get_or_insert_entry(HashMap* map, char* key, int keylen) {
   if (!map->buckets) {
-    map->buckets = bumpcalloc(INIT_SIZE, sizeof(HashEntry), map->alloc_lifetime);
+    if (map->global_alloc) {
+      map->buckets = calloc(INIT_SIZE, sizeof(HashEntry));
+    } else {
+      map->buckets = bumpcalloc(INIT_SIZE, sizeof(HashEntry));
+    }
     map->capacity = INIT_SIZE;
   } else if ((map->used * 100) / map->capacity >= HIGH_WATERMARK) {
     rehash(map);

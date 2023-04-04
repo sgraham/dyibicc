@@ -4,7 +4,16 @@
 #define strncasecmp _strnicmp
 #endif
 
-#define C(x) compiler_state.tokenize__##x
+// Input file
+static File* current_file;
+
+// True if the current position is at the beginning of a line
+static bool at_bol;
+
+// True if the current position follows a space character
+static bool has_space;
+
+static HashMap keyword_map;
 
 // Reports an error message in the following format.
 //
@@ -35,13 +44,13 @@ static void verror_at(char* filename, char* input, int line_no, char* loc, char*
 
 void error_at(char* loc, char* fmt, ...) {
   int line_no = 1;
-  for (char* p = C(current_file)->contents; p < loc; p++)
+  for (char* p = current_file->contents; p < loc; p++)
     if (*p == '\n')
       line_no++;
 
   va_list ap;
   va_start(ap, fmt);
-  verror_at(C(current_file)->name, C(current_file)->contents, line_no, loc, fmt, ap);
+  verror_at(current_file->name, current_file->contents, line_no, loc, fmt, ap);
   exit(1);
 }
 
@@ -82,16 +91,16 @@ bool consume(Token** rest, Token* tok, char* str) {
 
 // Create a new token.
 static Token* new_token(TokenKind kind, char* start, char* end) {
-  Token* tok = bumpcalloc(1, sizeof(Token), AL_Compile);
+  Token* tok = bumpcalloc(1, sizeof(Token));
   tok->kind = kind;
   tok->loc = start;
   tok->len = (int)(end - start);
-  tok->file = C(current_file);
-  tok->filename = C(current_file)->display_name;
-  tok->at_bol = C(at_bol);
-  tok->has_space = C(has_space);
+  tok->file = current_file;
+  tok->filename = current_file->display_name;
+  tok->at_bol = at_bol;
+  tok->has_space = has_space;
 
-  C(at_bol) = C(has_space) = false;
+  at_bol = has_space = false;
   return tok;
 }
 
@@ -139,7 +148,7 @@ static int read_punct(char* p) {
 }
 
 static bool is_keyword(Token* tok) {
-  if (C(keyword_map).capacity == 0) {
+  if (keyword_map.capacity == 0) {
     static char* kw[] = {
       "return",
       "if",
@@ -193,10 +202,10 @@ static bool is_keyword(Token* tok) {
     };
 
     for (size_t i = 0; i < sizeof(kw) / sizeof(*kw); i++)
-      hashmap_put(&C(keyword_map), kw[i], (void*)1);
+      hashmap_put(&keyword_map, kw[i], (void*)1);
   }
 
-  return hashmap_get2(&C(keyword_map), tok->loc, tok->len);
+  return hashmap_get2(&keyword_map, tok->loc, tok->len);
 }
 
 static int read_escaped_char(char** new_pos, char* p) {
@@ -275,7 +284,7 @@ static char* string_literal_end(char* p) {
 
 static Token* read_string_literal(char* start, char* quote) {
   char* end = string_literal_end(quote + 1);
-  char* buf = bumpcalloc(1, end - quote, AL_Compile);
+  char* buf = bumpcalloc(1, end - quote);
   int len = 0;
 
   for (char* p = quote + 1; p < end;) {
@@ -300,7 +309,7 @@ static Token* read_string_literal(char* start, char* quote) {
 // is called a "surrogate pair".
 static Token* read_utf16_string_literal(char* start, char* quote) {
   char* end = string_literal_end(quote + 1);
-  uint16_t* buf = bumpcalloc(2, end - start, AL_Compile);
+  uint16_t* buf = bumpcalloc(2, end - start);
   int len = 0;
 
   for (char* p = quote + 1; p < end;) {
@@ -333,7 +342,7 @@ static Token* read_utf16_string_literal(char* start, char* quote) {
 // encoded in 4 bytes.
 static Token* read_utf32_string_literal(char* start, char* quote, Type* ty) {
   char* end = string_literal_end(quote + 1);
-  uint32_t* buf = bumpcalloc(4, end - quote, AL_Compile);
+  uint32_t* buf = bumpcalloc(4, end - quote);
   int len = 0;
 
   for (char* p = quote + 1; p < end;) {
@@ -493,7 +502,7 @@ void convert_pp_tokens(Token* tok) {
 
 // Initialize line info for all tokens.
 static void add_line_numbers(Token* tok) {
-  char* p = C(current_file)->contents;
+  char* p = current_file->contents;
   int n = 1;
 
   do {
@@ -518,14 +527,14 @@ Token* tokenize_string_literal(Token* tok, Type* basety) {
 
 // Tokenize a given string and returns new tokens.
 Token* tokenize(File* file) {
-  C(current_file) = file;
+  current_file = file;
 
   char* p = file->contents;
   Token head = {0};
   Token* cur = &head;
 
-  C(at_bol) = true;
-  C(has_space) = false;
+  at_bol = true;
+  has_space = false;
 
   while (*p) {
     // Skip line comments.
@@ -533,7 +542,7 @@ Token* tokenize(File* file) {
       p += 2;
       while (*p != '\n')
         p++;
-      C(has_space) = true;
+      has_space = true;
       continue;
     }
 
@@ -543,22 +552,22 @@ Token* tokenize(File* file) {
       if (!q)
         error_at(p, "unclosed block comment");
       p = q + 2;
-      C(has_space) = true;
+      has_space = true;
       continue;
     }
 
     // Skip newline.
     if (*p == '\n') {
       p++;
-      C(at_bol) = true;
-      C(has_space) = false;
+      at_bol = true;
+      has_space = false;
       continue;
     }
 
     // Skip whitespace characters.
     if (isspace(*p)) {
       p++;
-      C(has_space) = true;
+      has_space = true;
       continue;
     }
 
@@ -678,7 +687,7 @@ static char* read_file(char* path) {
   fseek(fp, 0, SEEK_END);
   long long size = ftell(fp);
   rewind(fp);
-  char* buf = bumpcalloc(1, size + 1, AL_Compile);
+  char* buf = bumpcalloc(1, size + 1);
   long long n = fread(buf, 1, size, fp);
   fclose(fp);
   buf[n] = 0;
@@ -686,7 +695,7 @@ static char* read_file(char* path) {
 }
 
 File* new_file(char* name, char* contents) {
-  File* file = bumpcalloc(1, sizeof(File), AL_Compile);
+  File* file = bumpcalloc(1, sizeof(File));
   file->name = name;
   file->display_name = name;
   file->contents = contents;
@@ -799,4 +808,11 @@ Token* tokenize_file(char* path) {
 
   File* file = new_file(path, p);
   return tokenize(file);
+}
+
+void tokenize_reset(void) {
+  current_file = NULL;
+  at_bol = false;
+  has_space = false;
+  keyword_map = (HashMap){NULL, 0, 0};
 }

@@ -7,23 +7,22 @@
 #include <unistd.h>
 #endif
 
-#define L(x) linker_state.link__##x
-
 #include "khash.h"
 
 KHASH_SET_INIT_INT64(voidp)
 
-static DyibiccFunctionLookupFn user_runtime_function_callback = NULL;
+static DyibiccFunctionLookupFn  user_runtime_function_callback = NULL;
+
+#if X64WIN
+static HashMap runtime_function_map;
 
 void dyibicc_set_user_runtime_function_callback(DyibiccFunctionLookupFn f) {
   user_runtime_function_callback = f;
 }
 
 static void* get_standard_runtime_function(char* name) {
-  if (L(runtime_function_map).capacity == 0) {
-    L(runtime_function_map).alloc_lifetime = AL_Link;
-#define X(func) hashmap_put(&L(runtime_function_map), #func, (void*)&func)
-#if X64WIN
+  if (runtime_function_map.capacity == 0) {
+#define X(func) hashmap_put(&runtime_function_map, #func, (void*)&func)
     X(CloseHandle);
     X(CreateThread);
     X(WaitForSingleObject);
@@ -46,7 +45,6 @@ static void* get_standard_runtime_function(char* name) {
     X(__stdio_common_vswprintf_p);
     X(__stdio_common_vswprintf_s);
     X(__stdio_common_vswscanf);
-#endif
     X(exit);
     X(memcmp);
     X(memcpy);
@@ -59,8 +57,9 @@ static void* get_standard_runtime_function(char* name) {
 #undef X
   }
 
-  return hashmap_get(&L(runtime_function_map), name);
+  return hashmap_get(&runtime_function_map, name);
 }
+#endif
 
 static void* symbol_lookup(char* name) {
   if (user_runtime_function_callback) {
@@ -70,36 +69,15 @@ static void* symbol_lookup(char* name) {
     }
   }
 
+#if X64WIN
   void* f = get_standard_runtime_function(name);
   if (f) {
     return f;
   }
-#if X64WIN
   return (void*)GetProcAddress(GetModuleHandle(NULL), name);
 #else
   return dlsym(NULL, name);
 #endif
-}
-
-#define TOMBSTONE ((void*)-1)
-static void hashmap_custom_free(HashMap* map) {
-  assert(map->alloc_lifetime == AL_Manual);
-  for (int i = 0; i < map->capacity; i++) {
-    HashEntry* ent = &map->buckets[i];
-    if (ent->key && ent->key != TOMBSTONE) {
-      alloc_free(ent->key, map->alloc_lifetime);
-      aligned_free(ent->val);
-    }
-  }
-  alloc_free(map->buckets, map->alloc_lifetime);
-}
-
-void dyibicc_free_link_info_resources(DyibiccLinkInfo* link_info) {
-  LinkInfo* li = (LinkInfo*)link_info;
-  hashmap_custom_free(&li->global_data);
-  for (int i = 0; i < li->num_dyos; ++i) {
-    hashmap_custom_free(&li->per_dyo_data[i]);
-  }
 }
 
 bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
@@ -118,7 +96,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
   LinkInfo li = {0};
 
   if (relinking) {
-    assert(link_info->global_data.alloc_lifetime == AL_Manual);
+    assert(link_info->global_data.global_alloc);
     li = *link_info;
 
     // Free all old code, but not data.
@@ -128,9 +106,9 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
   } else {
     // These hashmaps live beyond the purge to maintain addresses of the global
     // data that shouldn't be updated.
-    li.global_data.alloc_lifetime = AL_Manual;
+    li.global_data.global_alloc = true;
     for (int i = 0; i < MAX_DYOS; ++i) {
-      li.per_dyo_data[i].alloc_lifetime = AL_Manual;
+      li.per_dyo_data[i].global_alloc = true;
     }
   }
 
@@ -148,7 +126,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
     int record_index = 0;
 
     StringArray strings = {NULL, 0, 0};
-    strarray_push(&strings, NULL, AL_Link);  // 1-based
+    strarray_push(&strings, NULL);  // 1-based
 
     for (;;) {
       unsigned int type;
@@ -157,9 +135,9 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
         goto fail;
 
       if (type == kTypeString) {
-        strarray_push(&strings, bumpstrndup(buf, size, AL_Link), AL_Link);
+        strarray_push(&strings, bumpstrndup(buf, size));
       } else {
-        strarray_push(&strings, NULL, AL_Link);
+        strarray_push(&strings, NULL);
 
         if (type == kTypeEntryPoint) {
           entry_point_offset = *(unsigned int*)&buf[0];
@@ -212,21 +190,9 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
 
           // The keys need to be strdup'd to stick around for subsequent links.
           if (is_static) {
-            void* prev = hashmap_get(&li.per_dyo_data[num_dyos], strings.data[name_index]);
-            if (prev) {
-              logerr("duplicated symbol: %s\n", strings.data[name_index]);
-              goto fail;
-            }
-            hashmap_put(&li.per_dyo_data[num_dyos], bumpstrdup(strings.data[name_index], AL_Manual),
-                        global_data);
+            hashmap_put(&li.per_dyo_data[num_dyos], strdup(strings.data[name_index]), global_data);
           } else {
-            void* prev = hashmap_get(&li.global_data, strings.data[name_index]);
-            if (prev) {
-              logerr("duplicated symbol: %s\n", strings.data[name_index]);
-              goto fail;
-            }
-            hashmap_put(&li.global_data, bumpstrdup(strings.data[name_index], AL_Manual),
-                        global_data);
+            hashmap_put(&li.global_data, strdup(strings.data[name_index]), global_data);
           }
 
           int ret;
@@ -241,7 +207,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
   }
 
   // Get all exported symbols as hashmap of name => real address.
-  HashMap exports = {NULL, 0, 0, AL_Link};
+  HashMap exports = {NULL, 0, 0};
   num_dyos = 0;
   for (FILE** dyo = dyo_files; *dyo; ++dyo) {
     if (!ensure_dyo_header(*dyo))
@@ -250,7 +216,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
     int record_index = 0;
 
     StringArray strings = {NULL, 0, 0};
-    strarray_push(&strings, NULL, AL_Link);  // 1-based
+    strarray_push(&strings, NULL);  // 1-based
 
     for (;;) {
       unsigned int type;
@@ -259,9 +225,9 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
         goto fail;
 
       if (type == kTypeString) {
-        strarray_push(&strings, bumpstrndup(buf, size, AL_Link), AL_Link);
+        strarray_push(&strings, bumpstrndup(buf, size));
       } else {
-        strarray_push(&strings, NULL, AL_Link);
+        strarray_push(&strings, NULL);
 
         if (type == kTypeFunctionExport) {
           unsigned int function_offset = *(unsigned int*)&buf[0];
@@ -291,7 +257,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
     int record_index = 0;
 
     StringArray strings = {NULL, 0, 0};
-    strarray_push(&strings, NULL, AL_Link);  // 1-based
+    strarray_push(&strings, NULL);  // 1-based
 
     char* current_data_base = NULL;
     char* current_data_pointer = NULL;
@@ -304,9 +270,9 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
         goto fail;
 
       if (type == kTypeString) {
-        strarray_push(&strings, bumpstrndup(buf, size, AL_Link), AL_Link);
+        strarray_push(&strings, bumpstrndup(buf, size));
       } else {
-        strarray_push(&strings, NULL, AL_Link);
+        strarray_push(&strings, NULL);
 
         if (type == kTypeImport) {
           unsigned int fixup_offset = *(unsigned int*)&buf[0];
@@ -448,10 +414,15 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
 
   li.num_dyos = num_dyos;
   *link_info = li;
-  kh_destroy(voidp, created_this_update);
   return true;
 
 fail:
   kh_destroy(voidp, created_this_update);
   return false;
+}
+
+void link_reset(void) {
+#if X64WIN
+  runtime_function_map = (HashMap){NULL, 0, 0};
+#endif
 }

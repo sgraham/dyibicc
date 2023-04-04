@@ -2,9 +2,9 @@
 
 DyibiccOutputFn output_fn;
 
-char* bumpstrndup(const char* s, size_t n, AllocLifetime lifetime) {
+char* bumpstrndup(const char* s, size_t n) {
   size_t l = strnlen(s, n);
-  char* d = bumpcalloc(1, l + 1, lifetime);
+  char* d = bumpcalloc(1, l + 1);
   if (!d)
     return NULL;
   memcpy(d, s, l);
@@ -12,9 +12,9 @@ char* bumpstrndup(const char* s, size_t n, AllocLifetime lifetime) {
   return d;
 }
 
-char* bumpstrdup(const char* s, AllocLifetime lifetime) {
+char* bumpstrdup(const char* s) {
   size_t l = strlen(s);
-  char* d = bumpcalloc(1, l + 1, lifetime);
+  char* d = bumpcalloc(1, l + 1);
   if (!d)
     return NULL;
   memcpy(d, s, l);
@@ -62,15 +62,15 @@ int64_t align_to_s(int64_t n, int64_t align) {
   return (n + align - 1) / align * align;
 }
 
-void strarray_push(StringArray* arr, char* s, AllocLifetime lifetime) {
+void strarray_push(StringArray* arr, char* s) {
   if (!arr->data) {
-    arr->data = bumpcalloc(8, sizeof(char*), lifetime);
+    arr->data = bumpcalloc(8, sizeof(char*));
     arr->capacity = 8;
   }
 
   if (arr->capacity == arr->len) {
     arr->data = bumplamerealloc(arr->data, sizeof(char*) * arr->capacity,
-                                sizeof(char*) * arr->capacity * 2, lifetime);
+                                sizeof(char*) * arr->capacity * 2);
     arr->capacity *= 2;
     for (int i = arr->len; i < arr->capacity; i++)
       arr->data[i] = NULL;
@@ -79,15 +79,15 @@ void strarray_push(StringArray* arr, char* s, AllocLifetime lifetime) {
   arr->data[arr->len++] = s;
 }
 
-void strintarray_push(StringIntArray* arr, StringInt item, AllocLifetime lifetime) {
+void strintarray_push(StringIntArray* arr, StringInt item) {
   if (!arr->data) {
-    arr->data = bumpcalloc(8, sizeof(StringInt), lifetime);
+    arr->data = bumpcalloc(8, sizeof(StringInt));
     arr->capacity = 8;
   }
 
   if (arr->capacity == arr->len) {
     arr->data = bumplamerealloc(arr->data, sizeof(StringInt) * arr->capacity,
-                                sizeof(StringInt) * arr->capacity * 2, lifetime);
+                                sizeof(StringInt) * arr->capacity * 2);
     arr->capacity *= 2;
     for (int i = arr->len; i < arr->capacity; i++)
       arr->data[i] = (StringInt){NULL, -1};
@@ -96,15 +96,15 @@ void strintarray_push(StringIntArray* arr, StringInt item, AllocLifetime lifetim
   arr->data[arr->len++] = item;
 }
 
-void bytearray_push(ByteArray* arr, char b, AllocLifetime lifetime) {
+void bytearray_push(ByteArray* arr, char b) {
   if (!arr->data) {
-    arr->data = bumpcalloc(8, sizeof(char), lifetime);
+    arr->data = bumpcalloc(8, sizeof(char));
     arr->capacity = 8;
   }
 
   if (arr->capacity == arr->len) {
-    arr->data = bumplamerealloc(arr->data, sizeof(char) * arr->capacity,
-                                sizeof(char) * arr->capacity * 2, lifetime);
+    arr->data =
+        bumplamerealloc(arr->data, sizeof(char) * arr->capacity, sizeof(char) * arr->capacity * 2);
     arr->capacity *= 2;
     for (int i = arr->len; i < arr->capacity; i++)
       arr->data[i] = 0;
@@ -113,15 +113,15 @@ void bytearray_push(ByteArray* arr, char b, AllocLifetime lifetime) {
   arr->data[arr->len++] = b;
 }
 
-void intintarray_push(IntIntArray* arr, IntInt item, AllocLifetime lifetime) {
+void intintarray_push(IntIntArray* arr, IntInt item) {
   if (!arr->data) {
-    arr->data = bumpcalloc(8, sizeof(IntInt), lifetime);
+    arr->data = bumpcalloc(8, sizeof(IntInt));
     arr->capacity = 8;
   }
 
   if (arr->capacity == arr->len) {
     arr->data = bumplamerealloc(arr->data, sizeof(IntInt) * arr->capacity,
-                                sizeof(IntInt) * arr->capacity * 2, lifetime);
+                                sizeof(IntInt) * arr->capacity * 2);
     arr->capacity *= 2;
     for (int i = arr->len; i < arr->capacity; i++)
       arr->data[i] = (IntInt){0, 0};
@@ -131,14 +131,14 @@ void intintarray_push(IntIntArray* arr, IntInt item, AllocLifetime lifetime) {
 }
 
 // Takes a printf-style format string and returns a formatted string.
-char* format(AllocLifetime lifetime, char* fmt, ...) {
+char* format(char* fmt, ...) {
   char buf[4096];
 
   va_list ap;
   va_start(ap, fmt);
   vsprintf(buf, fmt, ap);
   va_end(ap);
-  return bumpstrdup(buf, lifetime);
+  return bumpstrdup(buf);
 }
 
 int logdbg(const char* fmt, ...) {

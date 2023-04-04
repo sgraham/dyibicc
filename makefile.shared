@@ -14,14 +14,14 @@ util.c
 
 # XXX:
 # test/asm.c
-#   asm() blocks were directly passed through to the system assembler, so now
+#   dyibicc passes asm() blocks directly through to the system assembler, so now
 #   that we're not using that, there's no assembler available.
 #
 # test/tls.c
 #   TLS not implemented
 #
 # test/commonsym.c
-#   Intentionally disabled.
+#   currently passes, but I thought I disabled support, so need to investigate.
 #
 TEST_SRCS=\
 test/alignof.c \
@@ -32,6 +32,7 @@ test/attribute.c \
 test/bitfield.c \
 test/builtin.c \
 test/cast.c \
+test/commonsym.c \
 test/compat.c \
 test/complit.c \
 test/const.c \

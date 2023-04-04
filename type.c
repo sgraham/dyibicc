@@ -22,7 +22,7 @@ Type* ty_ldouble = &(Type){TY_LDOUBLE, 16, 16};
 #endif
 
 static Type* new_type(TypeKind kind, int size, int align) {
-  Type* ty = bumpcalloc(1, sizeof(Type), AL_Compile);
+  Type* ty = bumpcalloc(1, sizeof(Type));
   ty->kind = kind;
   ty->size = size;
   ty->align = align;
@@ -92,7 +92,7 @@ bool is_compatible(Type* t1, Type* t2) {
 }
 
 Type* copy_type(Type* ty) {
-  Type* ret = bumpcalloc(1, sizeof(Type), AL_Compile);
+  Type* ret = bumpcalloc(1, sizeof(Type));
   *ret = *ty;
   ret->origin = ty;
   return ret;
