@@ -3,9 +3,9 @@
 SRCS=$(SRCS) codegen.win32.c
 
 CC=@cl
-CFLAGS=/nologo /Od /Zi /D_CRT_SECURE_NO_DEPRECATE /DX64WIN=1 /W4 /WX
+CFLAGS=/nologo /Ox /Zi /D_CRT_SECURE_NO_DEPRECATE /DX64WIN=1 /W4 /WX
 #CC=@"C:\Program Files\LLVM\bin\clang-cl.exe"
-#CFLAGS=/nologo /O1 /fsanitize=address /Zi /D_CRT_SECURE_NO_DEPRECATE /DX64WIN=1 /W4 /WX -Wno-missing-field-initializers -Wno-switch
+#CFLAGS=/nologo /Od /fsanitize=address /Zi /D_CRT_SECURE_NO_DEPRECATE /DX64WIN=1 /W4 /WX -Wno-missing-field-initializers -Wno-switch -Wno-unused-function
 
 OBJS=$(SRCS:.c=.obj)
 

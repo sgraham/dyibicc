@@ -1,5 +1,7 @@
 #include "dyibicc.h"
 
+#define C(x) compiler_state.codegen__##x
+
 #define DASM_CHECKS 1
 
 #ifdef _MSC_VER
@@ -21,10 +23,7 @@
 ///| .define X64WIN, 1
 ///| .endif
 
-#define Dst &dynasm
-
-static FILE* dyo_file;
-static int depth;
+#define Dst &C(dynasm)
 
 #define REG_DI 7
 #define REG_SI 6
@@ -67,44 +66,35 @@ static int dasmargreg[] = {REG_DI, REG_SI, REG_DX, REG_CX, REG_R8, REG_R9};
 ///| .define RUTILenc, 0x17
 ///| .endif
 
-static Obj* current_fn;
-
-static dasm_State* dynasm;
-static int numlabels = 1;
-static int dasm_label_main_entry = -1;
-static StringIntArray import_fixups;
-static StringIntArray data_fixups;
-static IntIntArray pending_code_pclabels;
-
 static void gen_expr(Node* node);
 static void gen_stmt(Node* node);
 
 int codegen_pclabel(void) {
-  int ret = numlabels;
-  dasm_growpc(&dynasm, ++numlabels);
+  int ret = C(numlabels);
+  dasm_growpc(&C(dynasm), ++C(numlabels));
   return ret;
 }
 
 static void push(void) {
   ///| push rax
-  depth++;
+  C(depth)++;
 }
 
 static void pop(int dasmreg) {
   ///| pop Rq(dasmreg)
-  depth--;
+  C(depth)--;
 }
 
 static void pushf(void) {
   ///| sub rsp, 8
   ///| movsd qword [rsp], xmm0
-  depth++;
+  C(depth)++;
 }
 
 static void popf(int reg) {
   ///| movsd xmm(reg), qword [rsp]
   ///| add rsp, 8
-  depth--;
+  C(depth)--;
 }
 
 // Load a value from where %rax is pointing to.
@@ -226,7 +216,8 @@ static void gen_addr(Node* node) {
           ///| lea rax, [=>node->var->dasm_entry_label]
         } else {
           int fixup_location = codegen_pclabel();
-          strintarray_push(&import_fixups, (StringInt){node->var->name, fixup_location});
+          strintarray_push(&C(import_fixups), (StringInt){node->var->name, fixup_location},
+                           AL_Compile);
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4310)  // dynasm casts the top and bottom of the 64bit arg
@@ -242,7 +233,7 @@ static void gen_addr(Node* node) {
 
       // Global variable
       int fixup_location = codegen_pclabel();
-      strintarray_push(&data_fixups, (StringInt){node->var->name, fixup_location});
+      strintarray_push(&C(data_fixups), (StringInt){node->var->name, fixup_location}, AL_Compile);
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4310)  // dynasm casts the top and bottom of the 64bit arg
@@ -652,7 +643,7 @@ static bool has_flonum2(Type* ty) {
 static int push_struct(Type* ty) {
   int sz = (int)align_to_s(ty->size, 8);
   ///| sub rsp, sz
-  depth += sz / 8;
+  C(depth) += sz / 8;
 
   for (int i = 0; i < ty->size; i++) {
     ///| mov r10b, [rax+i]
@@ -823,9 +814,9 @@ static int push_args_win(Node* node, int* by_ref_copies_size) {
   assert((*by_ref_copies_size == 0 && !has_by_ref_args) ||
          (*by_ref_copies_size && has_by_ref_args));
 
-  if ((depth + stack) % 2 == 1) {
+  if ((C(depth) + stack) % 2 == 1) {
     ///| sub rsp, 8
-    depth++;
+    C(depth)++;
     stack++;
   }
 
@@ -868,7 +859,7 @@ static void push_args2_sysv(Node* args, bool first_pass) {
     case TY_LDOUBLE:
       ///| sub rsp, 16
       ///| fstp tword [rsp]
-      depth += 2;
+      C(depth) += 2;
       break;
     default:
       push();
@@ -949,9 +940,9 @@ static int push_args_sysv(Node* node) {
     }
   }
 
-  if ((depth + stack) % 2 == 1) {
+  if ((C(depth) + stack) % 2 == 1) {
     ///| sub rsp, 8
-    depth++;
+    C(depth)++;
     stack++;
   }
 
@@ -1012,7 +1003,7 @@ static void copy_struct_reg(void) {
   // TODO: I'm not sure if this is right/sufficient.
   ///| mov rax, [rax]
 #else
-  Type* ty = current_fn->ty->return_ty;
+  Type* ty = C(current_fn)->ty->return_ty;
 
   int gp = 0, fp = 0;
 
@@ -1055,8 +1046,8 @@ static void copy_struct_reg(void) {
 }
 
 static void copy_struct_mem(void) {
-  Type* ty = current_fn->ty->return_ty;
-  Obj* var = current_fn->params;
+  Type* ty = C(current_fn)->ty->return_ty;
+  Obj* var = C(current_fn)->params;
 
   ///| mov RUTIL, [rbp+var->offset]
 
@@ -1072,7 +1063,7 @@ static void builtin_alloca(void) {
   ///| and CARG1d, 0xfffffff0
 
   // Shift the temporary area by CARG1.
-  ///| mov CARG4, [rbp+current_fn->alloca_bottom->offset]
+  ///| mov CARG4, [rbp+C(current_fn)->alloca_bottom->offset]
   ///| sub CARG4, rsp
   ///| mov rax, rsp
   ///| sub rsp, CARG1
@@ -1089,9 +1080,9 @@ static void builtin_alloca(void) {
   ///|2:
 
   // Move alloca_bottom pointer.
-  ///| mov rax, [rbp+current_fn->alloca_bottom->offset]
+  ///| mov rax, [rbp+C(current_fn)->alloca_bottom->offset]
   ///| sub rax, CARG1
-  ///| mov [rbp+current_fn->alloca_bottom->offset], rax
+  ///| mov [rbp+C(current_fn)->alloca_bottom->offset], rax
 }
 
 // Generate code for a given node.
@@ -1380,8 +1371,8 @@ static void gen_expr(Node* node) {
         ///| pop r11
       }
 
-      depth -= by_ref_copies_size / 8;
-      depth -= stack_args;
+      C(depth) -= by_ref_copies_size / 8;
+      C(depth) -= stack_args;
 
       // It looks like the most significant 48 or 56 bits in RAX may
       // contain garbage if a function return type is short or bool/char,
@@ -1474,7 +1465,7 @@ static void gen_expr(Node* node) {
       ///| call r10
       ///| add rsp, stack_args*8
 
-      depth -= stack_args;
+      C(depth) -= stack_args;
 
       // It looks like the most significant 48 or 56 bits in RAX may
       // contain garbage if a function return type is short or bool/char,
@@ -1987,7 +1978,7 @@ static void gen_stmt(Node* node) {
         }
       }
 
-      ///| jmp =>current_fn->dasm_return_label
+      ///| jmp =>C(current_fn)->dasm_return_label
       return;
     case ND_EXPR_STMT:
       gen_expr(node->lhs);
@@ -2187,7 +2178,7 @@ static void emit_data(Obj* prog) {
     int align =
         (var->ty->kind == TY_ARRAY && var->ty->size >= 16) ? MAX(16, var->align) : var->align;
 
-    write_dyo_initialized_data(dyo_file, var->ty->size, align, var->is_static, var->is_rodata,
+    write_dyo_initialized_data(C(dyo_file), var->ty->size, align, var->is_static, var->is_rodata,
                                var->name);
 
     // .data or .tdata
@@ -2198,7 +2189,7 @@ static void emit_data(Obj* prog) {
       while (pos < var->ty->size) {
         if (rel && rel->offset == pos) {
           if (bytes.len > 0) {
-            write_dyo_initializer_bytes(dyo_file, bytes.data, bytes.len);
+            write_dyo_initializer_bytes(C(dyo_file), bytes.data, bytes.len);
             bytes = (ByteArray){NULL, 0, 0};
           }
 
@@ -2206,32 +2197,33 @@ static void emit_data(Obj* prog) {
           assert(rel->data_label || rel->code_label);  // But should be at least one if we're here.
 
           if (rel->data_label) {
-            write_dyo_initializer_data_relocation(dyo_file, *rel->data_label, rel->addend);
+            write_dyo_initializer_data_relocation(C(dyo_file), *rel->data_label, rel->addend);
           } else {
             int file_loc;
-            write_dyo_initializer_code_relocation(dyo_file, -1, rel->addend, &file_loc);
-            intintarray_push(&pending_code_pclabels, (IntInt){file_loc, *rel->code_label});
+            write_dyo_initializer_code_relocation(C(dyo_file), -1, rel->addend, &file_loc);
+            intintarray_push(&C(pending_code_pclabels), (IntInt){file_loc, *rel->code_label},
+                             AL_Compile);
           }
 
           rel = rel->next;
           pos += 8;
         } else {
-          bytearray_push(&bytes, var->init_data[pos]);
+          bytearray_push(&bytes, var->init_data[pos], AL_Compile);
           ++pos;
         }
       }
 
       if (bytes.len > 0) {
-        write_dyo_initializer_bytes(dyo_file, bytes.data, bytes.len);
+        write_dyo_initializer_bytes(C(dyo_file), bytes.data, bytes.len);
         bytes = (ByteArray){NULL, 0, 0};
       }
 
-      write_dyo_initializer_end(dyo_file);
+      write_dyo_initializer_end(C(dyo_file));
       continue;
     }
 
     // .bss or .tbss
-    write_dyo_initializer_end(dyo_file);
+    write_dyo_initializer_end(C(dyo_file));
   }
 }
 
@@ -2287,7 +2279,7 @@ static void emit_text(Obj* prog) {
 
     ///|=>fn->dasm_entry_label:
 
-    current_fn = fn;
+    C(current_fn) = fn;
 
     // logerr("---- %s\n", fn->name);
 
@@ -2407,7 +2399,7 @@ static void emit_text(Obj* prog) {
 
     // Emit code
     gen_stmt(fn->body);
-    assert(depth == 0);
+    assert(C(depth) == 0);
 
     // [https://www.sigbus.info/n1570#5.1.2.2.3p1] The C spec defines
     // a special rule for the main function. Reaching the end of the
@@ -2415,11 +2407,11 @@ static void emit_text(Obj* prog) {
     // behavior is undefined for the other functions.
     if (strcmp(fn->name, "main") == 0) {
       ///| mov rax, 0
-      dasm_label_main_entry = fn->dasm_entry_label;
+      C(dasm_label_main_entry) = fn->dasm_entry_label;
     }
 
-    if (entry_point_override && strcmp(fn->name, entry_point_override) == 0) {
-      dasm_label_main_entry = fn->dasm_entry_label;
+    if (user_context->entry_point_name && strcmp(fn->name, user_context->entry_point_name) == 0) {
+      C(dasm_label_main_entry) = fn->dasm_entry_label;
     }
 
     // Epilogue
@@ -2436,14 +2428,15 @@ static void write_text_exports(Obj* prog) {
       continue;
 
     if (!fn->is_static) {
-      write_dyo_function_export(dyo_file, fn->name, dasm_getpclabel(&dynasm, fn->dasm_entry_label));
+      write_dyo_function_export(C(dyo_file), fn->name,
+                                dasm_getpclabel(&C(dynasm), fn->dasm_entry_label));
     }
   }
 }
 
 static void write_imports(void) {
-  for (int i = 0; i < import_fixups.len; ++i) {
-    int offset = dasm_getpclabel(&dynasm, import_fixups.data[i].i);
+  for (int i = 0; i < C(import_fixups).len; ++i) {
+    int offset = dasm_getpclabel(&C(dynasm), C(import_fixups).data[i].i);
     // +2 is a hack taking advantage of the fact that import fixups are always
     // of the form `mov64 rax, <ADDR>` which is encoded as:
     //   48 B8 <8 byte address>
@@ -2451,13 +2444,13 @@ static void write_imports(void) {
     // slapped into place.
     offset += 2;
 
-    write_dyo_import(dyo_file, import_fixups.data[i].str, offset);
+    write_dyo_import(C(dyo_file), C(import_fixups).data[i].str, offset);
   }
 }
 
 static void write_data_fixups(void) {
-  for (int i = 0; i < data_fixups.len; ++i) {
-    int offset = dasm_getpclabel(&dynasm, data_fixups.data[i].i);
+  for (int i = 0; i < C(data_fixups).len; ++i) {
+    int offset = dasm_getpclabel(&C(dynasm), C(data_fixups).data[i].i);
     // +2 is a hack taking advantage of the fact that import fixups are always
     // of the form `mov64 rax, <ADDR>` which is encoded as:
     //   48 B8 <8 byte address>
@@ -2465,40 +2458,43 @@ static void write_data_fixups(void) {
     // slapped into place.
     offset += 2;
 
-    write_dyo_code_reference_to_global(dyo_file, data_fixups.data[i].str, offset);
+    write_dyo_code_reference_to_global(C(dyo_file), C(data_fixups).data[i].str, offset);
   }
 }
 
 static void update_pending_code_relocations(void) {
-  for (int i = 0; i < pending_code_pclabels.len; ++i) {
-    int file_loc = pending_code_pclabels.data[i].a;
-    int pclabel = pending_code_pclabels.data[i].b;
-    int offset = dasm_getpclabel(&dynasm, pclabel);
+  for (int i = 0; i < C(pending_code_pclabels).len; ++i) {
+    int file_loc = C(pending_code_pclabels).data[i].a;
+    int pclabel = C(pending_code_pclabels).data[i].b;
+    int offset = dasm_getpclabel(&C(dynasm), pclabel);
     // logdbg("update at %d, label %d, offset %d\n", file_loc, pclabel, offset);
-    patch_dyo_initializer_code_relocation(dyo_file, file_loc, offset);
+    patch_dyo_initializer_code_relocation(C(dyo_file), file_loc, offset);
   }
 }
 
 void codegen_init(void) {
-  dasm_init(&dynasm, DASM_MAXSECTION);
-  dasm_growpc(&dynasm, 1 << 16);  // Arbitrary number to avoid lots of reallocs of that array.
+  dasm_init(&C(dynasm), DASM_MAXSECTION);
+  dasm_growpc(&C(dynasm), 1 << 16);  // Arbitrary number to avoid lots of reallocs of that array.
+
+  C(numlabels) = 1;
+  C(dasm_label_main_entry) = -1;
 }
 
 void codegen(Obj* prog, FILE* dyo_out) {
-  dyo_file = dyo_out;
-  write_dyo_begin(dyo_file);
+  C(dyo_file) = dyo_out;
+  write_dyo_begin(C(dyo_file));
 
   void* globals[dynasm_globals_MAX + 1];
-  dasm_setupglobal(&dynasm, globals, dynasm_globals_MAX + 1);
+  dasm_setupglobal(&C(dynasm), globals, dynasm_globals_MAX + 1);
 
-  dasm_setup(&dynasm, dynasm_actions);
+  dasm_setup(&C(dynasm), dynasm_actions);
 
   assign_lvar_offsets(prog);
   emit_data(prog);
   emit_text(prog);
 
   size_t code_size;
-  dasm_link(&dynasm, &code_size);
+  dasm_link(&C(dynasm), &code_size);
 
   write_text_exports(prog);
   write_imports();
@@ -2507,34 +2503,22 @@ void codegen(Obj* prog, FILE* dyo_out) {
 
   void* code_buf = malloc(code_size);
 
-  dasm_encode(&dynasm, code_buf);
+  dasm_encode(&C(dynasm), code_buf);
 
-  int check_result = dasm_checkstep(&dynasm, DASM_SECTION_MAIN);
+  int check_result = dasm_checkstep(&C(dynasm), DASM_SECTION_MAIN);
   if (check_result != DASM_S_OK) {
     logerr("internal error, dasm_checkstep: 0x%08x\n", check_result);
     abort();
   }
 
-  if (dasm_label_main_entry >= 0) {
-    int offset = dasm_getpclabel(&dynasm, dasm_label_main_entry);
-    write_dyo_entrypoint(dyo_file, offset);
+  if (C(dasm_label_main_entry) >= 0) {
+    int offset = dasm_getpclabel(&C(dynasm), C(dasm_label_main_entry));
+    write_dyo_entrypoint(C(dyo_file), offset);
   }
 
-  write_dyo_code(dyo_file, code_buf, code_size);
+  write_dyo_code(C(dyo_file), code_buf, code_size);
 
   free(code_buf);
 
-  dasm_free(&dynasm);
-}
-
-void codegen_reset(void) {
-  depth = 0;
-  current_fn = NULL;
-
-  dynasm = NULL;
-  numlabels = 1;
-  dasm_label_main_entry = -1;
-  import_fixups = (StringIntArray){NULL, 0, 0};
-  data_fixups = (StringIntArray){NULL, 0, 0};
-  pending_code_pclabels = (IntIntArray){NULL, 0, 0};
+  dasm_free(&C(dynasm));
 }

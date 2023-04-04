@@ -14,14 +14,14 @@ util.c
 
 # XXX:
 # test/asm.c
-#   dyibicc passes asm() blocks directly through to the system assembler, so now
+#   asm() blocks were directly passed through to the system assembler, so now
 #   that we're not using that, there's no assembler available.
 #
 # test/tls.c
 #   TLS not implemented
 #
 # test/commonsym.c
-#   Intentionally disabled for now.
+#   Intentionally disabled.
 #
 TEST_SRCS=\
 test/alignof.c \
