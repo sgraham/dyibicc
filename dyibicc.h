@@ -41,6 +41,33 @@ typedef struct Relocation Relocation;
 typedef struct Hideset Hideset;
 
 //
+// alloc.c
+//
+typedef enum AllocLifetime {
+  AL_Compile = 0,
+  AL_Link,
+  AL_Manual,
+} AllocLifetime;
+
+/*void alloc_init(void);
+void* alloc_cleared(size_t num, size_t size, AllocLifetime lifetime);
+void* alloc_realloc(void* old, size_t old_size, size_t new_size);
+void alloc_purge(AllocLifetime lifetime);*/
+
+void alloc_init(AllocLifetime lifetime);
+void alloc_reset(AllocLifetime lifetime);
+
+void* bumpcalloc(size_t num, size_t size, AllocLifetime lifetime);
+void* bumplamerealloc(void* old, size_t old_size, size_t new_size, AllocLifetime lifetime);
+void alloc_free(void* p, AllocLifetime lifetime);  // AL_Manual only.
+
+void* aligned_allocate(size_t size, size_t alignment);
+void aligned_free(void* p);
+void* allocate_writable_memory(size_t size);
+bool make_memory_executable(void* m, size_t size);
+void free_executable_memory(void* p, size_t size);
+
+//
 // util.c
 //
 
@@ -78,17 +105,17 @@ typedef struct IntIntArray {
   int len;
 } IntIntArray;
 
-char* bumpstrndup(const char* s, size_t n);
-char* bumpstrdup(const char* s);
+char* bumpstrndup(const char* s, size_t n, AllocLifetime lifetime);
+char* bumpstrdup(const char* s, AllocLifetime lifetime);
 char* dirname(char* s);
 char* basename(char* s);
 uint64_t align_to_u(uint64_t n, uint64_t align);
 int64_t align_to_s(int64_t n, int64_t align);
-void strarray_push(StringArray* arr, char* s);
-void strintarray_push(StringIntArray* arr, StringInt item);
-void bytearray_push(ByteArray* arr, char b);
-void intintarray_push(IntIntArray* arr, IntInt item);
-char* format(char* fmt, ...) __attribute__((format(printf, 1, 2)));
+void strarray_push(StringArray* arr, char* s, AllocLifetime lifetime);
+void strintarray_push(StringIntArray* arr, StringInt item, AllocLifetime lifetime);
+void bytearray_push(ByteArray* arr, char b, AllocLifetime lifetime);
+void intintarray_push(IntIntArray* arr, IntInt item, AllocLifetime lifetime);
+char* format(AllocLifetime lifetime, char* fmt, ...) __attribute__((format(printf, 2, 3)));
 
 //
 // tokenize.c
@@ -500,7 +527,7 @@ typedef struct {
   HashEntry* buckets;
   int capacity;
   int used;
-  bool global_alloc;
+  AllocLifetime alloc_lifetime;
 } HashMap;
 
 void* hashmap_get(HashMap* map, char* key);
@@ -510,18 +537,6 @@ void hashmap_put2(HashMap* map, char* key, int keylen, void* val);
 void hashmap_delete(HashMap* map, char* key);
 void hashmap_delete2(HashMap* map, char* key, int keylen);
 void hashmap_test(void);
-
-//
-// alloc.c
-//
-void bumpcalloc_init(void);
-void* bumpcalloc(size_t num, size_t size);
-void* bumplamerealloc(void* old, size_t old_size, size_t new_size);
-void* aligned_allocate(size_t size, size_t alignment);
-void aligned_free(void* p);
-void* allocate_writable_memory(size_t size);
-bool make_memory_executable(void* m, size_t size);
-void free_executable_memory(void* p, size_t size);
 
 //
 // dyo.c
@@ -593,15 +608,94 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info);
 // main.c
 //
 
-extern StringArray include_paths;
-extern char* base_file;
-extern char* entry_point_override;
 extern DyibiccOutputFn output_fn;
 
-void bumpcalloc_reset(void);
-void codegen_reset(void);
-void link_reset(void);
-void parse_reset(void);
-void preprocess_reset(void);
-void tokenize_reset(void);
 bool compile_and_link(int argc, char** argv, LinkInfo* link_info);
+
+//
+// Entire compiler state in one struct and linker in a second for clearing, esp.
+// after longjmp. There should be no globals outside of these structures.
+//
+
+typedef struct CondIncl CondIncl;
+
+typedef struct Scope Scope;
+// Represents a block scope.
+struct Scope {
+  Scope* next;
+
+  // C has two block scopes; one is for variables/typedefs and
+  // the other is for struct/union/enum tags.
+  HashMap vars;
+  HashMap tags;
+};
+
+typedef struct dasm_State dasm_State;
+
+typedef struct CompilerState {
+  // tokenize.c
+  File* tokenize__current_file;  // Input file
+  bool tokenize__at_bol;         // True if the current position is at the beginning of a line
+  bool tokenize__has_space;      // True if the current position follows a space character
+  HashMap tokenize__keyword_map;
+
+  // preprocess.c
+  HashMap preprocess__macros;
+  CondIncl* preprocess__cond_incl;
+  HashMap preprocess__pragma_once;
+  int preprocess__include_next_idx;
+  HashMap preprocess__include_path_cache;
+  HashMap preprocess__include_guards;
+  int preprocess__counter_macro_i;
+
+  // parse.c
+  Obj* parse__locals;   // All local variable instances created during parsing are accumulated to
+                        // this list.
+  Obj* parse__globals;  // Likewise, global variables are accumulated to this list.
+  Scope* parse__scope;  // NOTE: needs to be reinitialized after clear to point at empty_scope.
+  Scope parse__empty_scope;
+  Obj* parse__current_fn;  // Points to the function object the parser is currently parsing.
+  Node* parse__gotos;      // Lists of all goto statements and labels in the curent function.
+  Node* parse__labels;
+  int parse__brk_pc_label;  // Current "goto" and "continue" jump targets.
+  int parse__cont_pc_label;
+  Node* parse__current_switch;  // Points to a node representing a switch if we are parsing a switch
+                                // statement. Otherwise, NULL.
+  Obj* parse__builtin_alloca;
+  int parse__unique_name_id;
+  HashMap parse__typename_map;
+
+  // codegen.in.c
+  int codegen__depth;
+  FILE* codegen__dyo_file;
+  dasm_State* codegen__dynasm;
+  Obj* codegen__current_fn;
+  int codegen__numlabels;
+  int codegen__dasm_label_main_entry;
+  StringIntArray codegen__import_fixups;
+  StringIntArray codegen__data_fixups;
+  IntIntArray codegen__pending_code_pclabels;
+
+  // main.c
+  char* main__base_file;
+  char* main__entry_point_override;
+
+  char alloc__heap[256 << 20];
+  char* alloc__current_alloc_pointer;
+} CompilerState;
+
+typedef struct LinkerState {
+  // link.c
+  HashMap link__runtime_function_map;
+
+  // main.c
+  bool main__opt_E;
+  StringArray main__include_paths;
+  StringArray main__input_paths;
+
+  char alloc__heap[128 << 20];
+  char* alloc__current_alloc_pointer;
+} LinkerState;
+
+extern CompilerState compiler_state;
+extern LinkerState linker_state;
