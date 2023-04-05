@@ -1081,10 +1081,7 @@ void init_macros(void) {
   define_macro("__amd64__", "1");
   define_macro("__const__", "const");
   define_macro("__dyibicc__", "1");
-  define_macro("__gnu_linux__", "1");
   define_macro("__inline__", "inline");
-  define_macro("__linux", "1");
-  define_macro("__linux__", "1");
   define_macro("__signed__", "signed");
   define_macro("__typeof__", "typeof");
   define_macro("__unix", "1");
@@ -1096,12 +1093,30 @@ void init_macros(void) {
   define_macro("__SIZEOF_LONG__", "4");
   define_macro("__SIZEOF_LONG_DOUBLE__", "8");
   define_macro("__cdecl", "");
+  define_macro("__stdcall", "");
   define_macro("__inline", "");
+  define_macro("__forceinline", "");
+  define_macro("__unaligned", "");
+  define_macro("__alignof", "_Alignof");
+  define_macro("__int8", "char");
+  define_macro("__int16", "short");
+  define_macro("__int32", "int");
+  define_macro("__ptr32", "");  // Possibly wrong and needs to truncate?
+  define_macro("__ptr64", "");
   define_macro("_M_X64", "100");
   define_macro("_M_AMD64", "100");
+  define_macro("_AMD64_", "1");
   define_macro("_WIN32", "1");
+  define_macro("WIN32", "1");
   define_macro("_WIN64", "1");
+  // Without this, structs like OVERLAPPED don't use anon unions, so most user
+  // code will break.
+  define_macro("_MSC_EXTENSIONS", "1");
+  // VS2008, arbitrarily. Has to be defined to something as a lot of code uses
+  // it to indicate "is_windows", and 2008 was one of my favourites.
+  define_macro("_MSC_VER", "1500");
   define_macro("_NO_CRT_STDIO_INLINE", "1");
+  define_macro("_CRT_DECLARE_NONSTDC_NAMES", "1");
   define_macro("__WINT_TYPE__", "unsigned short");
   define_function_macro("__pragma(_)\n");
   define_function_macro("__declspec(_)\n");
@@ -1111,6 +1126,9 @@ void init_macros(void) {
   define_macro("__ELF__", "1");
   define_macro("linux", "1");
   define_macro("unix", "1");
+  define_macro("__linux", "1");
+  define_macro("__linux__", "1");
+  define_macro("__gnu_linux__", "1");
 #endif
 
   add_builtin("__FILE__", file_macro);

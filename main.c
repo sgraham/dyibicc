@@ -177,7 +177,11 @@ static void add_default_include_paths(char* argv0) {
   strarray_push(&include_paths, format("%s/include/all", dirname(bumpstrdup(argv0))));
 
   strarray_push(&include_paths,
-                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.19041.0\\ucrt");
+                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\ucrt");
+  strarray_push(&include_paths,
+                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\um");
+  strarray_push(&include_paths,
+                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\shared");
   strarray_push(&include_paths,
                 "C:\\Program Files\\Microsoft Visual "
                 "Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.34.31933\\include");
@@ -348,8 +352,10 @@ bool dyibicc_compile_and_link(int argc, char** argv, DyibiccLinkInfo* link_info)
     dyo_files[num_dyo_files++] = fopen(dyo_output_file, "rb");
   }
 
-  if (opt_E)
-    return 0;
+  if (opt_E) {
+    purge_all();
+    return true;
+  }
 
   result = link_dyos(dyo_files, (LinkInfo*)link_info);
 

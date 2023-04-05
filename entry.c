@@ -17,5 +17,6 @@ int main(int argc, char** argv) {
     }
   } else {
     fprintf(stderr, "link failed\n");
+    return 2;
   }
 }

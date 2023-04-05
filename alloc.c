@@ -26,7 +26,7 @@ void __asan_unpoison_memory_region(void const volatile* addr, size_t size);
 static char* allmem;
 static char* current_alloc_pointer;
 
-#define HEAP_SIZE (256 << 20)
+#define HEAP_SIZE (1024 << 20ull)
 
 // Reports an error and exit.
 void error(char* fmt, ...) {

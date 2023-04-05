@@ -793,12 +793,13 @@ static int push_args_win(Node* node, int* by_ref_copies_size) {
     switch (ty->kind) {
       case TY_STRUCT:
       case TY_UNION:
-        if (type_passed_in_register(ty)) {
-          if (reg++ >= X64WIN_REG_MAX) {
-            arg->pass_by_stack = true;
-            ++stack;
-          }
-        } else {
+        // It's either small and so passed in a register, or isn't and then
+        // we're instead storing the pointer to the larger struct.
+        if (reg++ >= X64WIN_REG_MAX) {
+          arg->pass_by_stack = true;
+          ++stack;
+        }
+        if (!type_passed_in_register(ty)) {
           // Make a copy, and note the offset for passing by reference.
           gen_expr(arg);
           *by_ref_copies_size += push_struct(ty);
@@ -2279,6 +2280,10 @@ static void store_gp(int r, int offset, int sz) {
   }
 }
 
+#if X64WIN
+extern int __chkstk();
+#endif
+
 static void emit_text(Obj* prog) {
   // Preallocate the dasm labels so they can be used in functions out of order.
   for (Obj* fn = prog; fn; fn = fn->next) {
@@ -2302,7 +2307,32 @@ static void emit_text(Obj* prog) {
     // Prologue
     ///| push rbp
     ///| mov rbp, rsp
-    ///| sub rsp, fn->stack_size
+
+#if X64WIN
+
+    // Stack probe on Windows if necessary. The MSDN reference for __chkstk says
+    // it's only necessary beyond 8k for x64, but cl does it at 4k.
+    if (fn->stack_size >= 4096) {
+      ///| mov rax, fn->stack_size
+      int fixup_location = codegen_pclabel();
+      strintarray_push(&import_fixups, (StringInt){"__chkstk", fixup_location});
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4310)  // dynasm casts the top and bottom of the 64bit arg
+#endif
+      ///|=>fixup_location:
+      ///| mov64 r10, 0xc0dec0dec0dec0de
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+      ///| call r10
+      ///| sub rsp, rax
+    } else
+#endif
+
+    {
+      ///| sub rsp, fn->stack_size
+    }
     ///| mov [rbp+fn->alloca_bottom->offset], rsp
 
 #if !X64WIN

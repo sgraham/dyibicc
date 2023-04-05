@@ -11,7 +11,7 @@
 
 KHASH_SET_INIT_INT64(voidp)
 
-static DyibiccFunctionLookupFn  user_runtime_function_callback = NULL;
+static DyibiccFunctionLookupFn user_runtime_function_callback = NULL;
 
 #if X64WIN
 static HashMap runtime_function_map;
@@ -20,13 +20,26 @@ void dyibicc_set_user_runtime_function_callback(DyibiccFunctionLookupFn f) {
   user_runtime_function_callback = f;
 }
 
+static void Unimplemented(void) {
+  fprintf(stderr, "unimplemented\n");
+  abort();
+}
+
+extern void __chkstk();
+
 static void* get_standard_runtime_function(char* name) {
   if (runtime_function_map.capacity == 0) {
 #define X(func) hashmap_put(&runtime_function_map, #func, (void*)&func)
+    X(CharUpperW);
     X(CloseHandle);
     X(CreateThread);
+    X(MapViewOfFileNuma2);
+    X(MessageBoxA);
     X(WaitForSingleObject);
+    X(SetProcessDPIAware);
     X(__acrt_iob_func);
+    X(__chkstk);
+    X(__pctype_func);
     X(__stdio_common_vfprintf);
     X(__stdio_common_vfprintf_p);
     X(__stdio_common_vfprintf_s);
@@ -45,19 +58,63 @@ static void* get_standard_runtime_function(char* name) {
     X(__stdio_common_vswprintf_p);
     X(__stdio_common_vswprintf_s);
     X(__stdio_common_vswscanf);
+    X(_errno);
+    X(_invalid_parameter_noinfo);
+    X(_isctype_l);
+    X(_wcsicmp);
     X(exit);
+    X(lstrcmpW);
+    X(lstrcmpiW);
+    X(lstrlenW);
     X(memcmp);
     X(memcpy);
+    X(memmove);
+    X(memset);
     X(printf);
     X(sprintf);
     X(strcmp);
     X(strlen);
     X(strncmp);
+    X(strnlen);
+    X(uaw_lstrcmpW);
+    X(uaw_lstrcmpiW);
+    X(uaw_lstrlenW);
+    X(uaw_wcschr);
+    X(uaw_wcscpy);
+    X(uaw_wcsicmp);
+    X(uaw_wcslen);
+    X(uaw_wcsrchr);
     X(vsprintf);
+    X(wcschr);
+    X(wcscpy);
+    X(wcscpy_s);
+    X(wcslen);
+    X(wcsnlen);
+    X(wcsrchr);
+    X(wcstok);
 #undef X
   }
 
-  return hashmap_get(&runtime_function_map, name);
+  void* ret = hashmap_get(&runtime_function_map, name);
+  if (ret == NULL) {
+    if (strcmp(name, "uaw_CharUpperW") == 0 ||             //
+        strcmp(name, "__readgsqword") == 0 ||              //
+        strcmp(name, "__readgsdword") == 0 ||              //
+        strcmp(name, "__readgsword") == 0 ||               //
+        strcmp(name, "__readgsbyte") == 0 ||               //
+        strcmp(name, "__stosb") == 0 ||                    //
+        strcmp(name, "_ReadWriteBarrier") == 0 ||          //
+        strcmp(name, "_umul128") == 0 ||                   //
+        strcmp(name, "_mul128") == 0 ||                    //
+        strcmp(name, "__shiftright128") == 0 ||            //
+        strcmp(name, "_InterlockedExchangeAdd64") == 0 ||  //
+        strcmp(name, "_InterlockedExchangeAdd") == 0       //
+    ) {
+      fprintf(stderr, "linking against stub '%s', will abort if called at runtime\n", name);
+      return (void*)Unimplemented;
+    }
+  }
+  return ret;
 }
 #endif
 
@@ -81,7 +138,10 @@ static void* symbol_lookup(char* name) {
 }
 
 bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
-  char buf[1 << 16];
+#define BUF_SIZE (16 << 20)
+  void* read_buffer = malloc(BUF_SIZE);
+  char* buf = read_buffer;
+  ;
 
 #if X64WIN
   SYSTEM_INFO system_info;
@@ -131,7 +191,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
     for (;;) {
       unsigned int type;
       unsigned int size;
-      if (!read_dyo_record(*dyo, &record_index, buf, sizeof(buf), &type, &size))
+      if (!read_dyo_record(*dyo, &record_index, buf, BUF_SIZE, &type, &size))
         goto fail;
 
       if (type == kTypeString) {
@@ -221,7 +281,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
     for (;;) {
       unsigned int type;
       unsigned int size;
-      if (!read_dyo_record(*dyo, &record_index, buf, sizeof(buf), &type, &size))
+      if (!read_dyo_record(*dyo, &record_index, buf, BUF_SIZE, &type, &size))
         goto fail;
 
       if (type == kTypeString) {
@@ -266,7 +326,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
     for (;;) {
       unsigned int type;
       unsigned int size;
-      if (!read_dyo_record(*dyo, &record_index, buf, sizeof(buf), &type, &size))
+      if (!read_dyo_record(*dyo, &record_index, buf, BUF_SIZE, &type, &size))
         goto fail;
 
       if (type == kTypeString) {
@@ -282,7 +342,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           if (target_address == NULL) {
             target_address = symbol_lookup(strings.data[string_record_index]);
             if (target_address == NULL) {
-              logerr("undefined symbol: %s\n", strings.data[string_record_index]);
+              logerr("undefined import symbol: %s\n", strings.data[string_record_index]);
               goto fail;
             }
           }
@@ -322,7 +382,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           if (!target_address) {
             target_address = hashmap_get(&li.global_data, strings.data[string_record_index]);
             if (!target_address) {
-              logerr("undefined symbol: %s\n", strings.data[string_record_index]);
+              logerr("undefined ref to symbol: %s\n", strings.data[string_record_index]);
               goto fail;
             }
           }
@@ -367,7 +427,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           if (!target_address) {
             target_address = hashmap_get(&li.global_data, strings.data[name_index]);
             if (!target_address) {
-              logerr("undefined symbol: %s\n", strings.data[name_index]);
+              logerr("undefined data reloc symbol: %s\n", strings.data[name_index]);
               goto fail;
             }
           }
@@ -414,10 +474,13 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
 
   li.num_dyos = num_dyos;
   *link_info = li;
+  kh_destroy(voidp, created_this_update);
+  free(read_buffer);
   return true;
 
 fail:
   kh_destroy(voidp, created_this_update);
+  free(read_buffer);
   return false;
 }
 

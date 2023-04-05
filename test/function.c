@@ -152,6 +152,17 @@ int many_args3(int a, double b, int c, int d, double e, int f,
   return o / p;
 }
 
+int anything() {
+  // Args not important (unprototyped). This was a bugfix for Windows in the
+  // case where the args at the callsite look like:
+  //   reg
+  //   reg
+  //   reg
+  //   by_ref_big_struct
+  //   would_have_fit_in_reg (but can't because there's none left)
+  return 19;
+}
+
 typedef struct { int a,b; short c; char d; } Ty4;
 typedef struct { int a; float b; double c; } Ty5;
 typedef struct { unsigned char a[3]; } Ty6;
@@ -319,6 +330,8 @@ int main() {
   ASSERT(4, many_args1(1,2,3,4,5,6,40,10));
   ASSERT(4, many_args2(1,2,3,4,5,6,7,8,40,10));
   ASSERT(8, many_args3(1,2,3,4,5,6,7,8,9,10,11,12,13,14,80,10));
+
+  ASSERT(19, anything(1, 2, 3, (Ty4){0}, 90));
 
   ASSERT(10, ({ Ty4 x={10,20,30,40}; struct_test4(x, 0); }));
   ASSERT(20, ({ Ty4 x={10,20,30,40}; struct_test4(x, 1); }));

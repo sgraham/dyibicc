@@ -319,7 +319,8 @@ bool read_dyo_record(FILE* f,
 }
 
 bool dump_dyo_file(FILE* f) {
-  char buf[1 << 16];  // Arbitrary max length.
+#define BUF_SIZE (16 << 20)
+  char* buf = malloc(BUF_SIZE);
 
   if (!ensure_dyo_header(f))
     return false;
@@ -328,7 +329,7 @@ bool dump_dyo_file(FILE* f) {
   for (;;) {
     unsigned int type;
     unsigned int size;
-    if (!read_dyo_record(f, &record_index, buf, sizeof(buf), &type, &size))
+    if (!read_dyo_record(f, &record_index, buf, BUF_SIZE, &type, &size))
       return false;
 
     switch (type) {

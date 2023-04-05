@@ -678,7 +678,6 @@ Token* tokenize(File* file) {
 // Returns the contents of a given file. Doesn't support '-' for reading from
 // stdin.
 static char* read_file(char* path) {
-  // logerr("reading \"%s\"\n", path);
   FILE* fp = fopen(path, "rb");
   if (!fp) {
     return NULL;

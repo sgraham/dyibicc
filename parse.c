@@ -2951,7 +2951,7 @@ static Node* funcall(Token** rest, Token* tok, Node* fn) {
   add_type(fn);
 
   if (fn->ty->kind != TY_FUNC && (fn->ty->kind != TY_PTR || fn->ty->base->kind != TY_FUNC))
-    error_tok(fn->tok, "not a function");
+    error_tok(tok, "not a function");
 
   Type* ty = (fn->ty->kind == TY_FUNC) ? fn->ty : fn->ty->base;
   Type* param_ty = ty->params;
