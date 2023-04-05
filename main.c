@@ -55,16 +55,6 @@
 //   replace hashmap.c too). Need to consider how they would/can integrate with
 //   bumpalloc.
 //
-// Large allocas aren't _chkstk'ing on Windows:
-//
-//   Will STACK_OVERFLOW if it jumps past the guard page.
-//
-// Parsing windows.h:
-//
-//   We make it through CRT, but windows.h will have lots more wild stuff.
-//   __declspecs and packing pragmas are currently ignored and will be necessary
-//   for passing structures to winapi.
-//
 // Debugger:
 //
 //   Picking either ELF/DWARF or PE/COFF (and dropping .dyo) would probably be

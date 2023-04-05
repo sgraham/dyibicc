@@ -2309,7 +2309,6 @@ static void emit_text(Obj* prog) {
     ///| mov rbp, rsp
 
 #if X64WIN
-
     // Stack probe on Windows if necessary. The MSDN reference for __chkstk says
     // it's only necessary beyond 8k for x64, but cl does it at 4k.
     if (fn->stack_size >= 4096) {
