@@ -289,12 +289,10 @@ int main() {
 
   ASSERT(4, sizeof(str_braced));
 
-#if 0  // TODO: data initializers don't have a way to resolve static functions
   static void* funcpointers[] = {
     some_static_func,
   };
   ASSERT(8, sizeof(funcpointers));
-#endif
 
   printf("OK\n");
   return 0;

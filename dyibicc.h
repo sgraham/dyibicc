@@ -544,7 +544,7 @@ typedef enum DyoRecordType {
 // Writing.
 bool write_dyo_begin(FILE* f);
 bool write_dyo_import(FILE* f, char* name, unsigned int loc);
-bool write_dyo_function_export(FILE* f, char* name, unsigned int loc);
+bool write_dyo_function_export(FILE* f, char* name, bool is_static, unsigned int loc);
 bool write_dyo_code_reference_to_global(FILE* f, char* name, unsigned int offset);
 bool write_dyo_initialized_data(FILE* f,
                                 int size,

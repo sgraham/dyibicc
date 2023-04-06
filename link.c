@@ -2,6 +2,10 @@
 
 #if X64WIN
 #include <windows.h>
+#include <direct.h>
+#include <io.h>
+#include <math.h>
+#include <process.h>
 #else
 #include <dlfcn.h>
 #include <unistd.h>
@@ -30,13 +34,6 @@ extern void __chkstk();
 static void* get_standard_runtime_function(char* name) {
   if (runtime_function_map.capacity == 0) {
 #define X(func) hashmap_put(&runtime_function_map, #func, (void*)&func)
-    X(CharUpperW);
-    X(CloseHandle);
-    X(CreateThread);
-    X(MapViewOfFileNuma2);
-    X(MessageBoxA);
-    X(WaitForSingleObject);
-    X(SetProcessDPIAware);
     X(__acrt_iob_func);
     X(__chkstk);
     X(__pctype_func);
@@ -58,33 +55,187 @@ static void* get_standard_runtime_function(char* name) {
     X(__stdio_common_vswprintf_p);
     X(__stdio_common_vswprintf_s);
     X(__stdio_common_vswscanf);
+    X(_access);
+    X(_chmod);
+    X(_chmod);
+    X(_ctime64);
+    X(_ctime64_s);
+    X(_difftime64);
     X(_errno);
+    X(_fileno);
+    X(_fileno);
+    X(_fileno);
+    X(_findclose);
+    X(_findfirst64i32);
+    X(_findnext64i32);
+    X(_findnext64i32);
+    X(_findnext64i32);
+    X(_fstat64i32);
+    X(_gmtime64);
+    X(_gmtime64_s);
     X(_invalid_parameter_noinfo);
+    X(_isatty);
     X(_isctype_l);
+    X(_localtime64);
+    X(_localtime64_s);
+    X(_mkdir);
+    X(_mkdir);
+    X(_mkgmtime64);
+    X(_mktime64);
+    X(_pclose);
+    X(_popen);
+    X(_setmode);
+    X(_setmode);
+    X(_snprintf);
+    X(_stat64i32);
+    X(_stat64i32);
+    X(_strdup);
+    X(_time64);
+    X(_timespec64_get);
+    X(_unlink);
+    X(_wassert);
     X(_wcsicmp);
+    X(_wctime64);
+    X(_wctime64_s);
+    X(_wunlink);
+    X(AreFileApisANSI);
+    X(atoi);
+    X(CharUpperW);
+    X(CloseHandle);
+    X(CreateFileA);
+    X(CreateFileMappingW);
+    X(CreateFileW);
+    X(CreateMutexW);
+    X(CreateThread);
+    X(DebugBreak);
+    X(DeleteCriticalSection);
+    X(DeleteFileA);
+    X(DeleteFileW);
     X(exit);
-    X(lstrcmpW);
+    X(fclose);
+    X(fflush);
+    X(fgetc);
+    X(fgets);
+    X(FindClose);
+    X(FindFirstFileW);
+    X(FlushFileBuffers);
+    X(FlushViewOfFile);
+    X(fopen);
+    X(FormatMessageA);
+    X(FormatMessageW);
+    X(fprintf);
+    X(fputc);
+    X(fputs);
+    X(fread);
+    X(free);
+    X(FreeLibrary);
+    X(fseek);
+    X(ftell);
+    X(fwrite);
+    X(GetConsoleScreenBufferInfo);
+    X(GetCurrentProcess);
+    X(GetCurrentProcessId);
+    X(GetDiskFreeSpaceA);
+    X(GetDiskFreeSpaceW);
+    X(getenv);
+    X(GetEnvironmentVariableA);
+    X(GetFileAttributesA);
+    X(GetFileAttributesExW);
+    X(GetFileAttributesW);
+    X(GetFileSize);
+    X(GetFullPathNameA);
+    X(GetFullPathNameW);
+    X(GetLastError);
+    X(GetProcAddress);
+    X(GetProcessHeap);
+    X(GetStdHandle);
+    X(GetSystemInfo);
+    X(GetSystemTime);
+    X(GetSystemTimeAsFileTime);
+    X(GetTempPathA);
+    X(GetTempPathW);
+    X(GetTickCount);
+    X(HeapAlloc);
+    X(HeapCompact);
+    X(HeapCreate);
+    X(HeapDestroy);
+    X(HeapFree);
+    X(HeapReAlloc);
+    X(HeapSize);
+    X(HeapValidate);
+    X(isalnum);
+    X(isalpha);
+    X(isdigit);
+    X(isprint);
+    X(isspace);
+    X(LoadLibraryA);
+    X(LoadLibraryW);
+    X(LocalFree);
+    X(LockFile);
+    X(LockFileEx);
     X(lstrcmpiW);
+    X(lstrcmpW);
     X(lstrlenW);
+    X(malloc);
+    X(MapViewOfFile);
+    X(MapViewOfFileNuma2);
     X(memcmp);
     X(memcpy);
     X(memmove);
     X(memset);
+    X(MessageBoxA);
+    X(MultiByteToWideChar);
+    X(OutputDebugStringA);
+    X(OutputDebugStringW);
     X(printf);
+    X(putc);
+    X(QueryPerformanceCounter);
+    X(ReadFile);
+    X(realloc);
+    X(rewind);
+    X(SetConsoleCtrlHandler);
+    X(SetConsoleTextAttribute);
+    X(SetCurrentDirectoryW);
+    X(SetEndOfFile);
+    X(SetFilePointer);
+    X(SetFileTime);
+    X(SetProcessDPIAware);
+    X(setvbuf);
+    X(Sleep);
     X(sprintf);
+    X(sscanf);
+    X(strchr);
     X(strcmp);
+    X(strcpy);
+    X(strcspn);
     X(strlen);
     X(strncmp);
+    X(strncpy);
+    X(strncpy);
+    X(strncpy);
+    X(strncpy);
     X(strnlen);
-    X(uaw_lstrcmpW);
+    X(strstr);
+    X(strtol);
+    X(system);
+    X(SystemTimeToFileTime);
+    X(SystemTimeToFileTime);
+    X(tolower);
     X(uaw_lstrcmpiW);
+    X(uaw_lstrcmpW);
     X(uaw_lstrlenW);
     X(uaw_wcschr);
     X(uaw_wcscpy);
     X(uaw_wcsicmp);
     X(uaw_wcslen);
     X(uaw_wcsrchr);
+    X(UnlockFile);
+    X(UnlockFileEx);
+    X(UnmapViewOfFile);
+    X(vfprintf);
     X(vsprintf);
+    X(WaitForSingleObject);
+    X(WaitForSingleObjectEx);
     X(wcschr);
     X(wcscpy);
     X(wcscpy_s);
@@ -92,6 +243,45 @@ static void* get_standard_runtime_function(char* name) {
     X(wcsnlen);
     X(wcsrchr);
     X(wcstok);
+    X(WideCharToMultiByte);
+    X(WriteFile);
+    X(EnterCriticalSection);
+    X(GetCurrentThreadId);
+    X(InitializeCriticalSection);
+    X(LeaveCriticalSection);
+    X(TryEnterCriticalSection);
+    X(_beginthreadex);
+    X(_byteswap_ulong);
+    X(_byteswap_ushort);
+    X(_chgsign);
+    X(_copysign);
+    X(_endthreadex);
+    X(_hypot);
+    X(_hypotf);
+    X(_msize);
+    X(acos);
+    X(asin);
+    X(atan);
+    X(atan2);
+    X(ceil);
+    X(cos);
+    X(cosh);
+    X(exp);
+    X(fabs);
+    X(floor);
+    X(fmod);
+    X(frexp);
+    X(ldexp);
+    X(log);
+    X(log10);
+    X(modf);
+    X(pow);
+    X(sin);
+    X(sinh);
+    X(sqrt);
+    X(strrchr);
+    X(tan);
+    X(tanh);
 #undef X
   }
 
@@ -108,7 +298,8 @@ static void* get_standard_runtime_function(char* name) {
         strcmp(name, "_mul128") == 0 ||                    //
         strcmp(name, "__shiftright128") == 0 ||            //
         strcmp(name, "_InterlockedExchangeAdd64") == 0 ||  //
-        strcmp(name, "_InterlockedExchangeAdd") == 0       //
+        strcmp(name, "_InterlockedExchangeAdd") == 0 ||    //
+        strcmp(name, "_InterlockedCompareExchange") == 0   //
     ) {
       fprintf(stderr, "linking against stub '%s', will abort if called at runtime\n", name);
       return (void*)Unimplemented;
@@ -267,7 +458,8 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
   }
 
   // Get all exported symbols as hashmap of name => real address.
-  HashMap exports = {NULL, 0, 0};
+  HashMap global_exports = {NULL, 0, 0};
+  HashMap static_exports[MAX_DYOS] = {0};
   num_dyos = 0;
   for (FILE** dyo = dyo_files; *dyo; ++dyo) {
     if (!ensure_dyo_header(*dyo))
@@ -291,11 +483,17 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
 
         if (type == kTypeFunctionExport) {
           unsigned int function_offset = *(unsigned int*)&buf[0];
-          unsigned int string_record_index = *(unsigned int*)&buf[4];
+          int is_static = *(unsigned int*)&buf[4];
+          unsigned int string_record_index = *(unsigned int*)&buf[8];
           // printf("%d \"%s\" at %p\n", string_record_index, strings.data[string_record_index],
           //      base_address[num_dyos] + function_offset);
-          hashmap_put(&exports, strings.data[string_record_index],
-                      li.code[num_dyos].base_address + function_offset);
+          if (is_static) {
+            hashmap_put(&static_exports[num_dyos], strings.data[string_record_index],
+                        li.code[num_dyos].base_address + function_offset);
+          } else {
+            hashmap_put(&global_exports, strings.data[string_record_index],
+                        li.code[num_dyos].base_address + function_offset);
+          }
         } else if (type == kTypeX64Code) {
           ++num_dyos;
           break;
@@ -338,12 +536,12 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           unsigned int fixup_offset = *(unsigned int*)&buf[0];
           unsigned int string_record_index = *(unsigned int*)&buf[4];
           void* fixup_address = li.code[num_dyos].base_address + fixup_offset;
-          void* target_address = hashmap_get(&exports, strings.data[string_record_index]);
+          void* target_address = hashmap_get(&global_exports, strings.data[string_record_index]);
           if (target_address == NULL) {
             target_address = symbol_lookup(strings.data[string_record_index]);
             if (target_address == NULL) {
               logerr("undefined import symbol: %s\n", strings.data[string_record_index]);
-              goto fail;
+              //goto fail;
             }
           }
           *((uintptr_t*)fixup_address) = (uintptr_t)target_address;
@@ -427,8 +625,17 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
           if (!target_address) {
             target_address = hashmap_get(&li.global_data, strings.data[name_index]);
             if (!target_address) {
-              logerr("undefined data reloc symbol: %s\n", strings.data[name_index]);
-              goto fail;
+              target_address = hashmap_get(&static_exports[num_dyos], strings.data[name_index]);
+              if (!target_address) {
+                target_address = hashmap_get(&global_exports, strings.data[name_index]);
+                if (!target_address) {
+                  target_address = symbol_lookup(strings.data[name_index]);
+                  if (!target_address) {
+                    logerr("undefined data reloc symbol: %s\n", strings.data[name_index]);
+                    //goto fail;
+                  }
+                }
+              }
             }
           }
           *((uintptr_t*)current_data_pointer) = (uintptr_t)target_address + addend;

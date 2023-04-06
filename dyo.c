@@ -16,7 +16,7 @@ type 2: import (# 8)
 <offset into code><string record index containing name>
 
 type 3: function export (# 8)
-<offset location in code><string record index containing name>
+<offset location in code><is static><string record index containing name>
 
 type 4: code reference to global (# 8)
 <offset into code><string record index containing name>
@@ -131,14 +131,16 @@ bool write_dyo_import(FILE* f, char* name, unsigned int loc) {
   return true;
 }
 
-bool write_dyo_function_export(FILE* f, char* name, unsigned int loc) {
+bool write_dyo_function_export(FILE* f, char* name, bool is_static, unsigned int loc) {
   int str_index;
   if (!write_string(f, name, &str_index))
     return false;
 
-  if (!write_record_header(f, kTypeFunctionExport, 8))
+  if (!write_record_header(f, kTypeFunctionExport, 12))
     return false;
   if (!write_int(f, loc))
+    return false;
+  if (!write_int(f, is_static))
     return false;
   if (!write_int(f, str_index))
     return false;
@@ -345,7 +347,8 @@ bool dump_dyo_file(FILE* f) {
       case kTypeFunctionExport:
         logout("%4d function export (%d bytes)\n", record_index, size);
         logout("       function at %d\n", *(unsigned int*)&buf[0]);
-        logout("       named by str record %d\n", *(unsigned int*)&buf[4]);
+        logout("       is static: %d\n", *(unsigned int*)&buf[4]);
+        logout("       named by str record %d\n", *(unsigned int*)&buf[8]);
         break;
       case kTypeCodeReferenceToGlobal:
         logout("%4d code reference to global (%d bytes)\n", record_index, size);

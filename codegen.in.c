@@ -2472,9 +2472,8 @@ static void write_text_exports(Obj* prog) {
     if (!fn->is_function || !fn->is_definition || !fn->is_live)
       continue;
 
-    if (!fn->is_static) {
-      write_dyo_function_export(dyo_file, fn->name, dasm_getpclabel(&dynasm, fn->dasm_entry_label));
-    }
+    write_dyo_function_export(dyo_file, fn->name, fn->is_static,
+                              dasm_getpclabel(&dynasm, fn->dasm_entry_label));
   }
 }
 

@@ -1084,8 +1084,6 @@ void init_macros(void) {
   define_macro("__inline__", "inline");
   define_macro("__signed__", "signed");
   define_macro("__typeof__", "typeof");
-  define_macro("__unix", "1");
-  define_macro("__unix__", "1");
   define_macro("__volatile__", "volatile");
   define_macro("__x86_64", "1");
   define_macro("__x86_64__", "1");
@@ -1126,6 +1124,8 @@ void init_macros(void) {
   define_macro("__ELF__", "1");
   define_macro("linux", "1");
   define_macro("unix", "1");
+  define_macro("__unix", "1");
+  define_macro("__unix__", "1");
   define_macro("__linux", "1");
   define_macro("__linux__", "1");
   define_macro("__gnu_linux__", "1");
