@@ -274,6 +274,7 @@ typedef enum {
   ND_MEMZERO,    // Zero-clear a stack variable
   ND_ASM,        // "asm"
   ND_CAS,        // Atomic compare-and-swap
+  ND_LOCKCE,     // _InterlockedCompareExchange
   ND_EXCH,       // Atomic exchange
 } NodeKind;
 

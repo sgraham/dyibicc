@@ -3144,6 +3144,18 @@ static Node* primary(Token** rest, Token* tok) {
     return node;
   }
 
+  if (equal(tok, "_InterlockedCompareExchange")) {
+    Node* node = new_node(ND_LOCKCE, tok);
+    tok = skip(tok->next, "(");
+    node->cas_addr = assign(&tok, tok);
+    tok = skip(tok, ",");
+    node->cas_new = assign(&tok, tok);
+    tok = skip(tok, ",");
+    node->cas_old = assign(&tok, tok);
+    *rest = skip(tok, ")");
+    return node;
+  }
+
   if (equal(tok, "__builtin_atomic_exchange")) {
     Node* node = new_node(ND_EXCH, tok);
     tok = skip(tok->next, "(");

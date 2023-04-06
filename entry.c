@@ -8,7 +8,9 @@ int main(int argc, char** argv) {
   if (dyibicc_compile_and_link(argc, argv, &link_info)) {
     if (link_info.entry_point) {
       int (*p)() = (int (*)())link_info.entry_point;
-      int result = p();
+      int myargc = 1;
+      char* myargv[] = {"prog", NULL};
+      int result = p(myargc, myargv);
       printf("main returned: %d\n", result);
       return result;
     } else {

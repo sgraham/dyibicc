@@ -25,15 +25,26 @@ void dyibicc_set_user_runtime_function_callback(DyibiccFunctionLookupFn f) {
 }
 
 static void Unimplemented(void) {
-  fprintf(stderr, "unimplemented\n");
+  fprintf(stderr, "unimplemented function, aborting\n");
   abort();
 }
 
 extern void __chkstk();
 
+static void Xstosb(PBYTE Destination, BYTE Value, SIZE_T Count) {
+  (void)Destination; (void)Value; (void)Count;
+  fprintf(stderr, "unimplemented __stosb, aborting\n");
+  abort();
+}
+
+static void XReadWriteBarrier(void) {
+  // I think this is probably a sufficient implementation in our compiler.
+}
+
 static void* get_standard_runtime_function(char* name) {
   if (runtime_function_map.capacity == 0) {
 #define X(func) hashmap_put(&runtime_function_map, #func, (void*)&func)
+#define Y(name, func) hashmap_put(&runtime_function_map, name, (void*)&func)
     X(__acrt_iob_func);
     X(__chkstk);
     X(__pctype_func);
@@ -282,6 +293,9 @@ static void* get_standard_runtime_function(char* name) {
     X(strrchr);
     X(tan);
     X(tanh);
+
+    Y("__stosb", Xstosb);
+    Y("_ReadWriteBarrier", XReadWriteBarrier);
 #undef X
   }
 
@@ -298,10 +312,8 @@ static void* get_standard_runtime_function(char* name) {
         strcmp(name, "_mul128") == 0 ||                    //
         strcmp(name, "__shiftright128") == 0 ||            //
         strcmp(name, "_InterlockedExchangeAdd64") == 0 ||  //
-        strcmp(name, "_InterlockedExchangeAdd") == 0 ||    //
-        strcmp(name, "_InterlockedCompareExchange") == 0   //
+        strcmp(name, "_InterlockedExchangeAdd") == 0       //
     ) {
-      fprintf(stderr, "linking against stub '%s', will abort if called at runtime\n", name);
       return (void*)Unimplemented;
     }
   }

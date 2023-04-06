@@ -1514,14 +1514,19 @@ static void gen_expr(Node* node) {
     case ND_LABEL_VAL:
       ///| lea rax, [=>node->unique_pc_label]
       return;
-    case ND_CAS: {
+    case ND_CAS:
+    case ND_LOCKCE: {
+      bool is_locked_ce = node->kind == ND_LOCKCE;
+
       gen_expr(node->cas_addr);
       push();
       gen_expr(node->cas_new);
       push();
       gen_expr(node->cas_old);
-      ///| mov r8, rax
-      load(node->cas_old->ty->base);
+      if (!is_locked_ce) {
+        ///| mov r8, rax
+        load(node->cas_old->ty->base);
+      }
       pop(REG_DX);    // new
       pop(REG_UTIL);  // addr
 
@@ -1564,26 +1569,28 @@ static void gen_expr(Node* node) {
         default:
           unreachable();
       }
-      ///| sete cl
-      ///| je >1
-      switch (sz) {
-        case 1:
-          ///| mov [r8], al
-          break;
-        case 2:
-          ///| mov [r8], ax
-          break;
-        case 4:
-          ///| mov [r8], eax
-          break;
-        case 8:
-          ///| mov [r8], rax
-          break;
-        default:
-          unreachable();
+      if (!is_locked_ce) {
+        ///| sete cl
+        ///| je >1
+        switch (sz) {
+          case 1:
+            ///| mov [r8], al
+            break;
+          case 2:
+            ///| mov [r8], ax
+            break;
+          case 4:
+            ///| mov [r8], eax
+            break;
+          case 8:
+            ///| mov [r8], rax
+            break;
+          default:
+            unreachable();
+        }
+        ///|1:
+        ///| movzx eax, cl
       }
-      ///|1:
-      ///| movzx eax, cl
 
       return;
     }
