@@ -113,6 +113,7 @@ static bool startswith(char* p, char* q) {
 static int read_ident(char* start) {
   char* p = start;
   uint32_t c = decode_utf8(&p, p);
+
   if (!is_ident1(c))
     return 0;
 
@@ -538,7 +539,7 @@ Token* tokenize(File* file) {
 
   while (*p) {
     // Skip line comments.
-    if (startswith(p, "//")) {
+    if (p[0] == '/' && p[1] == '/') {
       p += 2;
       while (*p != '\n')
         p++;
@@ -547,7 +548,7 @@ Token* tokenize(File* file) {
     }
 
     // Skip block comments.
-    if (startswith(p, "/*")) {
+    if (p[0] == '/' && p[1] == '*') {
       char* q = strstr(p + 2, "*/");
       if (!q)
         error_at(p, "unclosed block comment");
@@ -762,7 +763,7 @@ static void convert_universal_chars(char* p) {
   char* q = p;
 
   while (*p) {
-    if (startswith(p, "\\u")) {
+    if (p[0] == '\\' && p[1] == 'u') {
       uint32_t c = read_universal_char(p + 2, 4);
       if (c) {
         p += 6;
@@ -770,7 +771,7 @@ static void convert_universal_chars(char* p) {
       } else {
         *q++ = *p++;
       }
-    } else if (startswith(p, "\\U")) {
+    } else if (p[0] == '\\' && p[1] == 'U') {
       uint32_t c = read_universal_char(p + 2, 8);
       if (c) {
         p += 10;

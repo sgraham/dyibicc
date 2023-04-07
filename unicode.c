@@ -35,6 +35,8 @@ int encode_utf8(char* buf, uint32_t c) {
 // identical to ASCII. Non-ASCII characters are encoded using more
 // than one byte.
 uint32_t decode_utf8(char** new_pos, char* p) {
+#if 0
+
   if ((unsigned char)*p < 128) {
     *new_pos = p + 1;
     return *p;
@@ -65,6 +67,57 @@ uint32_t decode_utf8(char** new_pos, char* p) {
 
   *new_pos = p + len;
   return c;
+
+#else
+  // From http://bjoern.hoehrmann.de/utf-8/decoder/dfa/#variations
+
+  // This is maybe only a tiny amout faster (under /Ox /GL), likely because most
+  // code is ASCII so we hit the < 128 early out in the plain code.
+
+#define UTF8_ACCEPT 0
+#define UTF8_REJECT 12
+
+  // clang-format off
+  static const uint8_t utf8d[] = {
+    // The first part of the table maps bytes to character classes that
+    // to reduce the size of the transition table and create bitmasks.
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,  9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,
+    7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
+    8,8,2,2,2,2,2,2,2,2,2,2,2,2,2,2,  2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+    10,3,3,3,3,3,3,3,3,3,3,3,3,4,3,3, 11,6,6,6,5,8,8,8,8,8,8,8,8,8,8,8,
+
+    // The second part is a transition table that maps a combination
+    // of a state of the automaton and a character class to a state.
+    0,12,24,36,60,96,84,12,12,12,48,72, 12,12,12,12,12,12,12,12,12,12,12,12,
+    12, 0,12,12,12,12,12, 0,12, 0,12,12, 12,24,12,12,12,12,12,24,12,24,12,12,
+    12,12,12,12,12,12,12,24,12,12,12,12, 12,24,12,12,12,12,12,12,12,24,12,12,
+    12,12,12,12,12,12,12,36,12,36,12,12, 12,36,12,12,12,12,12,36,12,36,12,12,
+    12,36,12,12,12,12,12,12,12,12,12,12,
+  };
+  // clang-format on
+
+  uint32_t state = 0;
+  uint32_t codep = 0;
+  char* start = p;
+
+  while (*p) {
+    uint8_t byte = *p++;
+    uint32_t type = utf8d[byte];
+    codep = (state != UTF8_ACCEPT) ? (byte & 0x3fu) | (codep << 6) : (0xff >> type) & (byte);
+    state = utf8d[256 + state + type];
+    if (!state)
+      break;
+  }
+  if (!*p && state != UTF8_ACCEPT) {
+    error_at(start, "invalid UTF-8 sequence");
+  }
+  *new_pos = p;
+  return codep;
+#endif
 }
 
 static bool in_range(uint32_t* range, uint32_t c) {
@@ -85,18 +138,23 @@ static bool in_range(uint32_t* range, uint32_t c) {
 // 0x00BE-0x00C0 are allowed, while neither ⟘ (U+27D8) nor '　'
 // (U+3000, full-width space) are allowed because they are out of range.
 bool is_ident1(uint32_t c) {
+  // Slight performance improvement to early out before full test.
+  if (c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
+    return true;
+
   static uint32_t range[] = {
-      '_',     '_',     'a',     'z',     'A',     'Z',     '$',          '$',     0x00A8,  0x00A8,
-      0x00AA,  0x00AA,  0x00AD,  0x00AD,  0x00AF,  0x00AF,  0x00B2,       0x00B5,  0x00B7,  0x00BA,
-      0x00BC,  0x00BE,  0x00C0,  0x00D6,  0x00D8,  0x00F6,  0x00F8,       0x00FF,  0x0100,  0x02FF,
-      0x0370,  0x167F,  0x1681,  0x180D,  0x180F,  0x1DBF,  0x1E00,       0x1FFF,  0x200B,  0x200D,
-      0x202A,  0x202E,  0x203F,  0x2040,  0x2054,  0x2054,  0x2060,       0x206F,  0x2070,  0x20CF,
-      0x2100,  0x218F,  0x2460,  0x24FF,  0x2776,  0x2793,  0x2C00,       0x2DFF,  0x2E80,  0x2FFF,
-      0x3004,  0x3007,  0x3021,  0x302F,  0x3031,  0x303F,  0x3040,       0xD7FF,  0xF900,  0xFD3D,
-      0xFD40,  0xFDCF,  0xFDF0,  0xFE1F,  0xFE30,  0xFE44,  0xFE47,       0xFFFD,  0x10000, 0x1FFFD,
-      0x20000, 0x2FFFD, 0x30000, 0x3FFFD, 0x40000, 0x4FFFD, 0x50000,      0x5FFFD, 0x60000, 0x6FFFD,
-      0x70000, 0x7FFFD, 0x80000, 0x8FFFD, 0x90000, 0x9FFFD, 0xA0000,      0xAFFFD, 0xB0000, 0xBFFFD,
-      0xC0000, 0xCFFFD, 0xD0000, 0xDFFFD, 0xE0000, 0xEFFFD, (uint32_t)-1,
+      // '_',     '_',     'a',     'z',     'A',     'Z',
+      '$',          '$',     0x00A8,  0x00A8,  0x00AA,  0x00AA,  0x00AD,  0x00AD,  0x00AF,  0x00AF,
+      0x00B2,       0x00B5,  0x00B7,  0x00BA,  0x00BC,  0x00BE,  0x00C0,  0x00D6,  0x00D8,  0x00F6,
+      0x00F8,       0x00FF,  0x0100,  0x02FF,  0x0370,  0x167F,  0x1681,  0x180D,  0x180F,  0x1DBF,
+      0x1E00,       0x1FFF,  0x200B,  0x200D,  0x202A,  0x202E,  0x203F,  0x2040,  0x2054,  0x2054,
+      0x2060,       0x206F,  0x2070,  0x20CF,  0x2100,  0x218F,  0x2460,  0x24FF,  0x2776,  0x2793,
+      0x2C00,       0x2DFF,  0x2E80,  0x2FFF,  0x3004,  0x3007,  0x3021,  0x302F,  0x3031,  0x303F,
+      0x3040,       0xD7FF,  0xF900,  0xFD3D,  0xFD40,  0xFDCF,  0xFDF0,  0xFE1F,  0xFE30,  0xFE44,
+      0xFE47,       0xFFFD,  0x10000, 0x1FFFD, 0x20000, 0x2FFFD, 0x30000, 0x3FFFD, 0x40000, 0x4FFFD,
+      0x50000,      0x5FFFD, 0x60000, 0x6FFFD, 0x70000, 0x7FFFD, 0x80000, 0x8FFFD, 0x90000, 0x9FFFD,
+      0xA0000,      0xAFFFD, 0xB0000, 0xBFFFD, 0xC0000, 0xCFFFD, 0xD0000, 0xDFFFD, 0xE0000, 0xEFFFD,
+      (uint32_t)-1,
   };
 
   return in_range(range, c);
@@ -105,6 +163,10 @@ bool is_ident1(uint32_t c) {
 // Returns true if a given character is acceptable as a non-first
 // character of an identifier.
 bool is_ident2(uint32_t c) {
+  // Slight performance improvement to early out before full test.
+  if (c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+    return true;
+
   static uint32_t range[] = {
       '0',    '9',    '$',    '$',    0x0300, 0x036F,       0x1DC0,
       0x1DFF, 0x20D0, 0x20FF, 0xFE20, 0xFE2F, (uint32_t)-1,

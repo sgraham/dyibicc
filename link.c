@@ -1,11 +1,11 @@
 #include "dyibicc.h"
 
 #if X64WIN
-#include <windows.h>
 #include <direct.h>
 #include <io.h>
 #include <math.h>
 #include <process.h>
+#include <windows.h>
 #else
 #include <dlfcn.h>
 #include <unistd.h>
@@ -32,7 +32,9 @@ static void Unimplemented(void) {
 extern void __chkstk();
 
 static void Xstosb(PBYTE Destination, BYTE Value, SIZE_T Count) {
-  (void)Destination; (void)Value; (void)Count;
+  (void)Destination;
+  (void)Value;
+  (void)Count;
   fprintf(stderr, "unimplemented __stosb, aborting\n");
   abort();
 }
@@ -553,7 +555,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
             target_address = symbol_lookup(strings.data[string_record_index]);
             if (target_address == NULL) {
               logerr("undefined import symbol: %s\n", strings.data[string_record_index]);
-              //goto fail;
+              goto fail;
             }
           }
           *((uintptr_t*)fixup_address) = (uintptr_t)target_address;
@@ -644,7 +646,7 @@ bool link_dyos(FILE** dyo_files, LinkInfo* link_info) {
                   target_address = symbol_lookup(strings.data[name_index]);
                   if (!target_address) {
                     logerr("undefined data reloc symbol: %s\n", strings.data[name_index]);
-                    //goto fail;
+                    goto fail;
                   }
                 }
               }
