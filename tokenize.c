@@ -667,24 +667,6 @@ Token* tokenize(File* file) {
   return head.next;
 }
 
-// Returns the contents of a given file. Doesn't support '-' for reading from
-// stdin.
-static char* read_file(char* path) {
-  FILE* fp = fopen(path, "rb");
-  if (!fp) {
-    return NULL;
-  }
-
-  fseek(fp, 0, SEEK_END);
-  long long size = ftell(fp);
-  rewind(fp);
-  char* buf = bumpcalloc(1, size + 1, AL_Compile);
-  long long n = fread(buf, 1, size, fp);
-  fclose(fp);
-  buf[n] = 0;
-  return buf;
-}
-
 File* new_file(char* name, char* contents) {
   File* file = bumpcalloc(1, sizeof(File), AL_Compile);
   file->name = name;
@@ -782,7 +764,7 @@ static void convert_universal_chars(char* p) {
 }
 
 Token* tokenize_file(char* path) {
-  char* p = read_file(path);
+  char* p = read_file(path, AL_Compile);
   if (!p)
     return NULL;
 

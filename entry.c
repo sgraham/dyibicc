@@ -38,6 +38,22 @@ static void parse_args(int argc,
       continue;
     }
 
+    if (argv[i][0] == '@') {
+      char* rsp_contents = read_file(&argv[i][1], AL_Link);
+      if (!rsp_contents) {
+        error("couldn't open '%s'", &argv[i][1]);
+      }
+      char* cur = rsp_contents;
+      for (char* p = rsp_contents; *p; ++p) {
+        if (*p == '\n') {
+          *p = 0;
+          strarray_push(input_paths, cur, AL_Link);
+          cur = p + 1;
+        }
+      }
+      continue;
+    }
+
     if (!strcmp(argv[i], "--help"))
       usage(0);
 
@@ -52,6 +68,13 @@ static void parse_args(int argc,
 }
 
 int main(int argc, char** argv) {
+#if X64WIN
+  // All dyo files are open during link, so we hack this (the maximum)
+  // to support some tests with a lot of files. dyo files should
+  // probably go away later.
+  _setmaxstdio(8192);
+#endif
+
   alloc_init(AL_Link);
 
   StringArray include_paths = {0};

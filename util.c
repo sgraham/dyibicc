@@ -174,6 +174,24 @@ int64_t stat_single_file(const char* path) {
 
 #endif
 
+// Returns the contents of a given file. Doesn't support '-' for reading from
+// stdin.
+char* read_file(char* path, AllocLifetime lifetime) {
+  FILE* fp = fopen(path, "rb");
+  if (!fp) {
+    return NULL;
+  }
+
+  fseek(fp, 0, SEEK_END);
+  long long size = ftell(fp);
+  rewind(fp);
+  char* buf = bumpcalloc(1, size + 1, lifetime);  // TODO: doesn't really need a calloc
+  long long n = fread(buf, 1, size, fp);
+  fclose(fp);
+  buf[n] = 0;
+  return buf;
+}
+
 // Takes a printf-style format string and returns a formatted string.
 char* format(AllocLifetime lifetime, char* fmt, ...) {
   char buf[4096];

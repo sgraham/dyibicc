@@ -113,6 +113,7 @@ void bytearray_push(ByteArray* arr, char b, AllocLifetime lifetime);
 void intintarray_push(IntIntArray* arr, IntInt item, AllocLifetime lifetime);
 char* format(AllocLifetime lifetime, char* fmt, ...) __attribute__((format(printf, 2, 3)));
 int64_t stat_single_file(const char* path);
+char* read_file(char* path, AllocLifetime lifetime);
 
 //
 // tokenize.c

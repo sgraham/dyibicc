@@ -37,7 +37,7 @@ typedef struct HeapData {
 
 static HeapData heap[NUM_BUMP_HEAPS] = {
     {NULL, NULL, 1024 << 20},  // AL_Compile
-    {NULL, NULL, 64 << 10},    // AL_Temp
+    {NULL, NULL, 128 << 20},   // AL_Temp
     {NULL, NULL, 128 << 20},   // AL_Link
 };
 
@@ -45,7 +45,11 @@ static HeapData heap[NUM_BUMP_HEAPS] = {
 void error(char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  user_context->output_function(2, fmt, ap);
+  if (!user_context || !user_context->output_function) {
+    vfprintf(stderr, fmt, ap);
+  } else {
+    user_context->output_function(2, fmt, ap);
+  }
   logerr("\n");
   exit(1);
 }
