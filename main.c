@@ -1,4 +1,4 @@
-// Notes and todos
+﻿// Notes and todos
 // ---------------
 //
 // Windows x64 .pdata generation:
@@ -145,124 +145,12 @@
 //
 #include "dyibicc.h"
 
-StringArray include_paths;
-
-char* base_file;
-char* entry_point_override;
-
-static int default_output_fn(int level, const char* fmt, va_list ap) {
-  FILE* output_to = stdout;
-  if (level >= 2)
-    output_to = stderr;
-  int ret = vfprintf(output_to, fmt, ap);
-  return ret;
-}
-
-static StringArray input_paths;
-static bool opt_E = false;
-
-static void add_default_include_paths(char* argv0) {
 #if X64WIN
-  strarray_push(&include_paths, format("%s/include/win", dirname(bumpstrdup(argv0))));
-  strarray_push(&include_paths, format("%s/include/all", dirname(bumpstrdup(argv0))));
-
-  strarray_push(&include_paths,
-                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\ucrt");
-  strarray_push(&include_paths,
-                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\um");
-  strarray_push(&include_paths,
-                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\shared");
-  strarray_push(&include_paths,
-                "C:\\Program Files\\Microsoft Visual "
-                "Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.34.31933\\include");
-#else
-  strarray_push(&include_paths, format("%s/include/linux", dirname(bumpstrdup(argv0))));
-  strarray_push(&include_paths, format("%s/include/all", dirname(bumpstrdup(argv0))));
-
-  // Add standard include paths.
-  strarray_push(&include_paths, "/usr/local/include");
-  strarray_push(&include_paths, "/usr/include/x86_64-linux-gnu");
-  strarray_push(&include_paths, "/usr/include");
+#include <direct.h>
 #endif
-}
 
-static void usage(int status) {
-  logerr("dyibicc [-E] [-e symbolname] [-I <path>] <file0> [<file1>...]\n");
-  exit(status);
-}
-
-static bool take_arg(char* arg) {
-  char* x[] = {
-      "-I",
-      "-e",
-  };
-
-  for (size_t i = 0; i < sizeof(x) / sizeof(*x); i++)
-    if (!strcmp(arg, x[i]))
-      return true;
-  return false;
-}
-
-static void parse_args(int argc, char** argv) {
-  for (int i = 1; i < argc; i++)
-    if (take_arg(argv[i]))
-      if (!argv[++i])
-        usage(1);
-
-  for (int i = 1; i < argc; i++) {
-    if (!strncmp(argv[i], "-I", 2)) {
-      strarray_push(&include_paths, argv[i] + 2);
-      continue;
-    }
-
-    if (!strncmp(argv[i], "-e", 2)) {
-      entry_point_override = argv[i] + 2;
-      continue;
-    }
-
-    if (!strcmp(argv[i], "-E")) {
-      opt_E = true;
-      continue;
-    }
-
-    if (!strcmp(argv[i], "--help"))
-      usage(0);
-
-    if (argv[i][0] == '-' && argv[i][1] != '\0')
-      error("unknown argument: %s", argv[i]);
-
-    strarray_push(&input_paths, argv[i]);
-  }
-
-  if (input_paths.len == 0)
-    error("no input files");
-}
-
-// This attempts to blast all static variables back to zero-initialized and
-// clears all memory that was calloc'd in a previous iteration of the compiler.
-// All previously allocated pointers become invalidated. Command line arguments
-// are reparsed because of this, and will be identical to the last time.
-static void purge_all(void) {
-  bumpcalloc_reset();
-  codegen_reset();
-  link_reset();
-  parse_reset();
-  preprocess_reset();
-  tokenize_reset();
-  input_paths = (StringArray){NULL, 0, 0};
-  include_paths = (StringArray){NULL, 0, 0};
-  opt_E = false;
-  base_file = NULL;
-  entry_point_override = NULL;
-}
-
-static void reinit_all(int argc, char* argv[]) {
-  bumpcalloc_init();
-  init_macros();
-
-  parse_args(argc, argv);
-  add_default_include_paths(argv[0]);
-}
+#define C(x) compiler_state.main__##x
+#define L(x) linker_state.main__##x
 
 static Token* must_tokenize_file(char* path) {
   Token* tok = tokenize_file(path);
@@ -271,25 +159,7 @@ static Token* must_tokenize_file(char* path) {
   return tok;
 }
 
-static FILE* open_file(char* path) {
-  if (!path || strcmp(path, "-") == 0)
-    return stdout;
-
-  FILE* out = fopen(path, "wb");
-  if (!out)
-    error("cannot open output file: %s: %s", path, strerror(errno));
-  return out;
-}
-
-// Replace file extension
-static char* replace_extn(char* tmpl, char* extn) {
-  char* filename = basename(bumpstrdup(tmpl));
-  char* dot = strrchr(filename, '.');
-  if (dot)
-    *dot = '\0';
-  return format("%s%s", filename, extn);
-}
-
+#if 0  // for -E call after preprocess().
 static void print_tokens(Token* tok) {
   int line = 1;
   for (; tok->kind != TK_EOF; tok = tok->next) {
@@ -302,57 +172,257 @@ static void print_tokens(Token* tok) {
   }
   logout("\n");
 }
+#endif
 
-bool dyibicc_compile_and_link(int argc, char** argv, DyibiccLinkInfo* link_info) {
-  bool result = false;
-
-  if (!output_fn)
-    output_fn = default_output_fn;
-
-  bumpcalloc_init();
-  parse_args(argc, argv);
-
-  // TODO: Can't use a strarray because it'll get purged.
-  FILE* dyo_files[MAX_DYOS] = {0};
-  int num_dyo_files = 0;
-
-  for (int i = 0; i < input_paths.len; i++) {
-    purge_all();
-    reinit_all(argc, argv);
-    base_file = input_paths.data[i];
-    char* dyo_output_file = replace_extn(base_file, ".dyo");
-
-    Token* tok = must_tokenize_file(base_file);
-    tok = preprocess(tok);
-
-    // If -E is given, print out preprocessed C code as a result.
-    if (opt_E) {
-      print_tokens(tok);
-      continue;
-    }
-
-    codegen_init();  // Initializes dynasm so that parse() can assign labels.
-
-    Obj* prog = parse(tok);
-
-    FILE* dyo_out = open_file(dyo_output_file);
-    codegen(prog, dyo_out);
-    fclose(dyo_out);
-
-    dyo_files[num_dyo_files++] = fopen(dyo_output_file, "rb");
-  }
-
-  if (opt_E) {
-    purge_all();
-    return true;
-  }
-
-  result = link_dyos(dyo_files, (LinkInfo*)link_info);
-
-  purge_all();
-  return result;
+static int default_output_fn(int level, const char* fmt, va_list ap) {
+  FILE* output_to = stdout;
+  if (level >= 2)
+    output_to = stderr;
+  int ret = vfprintf(output_to, fmt, ap);
+  return ret;
 }
 
-void dyibicc_set_normal_output_function(DyibiccOutputFn f) {
-  output_fn = f;
+DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
+  alloc_init(AL_Temp);
+
+  // Clone env_data into allocated ctx
+
+  size_t total_include_paths_len = 0;
+  size_t num_include_paths = 0;
+  for (const char** p = env_data->include_paths; *p; ++p) {
+    total_include_paths_len += strlen(*p) + 1;
+    ++num_include_paths;
+  }
+
+  StringArray sys_inc_paths = {0};
+#if X64WIN
+  strarray_push(&sys_inc_paths, format(AL_Temp, "%s/win", env_data->dyibicc_include_dir), AL_Temp);
+  strarray_push(&sys_inc_paths, format(AL_Temp, "%s/all", env_data->dyibicc_include_dir), AL_Temp);
+
+  strarray_push(&sys_inc_paths,
+                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\ucrt", AL_Temp);
+  strarray_push(&sys_inc_paths,
+                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\um", AL_Temp);
+  strarray_push(&sys_inc_paths,
+                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\shared",
+                AL_Temp);
+  strarray_push(&sys_inc_paths,
+                "C:\\Program Files\\Microsoft Visual "
+                "Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.34.31933\\include",
+                AL_Temp);
+#else
+  strarray_push(&sys_inc_paths, format(AL_Temp, "%s/linux", env_data->dyibicc_include_dir),
+                AL_Temp);
+  strarray_push(&sys_inc_paths, format(AL_Temp, "%s/all", env_data->dyibicc_include_dir), AL_Temp);
+
+  strarray_push(&sys_inc_paths, "/usr/local/include", AL_Temp);
+  strarray_push(&sys_inc_paths, "/usr/include/x86_64-linux-gnu", AL_Temp);
+  strarray_push(&sys_inc_paths, "/usr/include", AL_Temp);
+#endif
+
+  for (int i = 0; i < sys_inc_paths.len; ++i) {
+    total_include_paths_len += strlen(sys_inc_paths.data[i]) + 1;
+    ++num_include_paths;
+  }
+
+  StringArray dyo_output_paths = {0};
+  size_t total_output_paths_len = 0;
+
+  size_t total_source_files_len = 0;
+  size_t num_files = 0;
+  for (const char** p = env_data->files; *p; ++p) {
+    total_source_files_len += strlen(*p) + 1;
+    char* source_name_copy = bumpstrdup(*p, AL_Temp);
+    for (char* q = source_name_copy; *q; ++q) {
+      if (!isalnum(*q) && *q != '-' && *q != '_')
+        *q = '@';
+    }
+    char* output_name = format(AL_Temp, "%s/%s.dyo", env_data->cache_dir, source_name_copy);
+    strarray_push(&dyo_output_paths, output_name, AL_Temp);
+    total_output_paths_len += strlen(output_name) + 1;
+
+    ++num_files;
+  }
+
+#if X64WIN
+  _mkdir(env_data->cache_dir);
+#else
+  mkdir(env_data->cache_dir, 0644);
+#endif
+
+  size_t entry_point_name_len =
+      env_data->entry_point_name ? strlen(env_data->entry_point_name) + 1 : 0;
+  if (!env_data->cache_dir) {
+    env_data->cache_dir = ".";
+  }
+  size_t cache_dir_len = strlen(env_data->cache_dir) + 1;
+  // Don't currently need dyibicc_include_dir once sys_inc_paths are added to.
+
+  size_t total_size =
+      sizeof(UserContext) +                       // base structure
+      (num_include_paths * sizeof(char*)) +       // array in base structure
+      (num_files * sizeof(DyoLinkData)) +         // array in base structure
+      (total_include_paths_len * sizeof(char)) +  // pointed to by include_paths
+      (total_source_files_len * sizeof(char)) +   // pointed to by DyoLinkData.source_name
+      (total_output_paths_len * sizeof(char)) +   // pointed to by DyoLinkData.output_dyo_name
+      entry_point_name_len +                      // two other strings
+      cache_dir_len +                             //
+      ((num_files + 1) * sizeof(HashMap));        // +1 beyond num_files for fully global dataseg
+
+  UserContext* data = calloc(1, total_size);
+
+  data->entry_point = NULL;
+  data->get_function_address = env_data->get_function_address;
+  data->output_function = env_data->output_function;
+  if (!data->output_function) {
+    data->output_function = default_output_fn;
+  }
+
+  char* d = (char*)(&data[1]);
+
+  data->num_include_paths = num_include_paths;
+  data->include_paths = (char**)d;
+  d += sizeof(char*) * num_include_paths;
+
+  data->num_files = num_files;
+  data->files = (DyoLinkData*)d;
+  d += sizeof(DyoLinkData) * num_files;
+
+  data->global_data = (HashMap*)d;
+  d += sizeof(HashMap) * (num_files + 1);
+
+  if (env_data->entry_point_name) {
+    data->entry_point_name = d;
+    strcpy(d, env_data->entry_point_name);
+    d += strlen(env_data->entry_point_name) + 1;
+  }
+
+  if (env_data->cache_dir) {
+    data->cache_dir = d;
+    strcpy(d, env_data->cache_dir);
+    d += strlen(env_data->cache_dir) + 1;
+  }
+
+  int i = 0;
+  for (const char** p = env_data->include_paths; *p; ++p) {
+    data->include_paths[i++] = d;
+    strcpy(d, *p);
+    d += strlen(*p) + 1;
+  }
+  for (int j = 0; j < sys_inc_paths.len; ++j) {
+    data->include_paths[i++] = d;
+    strcpy(d, sys_inc_paths.data[j]);
+    d += strlen(sys_inc_paths.data[j]) + 1;
+  }
+
+  i = 0;
+  for (const char** p = env_data->files; *p; ++p) {
+    DyoLinkData* dld = &data->files[i++];
+    dld->source_name = d;
+    strcpy(dld->source_name, *p);
+    d += strlen(*p) + 1;
+  }
+
+  i = 0;
+  for (int j = 0; j < dyo_output_paths.len; ++j) {
+    DyoLinkData* dld = &data->files[i++];
+    dld->output_dyo_name = d;
+    strcpy(d, dyo_output_paths.data[j]);
+    d += strlen(dyo_output_paths.data[j]) + 1;
+  }
+
+  for (size_t j = 0; j < num_files + 1; ++j) {
+    // These maps store an arbitrary number of symbols, and they must persist
+    // beyond AL_Link (to be saved for relink updates) so they must be manually
+    // managed.
+    data->global_data[j].alloc_lifetime = AL_Manual;
+  }
+
+  assert((size_t)(d - (char*)data) == total_size);
+
+  alloc_reset(AL_Temp);
+
+  user_context = data;
+  return (DyibiccContext*)data;
+}
+
+#define TOMBSTONE ((void*)-1)
+// These maps have keys strdup'd with AL_Manual, and values that are the data
+// segment allocations allocated by aligned_allocate.
+static void hashmap_custom_free(HashMap* map) {
+  assert(map->alloc_lifetime == AL_Manual);
+  for (int i = 0; i < map->capacity; i++) {
+    HashEntry* ent = &map->buckets[i];
+    if (ent->key && ent->key != TOMBSTONE) {
+      alloc_free(ent->key, map->alloc_lifetime);
+      aligned_free(ent->val);
+    }
+  }
+  alloc_free(map->buckets, map->alloc_lifetime);
+}
+
+void dyibicc_free(DyibiccContext* context) {
+  UserContext* ctx = (UserContext*)context;
+  assert(ctx == user_context && "only one context currently supported");
+  for (size_t i = 0; i < ctx->num_files + 1; ++i) {
+    hashmap_custom_free(&ctx->global_data[i]);
+  }
+  free(ctx);
+  user_context = NULL;
+}
+
+#define OPT_E 0
+
+static FILE* open_file(char* path) {
+  if (!path || strcmp(path, "-") == 0)
+    return stdout;
+
+  FILE* out = fopen(path, "wb");
+  if (!out)
+    error("cannot open output file: %s: %s", path, strerror(errno));
+  return out;
+}
+
+bool dyibicc_update(DyibiccContext* context) {
+  UserContext* ctx = (UserContext*)context;
+  bool link_result = false;
+
+  assert(ctx == user_context && "only one context currently supported");
+
+  {
+    for (size_t i = 0; i < ctx->num_files; ++i) {
+      DyoLinkData* dld = &ctx->files[i];
+
+      {
+        alloc_init(AL_Compile);
+
+        init_macros();
+        C(base_file) = dld->source_name;
+        Token* tok = must_tokenize_file(C(base_file));
+        tok = preprocess(tok);
+
+        codegen_init();  // Initializes dynasm so that parse() can assign labels.
+
+        Obj* prog = parse(tok);
+        FILE* dyo_out = open_file(dld->output_dyo_name);
+        // TODO: need to figure out FILE vs longjmp, either will succeed or
+        // error() which will leave this open. Probably the same for
+        // preprocess().
+        codegen(prog, dyo_out);
+        fclose(dyo_out);
+
+        alloc_reset(AL_Compile);
+      }
+    }
+
+    {
+      alloc_init(AL_Link);
+
+      link_result = link_dyos();
+
+      alloc_reset(AL_Link);
+    }
+  }
+
+  return link_result;
 }

@@ -9,6 +9,7 @@ x.bat
 /test/*.exe
 /test_codebase/
 .vs/
+dyocache/
 tags
 test/x.c
 minilua

@@ -1,4 +1,4 @@
-#include "dyibicc.h"
+﻿#include "dyibicc.h"
 
 #if X64WIN
 #include <windows.h>
@@ -23,32 +23,64 @@ void __asan_unpoison_memory_region(void const volatile* addr, size_t size);
 #define ASAN_UNPOISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
 #endif
 
-static char* allmem;
-static char* current_alloc_pointer;
+#define NUM_BUMP_HEAPS (AL_Link + 1)
 
-#define HEAP_SIZE (1024 << 20ull)
+UserContext* user_context;
+CompilerState compiler_state;
+LinkerState linker_state;
+
+typedef struct HeapData {
+  char* base;
+  char* alloc_pointer;
+  size_t size;
+} HeapData;
+
+static HeapData heap[NUM_BUMP_HEAPS] = {
+    {NULL, NULL, 1024 << 20},  // AL_Compile
+    {NULL, NULL, 64 << 10},    // AL_Temp
+    {NULL, NULL, 128 << 20},   // AL_Link
+};
 
 // Reports an error and exit.
 void error(char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  output_fn(2, fmt, ap);
+  user_context->output_function(2, fmt, ap);
   logerr("\n");
   exit(1);
 }
 
-void bumpcalloc_init(void) {
-  assert(!allmem);
-  allmem = allocate_writable_memory(HEAP_SIZE);
-  current_alloc_pointer = allmem;
-  ASAN_POISON_MEMORY_REGION(allmem, HEAP_SIZE);
+void alloc_init(AllocLifetime lifetime) {
+  assert(lifetime < NUM_BUMP_HEAPS);
+  HeapData* hd = &heap[lifetime];
+
+  hd->alloc_pointer = hd->base = allocate_writable_memory(hd->size);
+  ASAN_POISON_MEMORY_REGION(hd->base, hd->size);
+  if (lifetime == AL_Compile) {
+    memset(&compiler_state, 0, sizeof(compiler_state));
+  } else if (lifetime == AL_Link) {
+    memset(&linker_state, 0, sizeof(linker_state));
+  }
 }
 
-void* bumpcalloc(size_t num, size_t size) {
+void alloc_reset(AllocLifetime lifetime) {
+  assert(lifetime < NUM_BUMP_HEAPS);
+  HeapData* hd = &heap[lifetime];
+  ASAN_POISON_MEMORY_REGION(hd->base, hd->size);
+  free_executable_memory(hd->base, hd->size);
+  hd->alloc_pointer = NULL;
+}
+
+void* bumpcalloc(size_t num, size_t size, AllocLifetime lifetime) {
+  if (lifetime == AL_Manual) {
+    return calloc(num, size);
+  }
+
   size_t toalloc = align_to_u(num * size, 8);
-  char* ret = current_alloc_pointer;
-  current_alloc_pointer += toalloc;
-  if (current_alloc_pointer > allmem + HEAP_SIZE) {
+  HeapData* hd = &heap[lifetime];
+  char* ret = hd->alloc_pointer;
+  hd->alloc_pointer += toalloc;
+  if (hd->alloc_pointer > hd->base + hd->size) {
     error("heap exhausted");
   }
   ASAN_UNPOISON_MEMORY_REGION(ret, toalloc);
@@ -56,18 +88,17 @@ void* bumpcalloc(size_t num, size_t size) {
   return ret;
 }
 
-void* bumplamerealloc(void* old, size_t old_size, size_t new_size) {
-  void* newptr = bumpcalloc(1, new_size);
+void alloc_free(void* p, AllocLifetime lifetime) {
+  (void)lifetime;
+  assert(lifetime == AL_Manual);
+  free(p);
+}
+
+void* bumplamerealloc(void* old, size_t old_size, size_t new_size, AllocLifetime lifetime) {
+  void* newptr = bumpcalloc(1, new_size, lifetime);
   memcpy(newptr, old, MIN(old_size, new_size));
   ASAN_POISON_MEMORY_REGION(old, old_size);
   return newptr;
-}
-
-void bumpcalloc_reset(void) {
-  free_executable_memory(allmem, HEAP_SIZE);
-  ASAN_POISON_MEMORY_REGION(allmem, HEAP_SIZE);
-  allmem = NULL;
-  current_alloc_pointer = NULL;
 }
 
 void* aligned_allocate(size_t size, size_t alignment) {
@@ -96,6 +127,7 @@ void* allocate_writable_memory(size_t size) {
   if (!p) {
     error("VirtualAlloc failed: 0x%x\n", GetLastError());
   }
+  ASAN_UNPOISON_MEMORY_REGION(p, size);
   return p;
 #else
   void* ptr = mmap(0, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -103,6 +135,7 @@ void* allocate_writable_memory(size_t size) {
     perror("mmap");
     return NULL;
   }
+  ASAN_UNPOISON_MEMORY_REGION(ptr, size);
   return ptr;
 #endif
 }
@@ -131,7 +164,9 @@ void free_executable_memory(void* p, size_t size) {
   if (!VirtualFree(p, 0, MEM_RELEASE)) {
     error("VirtualFree failed: 0x%x\n", GetLastError());
   }
+  ASAN_POISON_MEMORY_REGION(p, size);
 #else
   munmap(p, size);
+  ASAN_POISON_MEMORY_REGION(p, size);
 #endif
 }
