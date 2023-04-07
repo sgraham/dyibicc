@@ -685,9 +685,6 @@ typedef struct CompilerState {
 
   // main.c
   char* main__base_file;
-
-  char alloc__heap[256 << 20];
-  char* alloc__current_alloc_pointer;
 } CompilerState;
 
 typedef struct LinkerState {
@@ -695,19 +692,8 @@ typedef struct LinkerState {
   HashMap link__runtime_function_map;
 
   // main.c
-
-  char alloc__heap[128 << 20];
-  char* alloc__current_alloc_pointer;
 } LinkerState;
-
-// Allocator-only, no long term program state. Used for AL_Temp in a very narrow
-// scope (building a format string, etc.)
-typedef struct TempState {
-  char alloc__heap[64 << 10];
-  char* alloc__current_alloc_pointer;
-} TempState;
 
 extern UserContext* user_context;
 extern CompilerState compiler_state;
 extern LinkerState linker_state;
-extern TempState temp_state;

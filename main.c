@@ -210,7 +210,11 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
   strarray_push(&sys_inc_paths, format(AL_Temp, "%s/all", env_data->dyibicc_include_dir), AL_Temp);
 
   strarray_push(&sys_inc_paths,
-                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.19041.0\\ucrt", AL_Temp);
+                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\ucrt", AL_Temp);
+  strarray_push(&sys_inc_paths,
+                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\um", AL_Temp);
+  strarray_push(&sys_inc_paths,
+                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\shared", AL_Temp);
   strarray_push(&sys_inc_paths,
                 "C:\\Program Files\\Microsoft Visual "
                 "Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.34.31933\\include",
