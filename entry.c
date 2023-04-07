@@ -102,7 +102,9 @@ int main(int argc, char** argv) {
 
   if (dyibicc_update(ctx)) {
     if (ctx->entry_point) {
-      result = ctx->entry_point();
+      int myargc = 1;
+      char* myargv[] = {"prog", NULL};
+      result = ctx->entry_point(myargc, myargv);
     } else {
       fprintf(stderr, "no entry point found\n");
       result = 254;

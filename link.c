@@ -103,9 +103,7 @@ static void* get_standard_runtime_function(char* name) {
     X(_time64);
     X(_timespec64_get);
     X(_unlink);
-#ifndef NDEBUG
     X(_wassert);
-#endif
     X(_wcsicmp);
     X(_wctime64);
     X(_wctime64_s);
@@ -344,7 +342,7 @@ static void* symbol_lookup(char* name) {
 bool link_dyos(void) {
 #define BUF_SIZE (16 << 20)
   void* read_buffer = malloc(BUF_SIZE);
-  char buf[64 << 10];
+  char* buf = read_buffer;
 
   UserContext* uc = user_context;
 

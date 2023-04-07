@@ -485,7 +485,7 @@ static void convert_pp_number(Token* tok) {
 
 void convert_pp_tokens(Token* tok) {
   for (Token* t = tok; t->kind != TK_EOF; t = t->next) {
-    if (is_keyword(t))
+    if (t->kind == TK_IDENT && is_keyword(t))
       t->kind = TK_KEYWORD;
     else if (t->kind == TK_PP_NUM)
       convert_pp_number(t);

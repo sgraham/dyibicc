@@ -312,11 +312,11 @@ bool read_dyo_record(FILE* f,
     logerr("record larger than buffer (%d > %d)\n", *size, buf_size);
     return false;
   }
-  if (fread(buf, *size, 1, f) < 0) {
+  size_t bytes_read = fread(buf, 1, *size, f);
+  if (bytes_read != *size) {
     logerr("read error");
     return false;
   }
-
   return true;
 }
 

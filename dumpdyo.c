@@ -1,6 +1,15 @@
 #include "dyibicc.h"
 
+static int default_output_fn(int level, const char* fmt, va_list ap) {
+  if (level >= 2)
+    return vfprintf(stderr, fmt, ap);
+  return vfprintf(stdout, fmt, ap);
+}
+
 int main(int argc, char* argv[]) {
+  user_context = &(UserContext){0};
+  user_context->output_function = default_output_fn;
+
   if (argc != 2) {
     fprintf(stderr, "dumpdyo <file.dyo>\n");
     return 1;

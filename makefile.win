@@ -3,8 +3,8 @@
 SRCS=$(SRCS) codegen.win32.c
 
 CC=@cl
-#CFLAGS=/nologo /Od /Zi /DNDEBUG /D_CRT_SECURE_NO_DEPRECATE /DX64WIN=1 /W4 /WX
-CFLAGS=/nologo /Ox /GL /Zi /DNDEBUG /D_CRT_SECURE_NO_DEPRECATE /DX64WIN=1 /W4 /WX
+#CFLAGS=/nologo /Od /Zi /D_CRT_SECURE_NO_DEPRECATE /DX64WIN=1 /W4 /WX
+CFLAGS=/nologo /Ox /GL /Zi /D_CRT_SECURE_NO_DEPRECATE /DX64WIN=1 /W4 /WX
 LDFLAGS=gdi32.lib user32.lib onecore.lib /LTCG /OPT:REF /OPT:ICF
 
 #CC=@"C:\Program Files\LLVM\bin\clang-cl.exe"
@@ -38,7 +38,7 @@ test: $(TEST_SRCS) dyibicc.exe .phony
 	@for %%x in ($**) do @if not %%x==dyibicc.exe (@if not %%x==.phony (@echo %%x & (dyibicc.exe -Itest test/common.c %%x || exit) && echo.))
 
 sleepy: dyibicc.exe .phony
-	@start "" "C:\Program Files\Very Sleepy\sleepy.exe" /r "dyibicc.exe -Ithird_party\sqlite-amalgamation-3410200 third_party\sqlite-amalgamation-3410200\shell.c third_party\sqlite-amalgamation-3410200\sqlite3.c"
+	@start "" "C:\Program Files\Very Sleepy\sleepy.exe" /r "dyibicc.exe -ewmain -Ithird_party\sqlite-amalgamation-3410200 third_party\sqlite-amalgamation-3410200\shell.c third_party\sqlite-amalgamation-3410200\sqlite3.c"
 
 prof: dyibicc.exe .phony
 	timavg dyibicc.exe -Ithird_party\sqlite-amalgamation-3410200 third_party\sqlite-amalgamation-3410200\shell.c third_party\sqlite-amalgamation-3410200\sqlite3.c
