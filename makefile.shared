@@ -41,6 +41,7 @@ test/decl.c \
 test/enum.c \
 test/extern.c \
 test/float.c \
+test/funcstack.c \
 test/function.c \
 test/generic.c \
 test/initializer.c \

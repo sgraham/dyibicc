@@ -1344,7 +1344,8 @@ static void gen_expr(Node* node) {
         switch (ty->kind) {
           case TY_STRUCT:
           case TY_UNION:
-            if (type_passed_in_register(ty) || (arg->pass_by_reference && reg < X64WIN_REG_MAX)) {
+            if ((type_passed_in_register(ty) && reg < X64WIN_REG_MAX) ||
+                (arg->pass_by_reference && reg < X64WIN_REG_MAX)) {
               pop(dasmargreg[reg++]);
             }
             break;
@@ -2122,7 +2123,14 @@ static void assign_lvar_offsets(Obj* prog) {
       switch (ty->kind) {
         case TY_STRUCT:
         case TY_UNION:
-          if (ty->size <= 16) {
+          if (ty->size <= 8) {
+            bool fp1 = has_flonum(ty, 0, 8, 0);
+            if (fp + fp1 < SYSV_FP_MAX && gp + !fp1 < SYSV_GP_MAX) {
+              fp = fp + fp1;
+              gp = gp + !fp1;
+              continue;
+            }
+          } else if (ty->size <= 16) {
             bool fp1 = has_flonum(ty, 0, 8, 0);
             bool fp2 = has_flonum(ty, 8, 16, 8);
             if (fp + fp1 + fp2 < SYSV_FP_MAX && gp + !fp1 + !fp2 < SYSV_GP_MAX) {
