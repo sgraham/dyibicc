@@ -425,6 +425,7 @@ bool link_dyos(void) {
           unsigned int name_index = *(unsigned int*)&buf[12];
           bool is_static = flags & 0x01;
           bool is_rodata = flags & 0x02;
+          bool was_freed = false;
 
           // Don't recreate non-rodata if relinking. TBD what data should be
           // recreated vs. preserved, maybe some sort of annotations.
@@ -434,6 +435,7 @@ bool link_dyos(void) {
             if (prev) {
               if (is_rodata) {
                 aligned_free(prev);
+                was_freed = true;
               } else {
                 continue;
               }
@@ -445,10 +447,12 @@ bool link_dyos(void) {
 
           // The keys need to be strdup'd to stick around for subsequent links.
           size_t idx = is_static ? num_dyos : uc->num_files;
-          void* prev = hashmap_get(&uc->global_data[idx], strings.data[name_index]);
-          if (prev) {
-            logerr("duplicated symbol: %s\n", strings.data[name_index]);
-            goto fail;
+          if (!was_freed) {
+            void* prev = hashmap_get(&uc->global_data[idx], strings.data[name_index]);
+            if (prev) {
+              logerr("duplicated symbol: %s\n", strings.data[name_index]);
+              goto fail;
+            }
           }
           hashmap_put(&uc->global_data[idx], bumpstrdup(strings.data[name_index], AL_Manual),
                       global_data);

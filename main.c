@@ -225,6 +225,15 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
     ++num_include_paths;
   }
 
+  size_t entry_point_name_len =
+      env_data->entry_point_name ? strlen(env_data->entry_point_name) + 1 : 0;
+
+  if (!env_data->cache_dir) {
+    env_data->cache_dir = ".";
+  }
+  size_t cache_dir_len = strlen(env_data->cache_dir) + 1;
+  // Don't currently need dyibicc_include_dir once sys_inc_paths are added to.
+
   StringArray dyo_output_paths = {0};
   size_t total_output_paths_len = 0;
 
@@ -249,14 +258,6 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
 #else
   mkdir(env_data->cache_dir, 0644);
 #endif
-
-  size_t entry_point_name_len =
-      env_data->entry_point_name ? strlen(env_data->entry_point_name) + 1 : 0;
-  if (!env_data->cache_dir) {
-    env_data->cache_dir = ".";
-  }
-  size_t cache_dir_len = strlen(env_data->cache_dir) + 1;
-  // Don't currently need dyibicc_include_dir once sys_inc_paths are added to.
 
   size_t total_size =
       sizeof(UserContext) +                       // base structure
@@ -385,16 +386,24 @@ static FILE* open_file(char* path) {
 
 bool dyibicc_update(DyibiccContext* context) {
   UserContext* ctx = (UserContext*)context;
-  bool link_result = false;
+  bool link_result = true;
 
   assert(ctx == user_context && "only one context currently supported");
 
+  bool compiled_any = false;
   {
     for (size_t i = 0; i < ctx->num_files; ++i) {
       DyoLinkData* dld = &ctx->files[i];
 
       {
+        int64_t cur_mtime = stat_single_file(dld->source_name);
+        if (cur_mtime == dld->last_compiled_timestamp) {
+          continue;
+        }
+
         alloc_init(AL_Compile);
+
+        // logdbg("%s => %s\n", dld->source_name, dld->output_dyo_name);
 
         init_macros();
         C(base_file) = dld->source_name;
@@ -411,11 +420,14 @@ bool dyibicc_update(DyibiccContext* context) {
         codegen(prog, dyo_out);
         fclose(dyo_out);
 
+        dld->last_compiled_timestamp = cur_mtime;
+        compiled_any = true;
+
         alloc_reset(AL_Compile);
       }
     }
 
-    {
+    if (compiled_any) {
       alloc_init(AL_Link);
 
       link_result = link_dyos();

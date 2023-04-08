@@ -104,7 +104,7 @@ int main(int argc, char** argv) {
     if (ctx->entry_point) {
       int myargc = 1;
       char* myargv[] = {"prog", NULL};
-      result = ctx->entry_point(myargc, myargv);
+      result = ((int (*)(int, char**))(ctx->entry_point))(myargc, myargv);
     } else {
       fprintf(stderr, "no entry point found\n");
       result = 254;

@@ -11,7 +11,7 @@ typedef int (*DyibiccOutputFn)(int level, const char* fmt, va_list ap);
 // Returns the address of a function by name.
 typedef void* (*DyibiccFunctionLookupFn)(const char* name);
 
-typedef int (*DyibiccEntryPointFn)();
+typedef void* DyibiccEntryPointFn;
 
 typedef struct DyibiccEnviromentData {
   const char** include_paths;
