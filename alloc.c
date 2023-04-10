@@ -26,6 +26,7 @@ void __asan_unpoison_memory_region(void const volatile* addr, size_t size);
 #define NUM_BUMP_HEAPS (AL_Link + 1)
 
 UserContext* user_context;
+jmp_buf toplevel_update_jmpbuf;
 CompilerState compiler_state;
 LinkerState linker_state;
 
@@ -41,7 +42,7 @@ static HeapData heap[NUM_BUMP_HEAPS] = {
     {NULL, NULL, 128 << 20},   // AL_Link
 };
 
-// Reports an error and exit.
+// Reports an error and exit update.
 void error(char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
@@ -51,7 +52,7 @@ void error(char* fmt, ...) {
     user_context->output_function(2, fmt, ap);
   }
   logerr("\n");
-  exit(1);
+  longjmp(toplevel_update_jmpbuf, 1);
 }
 
 void alloc_init(AllocLifetime lifetime) {
@@ -70,9 +71,14 @@ void alloc_init(AllocLifetime lifetime) {
 void alloc_reset(AllocLifetime lifetime) {
   assert(lifetime < NUM_BUMP_HEAPS);
   HeapData* hd = &heap[lifetime];
-  ASAN_POISON_MEMORY_REGION(hd->base, hd->size);
-  free_executable_memory(hd->base, hd->size);
-  hd->alloc_pointer = NULL;
+  // We allow double resets because we may longjmp out during error handling,
+  // and don't know which heaps are initialized at that point.
+  if (hd->base) {
+    ASAN_POISON_MEMORY_REGION(hd->base, hd->size);
+    free_executable_memory(hd->base, hd->size);
+    hd->alloc_pointer = NULL;
+    hd->base = NULL;
+  }
 }
 
 void* bumpcalloc(size_t num, size_t size, AllocLifetime lifetime) {
@@ -129,7 +135,7 @@ void* allocate_writable_memory(size_t size) {
 #if X64WIN
   void* p = VirtualAlloc(0, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
   if (!p) {
-    error("VirtualAlloc failed: 0x%x\n", GetLastError());
+    error("VirtualAlloc of %zu failed: 0x%x\n", size, GetLastError());
   }
   ASAN_UNPOISON_MEMORY_REGION(p, size);
   return p;
@@ -150,7 +156,7 @@ bool make_memory_executable(void* m, size_t size) {
 #if X64WIN
   DWORD old_protect;
   if (!VirtualProtect(m, size, PAGE_EXECUTE_READ, &old_protect)) {
-    error("VirtualProtect failed: 0x%x\n", GetLastError());
+    error("VirtualProtect %p %zu failed: 0x%x\n", m, size, GetLastError());
   }
   return true;
 #else
@@ -166,7 +172,7 @@ void free_executable_memory(void* p, size_t size) {
 #if X64WIN
   (void)size;  // If |size| is passed, free will fail.
   if (!VirtualFree(p, 0, MEM_RELEASE)) {
-    error("VirtualFree failed: 0x%x\n", GetLastError());
+    error("VirtualFree %p %zu failed: 0x%x\n", p, size, GetLastError());
   }
   ASAN_POISON_MEMORY_REGION(p, size);
 #else

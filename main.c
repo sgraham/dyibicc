@@ -152,13 +152,6 @@
 #define C(x) compiler_state.main__##x
 #define L(x) linker_state.main__##x
 
-static Token* must_tokenize_file(char* path) {
-  Token* tok = tokenize_file(path);
-  if (!tok)
-    error("%s: %s", path, strerror(errno));
-  return tok;
-}
-
 #if 0  // for -E call after preprocess().
 static void print_tokens(Token* tok) {
   int line = 1;
@@ -384,7 +377,18 @@ static FILE* open_file(char* path) {
   return out;
 }
 
-bool dyibicc_update(DyibiccContext* context) {
+bool dyibicc_update(DyibiccContext* context, char* filename, char* contents) {
+  if (setjmp(toplevel_update_jmpbuf) != 0) {
+    alloc_reset(AL_Compile);
+    alloc_reset(AL_Temp);
+    alloc_reset(AL_Link);
+    memset(&compiler_state, 0, sizeof(compiler_state));
+    memset(&linker_state, 0, sizeof(linker_state));
+    // TODO: files are being left open
+    // TODO: AL_Manual memory or other mallocs may be leaked
+    return false;
+  }
+
   UserContext* ctx = (UserContext*)context;
   bool link_result = true;
 
@@ -395,19 +399,24 @@ bool dyibicc_update(DyibiccContext* context) {
     for (size_t i = 0; i < ctx->num_files; ++i) {
       DyoLinkData* dld = &ctx->files[i];
 
+      if (filename && strcmp(dld->source_name, filename) != 0) {
+        // If a specific update is provided, we only compile that one.
+        continue;
+      }
+
       {
-        int64_t cur_mtime = stat_single_file(dld->source_name);
-        if (cur_mtime == dld->last_compiled_timestamp) {
-          continue;
-        }
-
         alloc_init(AL_Compile);
-
-        // logdbg("%s => %s\n", dld->source_name, dld->output_dyo_name);
 
         init_macros();
         C(base_file) = dld->source_name;
-        Token* tok = must_tokenize_file(C(base_file));
+        Token* tok;
+        if (filename) {
+          tok = tokenize_filecontents(filename, contents);
+        } else {
+          tok = tokenize_file(C(base_file));
+        }
+        if (!tok)
+          error("%s: %s", filename, strerror(errno));
         tok = preprocess(tok);
 
         codegen_init();  // Initializes dynasm so that parse() can assign labels.
@@ -420,7 +429,6 @@ bool dyibicc_update(DyibiccContext* context) {
         codegen(prog, dyo_out);
         fclose(dyo_out);
 
-        dld->last_compiled_timestamp = cur_mtime;
         compiled_any = true;
 
         alloc_reset(AL_Compile);

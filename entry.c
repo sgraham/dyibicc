@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
 
   int result = 0;
 
-  if (dyibicc_update(ctx)) {
+  if (dyibicc_update(ctx, NULL, NULL)) {
     if (ctx->entry_point) {
       int myargc = 1;
       char* myargv[] = {"prog", NULL};

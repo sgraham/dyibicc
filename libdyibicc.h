@@ -30,6 +30,6 @@ typedef struct DyibiccContext {
 
 DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data);
 
-bool dyibicc_update(DyibiccContext* context);
+bool dyibicc_update(DyibiccContext* context, char* file, char* contents);
 
 void dyibicc_free(DyibiccContext* context);

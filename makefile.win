@@ -6,6 +6,7 @@ CC=@cl
 #CFLAGS=/nologo /Od /Zi /D_CRT_SECURE_NO_DEPRECATE /DX64WIN=1 /W4 /WX
 CFLAGS=/nologo /Ox /GL /Zi /D_CRT_SECURE_NO_DEPRECATE /DX64WIN=1 /W4 /WX
 LDFLAGS=gdi32.lib user32.lib onecore.lib /LTCG /OPT:REF /OPT:ICF
+#LDFLAGS=gdi32.lib user32.lib onecore.lib
 
 #CC=@"C:\Program Files\LLVM\bin\clang-cl.exe"
 #CFLAGS=/nologo /Od /fsanitize=address /Zi /D_CRT_SECURE_NO_DEPRECATE /DX64WIN=1 /W4 /WX -Wno-missing-field-initializers -Wno-switch -Wno-unused-function

@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
+#include <setjmp.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -173,6 +174,7 @@ File* new_file(char* name, char* contents);
 Token* tokenize_string_literal(Token* tok, Type* basety);
 Token* tokenize(File* file);
 Token* tokenize_file(char* filename);
+Token* tokenize_filecontents(char* path, char* contents);
 
 #define unreachable() error("internal error at %s:%d", __FILE__, __LINE__)
 
@@ -610,7 +612,6 @@ struct Scope {
 typedef struct DyoLinkData {
   char* source_name;
   char* output_dyo_name;
-  int64_t last_compiled_timestamp;
   char* codeseg_base_address;  // Just the address, not a string.
   size_t codeseg_size;
 } DyoLinkData;
@@ -692,10 +693,9 @@ typedef struct CompilerState {
 typedef struct LinkerState {
   // link.c
   HashMap link__runtime_function_map;
-
-  // main.c
 } LinkerState;
 
 extern UserContext* user_context;
+extern jmp_buf toplevel_update_jmpbuf;
 extern CompilerState compiler_state;
 extern LinkerState linker_state;

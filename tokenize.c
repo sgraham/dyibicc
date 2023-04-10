@@ -42,14 +42,14 @@ void error_at(char* loc, char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
   verror_at(C(current_file)->name, C(current_file)->contents, line_no, loc, fmt, ap);
-  exit(1);
+  longjmp(toplevel_update_jmpbuf, 1);
 }
 
 void error_tok(Token* tok, char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
   verror_at(tok->file->name, tok->file->contents, tok->line_no, tok->loc, fmt, ap);
-  exit(1);
+  longjmp(toplevel_update_jmpbuf, 1);
 }
 
 void warn_tok(Token* tok, char* fmt, ...) {
@@ -763,11 +763,7 @@ static void convert_universal_chars(char* p) {
   *q = '\0';
 }
 
-Token* tokenize_file(char* path) {
-  char* p = read_file(path, AL_Compile);
-  if (!p)
-    return NULL;
-
+Token* tokenize_filecontents(char* path, char* p) {
   // UTF-8 texts may start with a 3-byte "BOM" marker sequence.
   // If exists, just skip them because they are useless bytes.
   // (It is actually not recommended to add BOM markers to UTF-8
@@ -781,4 +777,11 @@ Token* tokenize_file(char* path) {
 
   File* file = new_file(path, p);
   return tokenize(file);
+}
+
+Token* tokenize_file(char* path) {
+  char* p = read_file(path, AL_Compile);
+  if (!p)
+    return NULL;
+  return tokenize_filecontents(path, p);
 }
