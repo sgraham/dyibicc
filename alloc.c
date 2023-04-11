@@ -50,8 +50,8 @@ void error(char* fmt, ...) {
     vfprintf(stderr, fmt, ap);
   } else {
     user_context->output_function(2, fmt, ap);
+    logerr("\n");
   }
-  logerr("\n");
   longjmp(toplevel_update_jmpbuf, 1);
 }
 

@@ -6,6 +6,11 @@
 
 #define C(x) compiler_state.tokenize__##x
 
+#define ANSI_WHITE "\033[1;37m"
+#define ANSI_GREEN "\033[1;32m"
+#define ANSI_RED "\033[1;31m"
+#define ANSI_RESET "\033[0m"
+
 // Reports an error message in the following format.
 //
 // foo.c:10: x = y + 1;
@@ -21,16 +26,19 @@ static void verror_at(char* filename, char* input, int line_no, char* loc, char*
     end++;
 
   // Print out the line.
+  logerr(ANSI_WHITE);
   int indent = logerr("%s:%d: ", filename, line_no);
+  logerr(ANSI_RESET);
   logerr("%.*s\n", (int)(end - line), line);
 
   // Show the error message.
   int pos = display_width(line, (int)(loc - line)) + indent;
 
   logerr("%*s", pos, "");  // print pos spaces.
-  logerr("^ ");
+
+  logerr("%s^ %serror: %s", ANSI_GREEN, ANSI_RED, ANSI_WHITE);
   user_context->output_function(2, fmt, ap);
-  logerr("\n");
+  logerr("\n%s", ANSI_RESET);
 }
 
 void error_at(char* loc, char* fmt, ...) {
@@ -557,19 +565,19 @@ Token* tokenize(File* file) {
     }
 
     // Skip whitespace characters.
-    if (isspace(*p)) {
+    if (isspace((unsigned char)*p)) {
       p++;
       C(has_space) = true;
       continue;
     }
 
     // Numeric literal
-    if (isdigit(*p) || (*p == '.' && isdigit(p[1]))) {
+    if (isdigit((unsigned char)*p) || (*p == '.' && isdigit((unsigned char)p[1]))) {
       char* q = p++;
       for (;;) {
         if (p[0] && p[1] && strchr("eEpP", p[0]) && strchr("+-", p[1]))
           p += 2;
-        else if (isalnum(*p) || *p == '.')
+        else if (isalnum((unsigned char)*p) || *p == '.')
           p++;
         else
           break;

@@ -110,7 +110,6 @@ int main(int argc, char** argv) {
       result = 254;
     }
   } else {
-    fprintf(stderr, "link failed\n");
     result = 255;
   }
 

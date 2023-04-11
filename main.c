@@ -379,6 +379,7 @@ static FILE* open_file(char* path) {
 
 bool dyibicc_update(DyibiccContext* context, char* filename, char* contents) {
   if (setjmp(toplevel_update_jmpbuf) != 0) {
+    codegen_free();
     alloc_reset(AL_Compile);
     alloc_reset(AL_Temp);
     alloc_reset(AL_Link);
@@ -416,7 +417,7 @@ bool dyibicc_update(DyibiccContext* context, char* filename, char* contents) {
           tok = tokenize_file(C(base_file));
         }
         if (!tok)
-          error("%s: %s", filename, strerror(errno));
+          error("%s: %s", C(base_file), strerror(errno));
         tok = preprocess(tok);
 
         codegen_init();  // Initializes dynasm so that parse() can assign labels.

@@ -2543,9 +2543,9 @@ void codegen(Obj* prog, FILE* dyo_out) {
   write_data_fixups();
   update_pending_code_relocations();
 
-  void* code_buf = malloc(code_size);
+  C(code_buf) = malloc(code_size);
 
-  dasm_encode(&C(dynasm), code_buf);
+  dasm_encode(&C(dynasm), C(code_buf));
 
   int check_result = dasm_checkstep(&C(dynasm), DASM_SECTION_MAIN);
   if (check_result != DASM_S_OK) {
@@ -2558,9 +2558,17 @@ void codegen(Obj* prog, FILE* dyo_out) {
     write_dyo_entrypoint(C(dyo_file), offset);
   }
 
-  write_dyo_code(C(dyo_file), code_buf, code_size);
+  write_dyo_code(C(dyo_file), C(code_buf), code_size);
 
-  free(code_buf);
+  codegen_free();
+}
 
-  dasm_free(&C(dynasm));
+// This can be called after a longjmp in update.
+void codegen_free(void) {
+  if (C(code_buf)) {
+    free(C(code_buf));
+  }
+  if (C(dynasm)) {
+    dasm_free(&C(dynasm));
+  }
 }

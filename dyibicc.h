@@ -499,6 +499,7 @@ void add_type(Node* node);
 
 void codegen_init(void);
 void codegen(Obj* prog, FILE* dyo_out);
+void codegen_free(void);
 int codegen_pclabel(void);
 #if X64WIN
 bool type_passed_in_register(Type* ty);
@@ -679,6 +680,7 @@ typedef struct CompilerState {
   int codegen__depth;
   FILE* codegen__dyo_file;
   dasm_State* codegen__dynasm;
+  void* codegen__code_buf;
   Obj* codegen__current_fn;
   int codegen__numlabels;
   int codegen__dasm_label_main_entry;
