@@ -210,3 +210,84 @@ int outaf(const char* fmt, ...) {
   va_end(ap);
   return ret;
 }
+
+#define ANSI_WHITE "\033[1;37m"
+#define ANSI_GREEN "\033[1;32m"
+#define ANSI_RED "\033[1;31m"
+#define ANSI_RESET "\033[0m"
+
+// Reports an error message in the following format.
+//
+// foo.c:10: x = y + 1;
+//               ^ <error message here>
+static void verror_at(char* filename, char* input, int line_no, char* loc, char* fmt, va_list ap) {
+  // Find a line containing `loc`.
+  char* line = loc;
+  while (input < line && line[-1] != '\n')
+    line--;
+
+  char* end = loc;
+  while (*end && *end != '\n')
+    end++;
+
+  // Print out the line.
+  outaf(ANSI_WHITE);
+  int indent = outaf("%s:%d: ", filename, line_no);
+  outaf(ANSI_RESET);
+  outaf("%.*s\n", (int)(end - line), line);
+
+  // Show the error message.
+  int pos = display_width(line, (int)(loc - line)) + indent;
+
+  outaf("%*s", pos, "");  // print pos spaces.
+
+  outaf("%s^ %serror: %s", ANSI_GREEN, ANSI_RED, ANSI_WHITE);
+  user_context->output_function(fmt, ap);
+  outaf("\n%s", ANSI_RESET);
+}
+
+void error_at(char* loc, char* fmt, ...) {
+  File* cf = compiler_state.tokenize__current_file;
+
+  int line_no = 1;
+  for (char* p = cf->contents; p < loc; p++)
+    if (*p == '\n')
+      line_no++;
+
+  va_list ap;
+  va_start(ap, fmt);
+  verror_at(cf->name, cf->contents, line_no, loc, fmt, ap);
+  longjmp(toplevel_update_jmpbuf, 1);
+}
+
+void error_tok(Token* tok, char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  verror_at(tok->file->name, tok->file->contents, tok->line_no, tok->loc, fmt, ap);
+  longjmp(toplevel_update_jmpbuf, 1);
+}
+
+void warn_tok(Token* tok, char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  verror_at(tok->file->name, tok->file->contents, tok->line_no, tok->loc, fmt, ap);
+  va_end(ap);
+}
+
+// Reports an error and exit update.
+void error(char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  if (!user_context || !user_context->output_function) {
+    vfprintf(stderr, fmt, ap);
+  } else {
+    user_context->output_function(fmt, ap);
+    outaf("\n");
+  }
+  longjmp(toplevel_update_jmpbuf, 1);
+}
+
+void error_internal(char* file, int line, char* msg) {
+  outaf("%sinternal error at %s:%d: %s%s\n%s", ANSI_RED, file, line, ANSI_WHITE, msg, ANSI_RESET);
+  longjmp(toplevel_update_jmpbuf, 1);
+}

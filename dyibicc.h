@@ -40,6 +40,7 @@ typedef struct Node Node;
 typedef struct Member Member;
 typedef struct Relocation Relocation;
 typedef struct Hideset Hideset;
+typedef struct Token Token;
 
 //
 // alloc.c
@@ -115,6 +116,12 @@ void intintarray_push(IntIntArray* arr, IntInt item, AllocLifetime lifetime);
 char* format(AllocLifetime lifetime, char* fmt, ...) __attribute__((format(printf, 2, 3)));
 int64_t stat_single_file(const char* path);
 char* read_file(char* path, AllocLifetime lifetime);
+NORETURN void error(char* fmt, ...) __attribute__((format(printf, 1, 2)));
+NORETURN void error_at(char* loc, char* fmt, ...) __attribute__((format(printf, 2, 3)));
+NORETURN void error_tok(Token* tok, char* fmt, ...) __attribute__((format(printf, 2, 3)));
+NORETURN void error_internal(char* file, int line, char* msg);
+int outaf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+void warn_tok(Token* tok, char* fmt, ...) __attribute__((format(printf, 2, 3)));
 
 //
 // tokenize.c
@@ -162,10 +169,6 @@ struct Token {
   Token* origin;     // If this is expanded from a macro, the original token
 };
 
-NORETURN void error(char* fmt, ...) __attribute__((format(printf, 1, 2)));
-NORETURN void error_at(char* loc, char* fmt, ...) __attribute__((format(printf, 2, 3)));
-NORETURN void error_tok(Token* tok, char* fmt, ...) __attribute__((format(printf, 2, 3)));
-void warn_tok(Token* tok, char* fmt, ...) __attribute__((format(printf, 2, 3)));
 bool equal(Token* tok, char* op);
 Token* skip(Token* tok, char* op);
 bool consume(Token** rest, Token* tok, char* str);
@@ -176,9 +179,8 @@ Token* tokenize(File* file);
 Token* tokenize_file(char* filename);
 Token* tokenize_filecontents(char* path, char* contents);
 
-#define unreachable() error("internal error at %s:%d", __FILE__, __LINE__)
-
-int outaf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+#define unreachable() error_internal(__FILE__, __LINE__, "unreachable")
+#define ABORT(msg) error_internal(__FILE__, __LINE__, msg)
 
 //
 // preprocess.c

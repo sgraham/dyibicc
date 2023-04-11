@@ -24,7 +24,7 @@ $(OBJS): dyibicc.h libdyibicc.h
 minilua.exe: dynasm/minilua.c
 	$(CC) $(CFLAGS) /wd4132 /wd4324 $** /link /out:$@
 
-dumpdyo.exe: dumpdyo.obj dyo.obj hashmap.obj alloc.obj util.obj
+dumpdyo.exe: dumpdyo.obj dyo.obj hashmap.obj alloc.obj util.obj unicode.obj
 	$(CC) $(CFLAGS) $** /link /out:$@ 
 
 .c.obj:

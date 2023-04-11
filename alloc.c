@@ -42,19 +42,6 @@ static HeapData heap[NUM_BUMP_HEAPS] = {
     {NULL, NULL, 128 << 20},   // AL_Link
 };
 
-// Reports an error and exit update.
-void error(char* fmt, ...) {
-  va_list ap;
-  va_start(ap, fmt);
-  if (!user_context || !user_context->output_function) {
-    vfprintf(stderr, fmt, ap);
-  } else {
-    user_context->output_function(fmt, ap);
-    outaf("\n");
-  }
-  longjmp(toplevel_update_jmpbuf, 1);
-}
-
 void alloc_init(AllocLifetime lifetime) {
   assert(lifetime < NUM_BUMP_HEAPS);
   HeapData* hd = &heap[lifetime];

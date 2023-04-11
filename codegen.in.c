@@ -2549,8 +2549,8 @@ void codegen(Obj* prog, FILE* dyo_out) {
 
   int check_result = dasm_checkstep(&C(dynasm), DASM_SECTION_MAIN);
   if (check_result != DASM_S_OK) {
-    outaf("internal error, dasm_checkstep: 0x%08x\n", check_result);
-    abort();
+    outaf("check_result: 0x%08x\n", check_result);
+    ABORT("dasm_checkstep failed");
   }
 
   if (C(dasm_label_main_entry) >= 0) {

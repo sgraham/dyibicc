@@ -21,8 +21,7 @@ KHASH_SET_INIT_INT64(voidp)
 
 #if X64WIN
 static void Unimplemented(void) {
-  fprintf(stderr, "unimplemented function, aborting\n");
-  abort();
+  ABORT("unimplemented function");
 }
 
 extern void __chkstk();
@@ -31,8 +30,7 @@ static void Xstosb(PBYTE Destination, BYTE Value, SIZE_T Count) {
   (void)Destination;
   (void)Value;
   (void)Count;
-  fprintf(stderr, "unimplemented __stosb, aborting\n");
-  abort();
+  ABORT("unimplemented __stosb");
 }
 
 static void XReadWriteBarrier(void) {
@@ -617,8 +615,7 @@ bool link_dyos(void) {
 
           assert(current_data_base);
           if (current_data_pointer + size > current_data_end) {
-            outaf("initializer overrun bytes\n");
-            abort();
+            ABORT("initializer overrun bytes");
           }
           memcpy(current_data_pointer, buf, size);
           current_data_pointer += size;
@@ -634,8 +631,7 @@ bool link_dyos(void) {
           // rather than specified as an offset.
           assert(current_data_base);
           if (current_data_pointer + 8 > current_data_end) {
-            outaf("initializer overrun reloc\n");
-            abort();
+            ABORT("initializer overrun reloc");
           }
           unsigned int name_index = *(unsigned int*)&buf[0];
           int addend = *(int*)&buf[4];
@@ -669,8 +665,7 @@ bool link_dyos(void) {
 
           assert(current_data_base);
           if (current_data_pointer + 8 > current_data_end) {
-            outaf("initializer overrun reloc\n");
-            abort();
+            ABORT("initializer overrun reloc");
           }
           int offset = *(unsigned int*)&buf[0];
           int addend = *(int*)&buf[4];
