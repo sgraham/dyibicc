@@ -389,6 +389,7 @@ bool dyibicc_update(DyibiccContext* context, char* filename, char* contents) {
 
   UserContext* ctx = (UserContext*)context;
   bool link_result = true;
+  ctx->entry_point = NULL; // This must be "refound" every time, otherwise it could be stale.
 
   assert(ctx == user_context && "only one context currently supported");
 
