@@ -49,8 +49,8 @@ void error(char* fmt, ...) {
   if (!user_context || !user_context->output_function) {
     vfprintf(stderr, fmt, ap);
   } else {
-    user_context->output_function(2, fmt, ap);
-    logerr("\n");
+    user_context->output_function(fmt, ap);
+    outaf("\n");
   }
   longjmp(toplevel_update_jmpbuf, 1);
 }

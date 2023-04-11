@@ -1,8 +1,6 @@
 #include "dyibicc.h"
 
-static int default_output_fn(int level, const char* fmt, va_list ap) {
-  if (level >= 2)
-    return vfprintf(stderr, fmt, ap);
+static int default_output_fn(const char* fmt, va_list ap) {
   return vfprintf(stdout, fmt, ap);
 }
 

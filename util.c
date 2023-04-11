@@ -203,26 +203,10 @@ char* format(AllocLifetime lifetime, char* fmt, ...) {
   return bumpstrdup(buf, lifetime);
 }
 
-int logdbg(const char* fmt, ...) {
+int outaf(const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  int ret = user_context->output_function(0, fmt, ap);
-  va_end(ap);
-  return ret;
-}
-
-int logout(const char* fmt, ...) {
-  va_list ap;
-  va_start(ap, fmt);
-  int ret = user_context->output_function(1, fmt, ap);
-  va_end(ap);
-  return ret;
-}
-
-int logerr(const char* fmt, ...) {
-  va_list ap;
-  va_start(ap, fmt);
-  int ret = user_context->output_function(2, fmt, ap);
+  int ret = user_context->output_function(fmt, ap);
   va_end(ap);
   return ret;
 }

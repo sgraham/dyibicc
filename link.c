@@ -409,7 +409,7 @@ bool link_dyos(void) {
           entry_point_offset = *(unsigned int*)&buf[0];
         } else if (type == kTypeX64Code) {
           unsigned int page_sized = (unsigned int)align_to_u(size, page_size);
-          // logdbg("code %d, allocating %d\n", size, page_sized);
+          // outaf("code %d, allocating %d\n", size, page_sized);
           dld->codeseg_base_address = allocate_writable_memory(page_sized);
           dld->codeseg_size = page_sized;
           memcpy(dld->codeseg_base_address, buf, size);
@@ -450,7 +450,7 @@ bool link_dyos(void) {
           if (!was_freed) {
             void* prev = hashmap_get(&uc->global_data[idx], strings.data[name_index]);
             if (prev) {
-              logerr("duplicated symbol: %s\n", strings.data[name_index]);
+              outaf("duplicated symbol: %s\n", strings.data[name_index]);
               goto fail;
             }
           }
@@ -561,7 +561,7 @@ bool link_dyos(void) {
           if (target_address == NULL) {
             target_address = symbol_lookup(strings.data[string_record_index]);
             if (target_address == NULL) {
-              logerr("undefined import symbol: %s\n", strings.data[string_record_index]);
+              outaf("undefined import symbol: %s\n", strings.data[string_record_index]);
               goto fail;
             }
           }
@@ -584,7 +584,7 @@ bool link_dyos(void) {
             continue;
 
           if (!current_data_base) {
-            logerr("init data not allocated\n");
+            outaf("init data not allocated\n");
             goto fail;
           }
           current_data_pointer = current_data_base;
@@ -599,7 +599,7 @@ bool link_dyos(void) {
             target_address =
                 hashmap_get(&uc->global_data[uc->num_files], strings.data[string_record_index]);
             if (!target_address) {
-              logerr("undefined ref to symbol: %s\n", strings.data[string_record_index]);
+              outaf("undefined ref to symbol: %s\n", strings.data[string_record_index]);
               goto fail;
             }
           }
@@ -617,7 +617,7 @@ bool link_dyos(void) {
 
           assert(current_data_base);
           if (current_data_pointer + size > current_data_end) {
-            logerr("initializer overrun bytes\n");
+            outaf("initializer overrun bytes\n");
             abort();
           }
           memcpy(current_data_pointer, buf, size);
@@ -634,7 +634,7 @@ bool link_dyos(void) {
           // rather than specified as an offset.
           assert(current_data_base);
           if (current_data_pointer + 8 > current_data_end) {
-            logerr("initializer overrun reloc\n");
+            outaf("initializer overrun reloc\n");
             abort();
           }
           unsigned int name_index = *(unsigned int*)&buf[0];
@@ -650,7 +650,7 @@ bool link_dyos(void) {
                 if (!target_address) {
                   target_address = symbol_lookup(strings.data[name_index]);
                   if (!target_address) {
-                    logerr("undefined data reloc symbol: %s\n", strings.data[name_index]);
+                    outaf("undefined data reloc symbol: %s\n", strings.data[name_index]);
                     goto fail;
                   }
                 }
@@ -669,7 +669,7 @@ bool link_dyos(void) {
 
           assert(current_data_base);
           if (current_data_pointer + 8 > current_data_end) {
-            logerr("initializer overrun reloc\n");
+            outaf("initializer overrun reloc\n");
             abort();
           }
           int offset = *(unsigned int*)&buf[0];

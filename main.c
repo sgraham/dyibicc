@@ -167,11 +167,8 @@ static void print_tokens(Token* tok) {
 }
 #endif
 
-static int default_output_fn(int level, const char* fmt, va_list ap) {
-  FILE* output_to = stdout;
-  if (level >= 2)
-    output_to = stderr;
-  int ret = vfprintf(output_to, fmt, ap);
+static int default_output_fn(const char* fmt, va_list ap) {
+  int ret = vfprintf(stdout, fmt, ap);
   return ret;
 }
 

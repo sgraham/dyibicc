@@ -178,9 +178,7 @@ Token* tokenize_filecontents(char* path, char* contents);
 
 #define unreachable() error("internal error at %s:%d", __FILE__, __LINE__)
 
-int logdbg(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
-int logout(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
-int logerr(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+int outaf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 
 //
 // preprocess.c

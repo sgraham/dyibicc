@@ -3,10 +3,8 @@
 #include <stdarg.h>
 #include <stdbool.h>
 
-// level == 0 debug log
-// level == 1 regular user message
-// level == 2 error
-typedef int (*DyibiccOutputFn)(int level, const char* fmt, va_list ap);
+// ANSI escape code decoding expected.
+typedef int (*DyibiccOutputFn)(const char* fmt, va_list ap);
 
 // Returns the address of a function by name.
 typedef void* (*DyibiccFunctionLookupFn)(const char* name);

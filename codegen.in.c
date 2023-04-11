@@ -2007,7 +2007,7 @@ static void assign_lvar_offsets(Obj* prog) {
     if (!fn->is_function || !fn->is_definition || !fn->is_live)
       continue;
 
-    // logerr("--- %s\n", fn->name);
+    // outaf("--- %s\n", fn->name);
 
     // The parameter home area starts at 16 above rbp:
     //   ...
@@ -2044,7 +2044,7 @@ static void assign_lvar_offsets(Obj* prog) {
             // pointer to a copy, rather than the actual value, so flag it as
             // such and then either assign a register or stack slot for the
             // reference.
-            // logerr("by ref %s\n", var->name);
+            // outaf("by ref %s\n", var->name);
             // var->passed_by_reference = true;
           }
 
@@ -2052,7 +2052,7 @@ static void assign_lvar_offsets(Obj* prog) {
           // passed in a register then assign here.
           if (reg++ < X64WIN_REG_MAX) {
             var->offset = top;
-            // logerr("  assigned reg offset 0x%x\n", var->offset);
+            // outaf("  assigned reg offset 0x%x\n", var->offset);
             top += 8;
             continue;
           }
@@ -2071,13 +2071,13 @@ static void assign_lvar_offsets(Obj* prog) {
           if (reg++ < X64WIN_REG_MAX) {
             var->offset = top;
             top += 8;
-            // logerr("int reg %s at home 0x%x\n", var->name, var->offset);
+            // outaf("int reg %s at home 0x%x\n", var->name, var->offset);
             continue;
           }
       }
 
       var->offset = top;
-      // logerr("int stack %s at stack 0x%x\n", var->name, var->offset);
+      // outaf("int stack %s at stack 0x%x\n", var->name, var->offset);
       top += MAX(8, var->ty->size);
     }
 
@@ -2093,7 +2093,7 @@ static void assign_lvar_offsets(Obj* prog) {
       bottom += var->ty->size;
       bottom = (int)align_to_s(bottom, align);
       var->offset = -bottom;
-      // logerr("local %s at -0x%x\n", var->name, -var->offset);
+      // outaf("local %s at -0x%x\n", var->name, -var->offset);
     }
 
     fn->stack_size = (int)align_to_s(bottom, 16);
@@ -2182,7 +2182,7 @@ static void assign_lvar_offsets(Obj* prog) {
 
 static void emit_data(Obj* prog) {
   for (Obj* var = prog; var; var = var->next) {
-    // logdbg("var->name %s %d %d %d %d\n", var->name, var->is_function, var->is_definition,
+    // outaf("var->name %s %d %d %d %d\n", var->name, var->is_function, var->is_definition,
     // var->is_static, var->is_tentative);
     if (var->is_function)
       continue;
@@ -2301,7 +2301,7 @@ static void emit_text(Obj* prog) {
 
     C(current_fn) = fn;
 
-    // logerr("---- %s\n", fn->name);
+    // outaf("---- %s\n", fn->name);
 
     // Prologue
     ///| push rbp
@@ -2509,7 +2509,7 @@ static void update_pending_code_relocations(void) {
     int file_loc = C(pending_code_pclabels).data[i].a;
     int pclabel = C(pending_code_pclabels).data[i].b;
     int offset = dasm_getpclabel(&C(dynasm), pclabel);
-    // logdbg("update at %d, label %d, offset %d\n", file_loc, pclabel, offset);
+    // outaf("update at %d, label %d, offset %d\n", file_loc, pclabel, offset);
     patch_dyo_initializer_code_relocation(C(dyo_file), file_loc, offset);
   }
 }
@@ -2549,7 +2549,7 @@ void codegen(Obj* prog, FILE* dyo_out) {
 
   int check_result = dasm_checkstep(&C(dynasm), DASM_SECTION_MAIN);
   if (check_result != DASM_S_OK) {
-    logerr("internal error, dasm_checkstep: 0x%08x\n", check_result);
+    outaf("internal error, dasm_checkstep: 0x%08x\n", check_result);
     abort();
   }
 

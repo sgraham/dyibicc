@@ -240,22 +240,22 @@ bool write_dyo_initializer_code_relocation(FILE* f, int pclabel, int addend, int
 bool patch_dyo_initializer_code_relocation(FILE* f, int file_loc, int final_code_offset) {
   long old = ftell(f);
   if (old < 0) {
-    logerr("couldn't save old loc\n");
+    outaf("couldn't save old loc\n");
     return false;
   }
 
   if (fseek(f, file_loc, SEEK_SET) < 0) {
-    logerr("couldn't seek to patch loc (%d)\n", file_loc);
+    outaf("couldn't seek to patch loc (%d)\n", file_loc);
     return false;
   }
 
   if (!write_int(f, final_code_offset)) {
-    logerr("writing patch failed\n");
+    outaf("writing patch failed\n");
     return false;
   }
 
   if (fseek(f, old, SEEK_SET) < 0) {
-    logerr("failed to restore loc\n");
+    outaf("failed to restore loc\n");
     return false;
   }
 
@@ -284,11 +284,11 @@ bool write_dyo_entrypoint(FILE* f, unsigned int loc) {
 bool ensure_dyo_header(FILE* f) {
   char buf[sizeof(kSignature)];
   if (fread(buf, sizeof(kSignature) - 1, 1, f) < 0) {
-    logerr("read error");
+    outaf("read error");
     return false;
   }
   if (strncmp(buf, kSignature, sizeof(kSignature) - 1) != 0) {
-    logerr("signature doesn't match");
+    outaf("signature doesn't match");
     return false;
   }
   return true;
@@ -301,7 +301,7 @@ bool read_dyo_record(FILE* f,
                      unsigned int* type,
                      unsigned int* size) {
   if (fread(buf, 4, 1, f) < 0) {
-    logerr("read error");
+    outaf("read error");
     return false;
   }
   *record_index += 1;
@@ -309,12 +309,12 @@ bool read_dyo_record(FILE* f,
   *type = (header & 0xff000000);
   *size = (header & 0xffffff);
   if (*size > buf_size) {
-    logerr("record larger than buffer (%d > %d)\n", *size, buf_size);
+    outaf("record larger than buffer (%d > %d)\n", *size, buf_size);
     return false;
   }
   size_t bytes_read = fread(buf, 1, *size, f);
   if (bytes_read != *size) {
-    logerr("read error");
+    outaf("read error");
     return false;
   }
   return true;
@@ -336,81 +336,81 @@ bool dump_dyo_file(FILE* f) {
 
     switch (type) {
       case kTypeString:
-        logout("%4d string (%d bytes)\n", record_index, size);
-        logout("        \"%.*s\"\n", size, buf);
+        outaf("%4d string (%d bytes)\n", record_index, size);
+        outaf("        \"%.*s\"\n", size, buf);
         break;
       case kTypeImport:
-        logout("%4d import (%d bytes)\n", record_index, size);
-        logout("       fixup at %d\n", *(unsigned int*)&buf[0]);
-        logout("       point at str record %d\n", *(unsigned int*)&buf[4]);
+        outaf("%4d import (%d bytes)\n", record_index, size);
+        outaf("       fixup at %d\n", *(unsigned int*)&buf[0]);
+        outaf("       point at str record %d\n", *(unsigned int*)&buf[4]);
         break;
       case kTypeFunctionExport:
-        logout("%4d function export (%d bytes)\n", record_index, size);
-        logout("       function at %d\n", *(unsigned int*)&buf[0]);
-        logout("       is static: %d\n", *(unsigned int*)&buf[4]);
-        logout("       named by str record %d\n", *(unsigned int*)&buf[8]);
+        outaf("%4d function export (%d bytes)\n", record_index, size);
+        outaf("       function at %d\n", *(unsigned int*)&buf[0]);
+        outaf("       is static: %d\n", *(unsigned int*)&buf[4]);
+        outaf("       named by str record %d\n", *(unsigned int*)&buf[8]);
         break;
       case kTypeCodeReferenceToGlobal:
-        logout("%4d code reference to global (%d bytes)\n", record_index, size);
-        logout("       fixup at %d\n", *(unsigned int*)&buf[0]);
-        logout("       point at str record %d\n", *(unsigned int*)&buf[4]);
+        outaf("%4d code reference to global (%d bytes)\n", record_index, size);
+        outaf("       fixup at %d\n", *(unsigned int*)&buf[0]);
+        outaf("       point at str record %d\n", *(unsigned int*)&buf[4]);
         break;
       case kTypeInitializedData:
-        logout("%4d initialized data (%d bytes)\n", record_index, size);
-        logout("       size %d\n", *(unsigned int*)&buf[0]);
-        logout("       align %d\n", *(unsigned int*)&buf[4]);
+        outaf("%4d initialized data (%d bytes)\n", record_index, size);
+        outaf("       size %d\n", *(unsigned int*)&buf[0]);
+        outaf("       align %d\n", *(unsigned int*)&buf[4]);
         unsigned int flags = *(unsigned int*)&buf[8];
-        logout("       flags %x\n", flags);
+        outaf("       flags %x\n", flags);
         if (flags & 0x01)
-          logout("         static\n");
+          outaf("         static\n");
         if (flags & 0x02)
-          logout("         rodata\n");
-        logout("       name at str record %d\n", *(unsigned int*)&buf[12]);
+          outaf("         rodata\n");
+        outaf("       name at str record %d\n", *(unsigned int*)&buf[12]);
         break;
       case kTypeInitializerEnd:
-        logout("    ->%d initializers end (%d bytes)\n", record_index, size);
+        outaf("    ->%d initializers end (%d bytes)\n", record_index, size);
         break;
       case kTypeInitializerBytes:
-        logout("    ->%d initializer bytes (%d bytes)\n", record_index, size);
-        logout("         ");
+        outaf("    ->%d initializer bytes (%d bytes)\n", record_index, size);
+        outaf("         ");
         for (int i = 0; i < (int)size; ++i) {
-          logout(" 0x%x", (unsigned char)buf[i]);
+          outaf(" 0x%x", (unsigned char)buf[i]);
         }
-        logout("\n");
+        outaf("\n");
         break;
       case kTypeInitializerDataRelocation:
-        logout("    ->%d initializer data relocation (%d bytes)\n", record_index, size);
-        logout("        name at str record %d\n", *(unsigned int*)&buf[0]);
-        logout("        addend %d\n", *(int*)&buf[4]);
+        outaf("    ->%d initializer data relocation (%d bytes)\n", record_index, size);
+        outaf("        name at str record %d\n", *(unsigned int*)&buf[0]);
+        outaf("        addend %d\n", *(int*)&buf[4]);
         break;
       case kTypeInitializerCodeRelocation:
-        logout("    ->%d initializer code relocation (%d bytes)\n", record_index, size);
-        logout("        pclabel %d\n", *(unsigned int*)&buf[0]);
-        logout("        addend %d\n", *(int*)&buf[4]);
+        outaf("    ->%d initializer code relocation (%d bytes)\n", record_index, size);
+        outaf("        pclabel %d\n", *(unsigned int*)&buf[0]);
+        outaf("        addend %d\n", *(int*)&buf[4]);
         break;
       case kTypeX64Code:
-        logout("%4d code (%d bytes)\n", record_index, size);
-        logout("--------------------\n");
+        outaf("%4d code (%d bytes)\n", record_index, size);
+        outaf("--------------------\n");
         fflush(stdout);
         FILE* tmp = fopen("tmp.raw", "wb");
         if (!tmp) {
-          logerr("failed to write tmp file for ndisasm\n");
+          outaf("failed to write tmp file for ndisasm\n");
           return false;
         }
         fwrite(buf, size, 1, tmp);
         fclose(tmp);
         if (system("ndisasm -b64 tmp.raw") < 0) {
-          logerr("failed to run ndisasm\n");
+          outaf("failed to run ndisasm\n");
           return false;
         }
-        logout("--------------------\n");
+        outaf("--------------------\n");
         return true;
       case kTypeEntryPoint:
-        logout("%4d entry point (%d bytes)\n", record_index, size);
-        logout("       located at offset %d\n", *(unsigned int*)&buf[0]);
+        outaf("%4d entry point (%d bytes)\n", record_index, size);
+        outaf("       located at offset %d\n", *(unsigned int*)&buf[0]);
         break;
       default:
-        logout("unhandled record type %x (%d bytes)\n", type, size);
+        outaf("unhandled record type %x (%d bytes)\n", type, size);
         break;
     }
   }

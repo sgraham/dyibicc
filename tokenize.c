@@ -26,19 +26,19 @@ static void verror_at(char* filename, char* input, int line_no, char* loc, char*
     end++;
 
   // Print out the line.
-  logerr(ANSI_WHITE);
-  int indent = logerr("%s:%d: ", filename, line_no);
-  logerr(ANSI_RESET);
-  logerr("%.*s\n", (int)(end - line), line);
+  outaf(ANSI_WHITE);
+  int indent = outaf("%s:%d: ", filename, line_no);
+  outaf(ANSI_RESET);
+  outaf("%.*s\n", (int)(end - line), line);
 
   // Show the error message.
   int pos = display_width(line, (int)(loc - line)) + indent;
 
-  logerr("%*s", pos, "");  // print pos spaces.
+  outaf("%*s", pos, "");  // print pos spaces.
 
-  logerr("%s^ %serror: %s", ANSI_GREEN, ANSI_RED, ANSI_WHITE);
-  user_context->output_function(2, fmt, ap);
-  logerr("\n%s", ANSI_RESET);
+  outaf("%s^ %serror: %s", ANSI_GREEN, ANSI_RED, ANSI_WHITE);
+  user_context->output_function(fmt, ap);
+  outaf("\n%s", ANSI_RESET);
 }
 
 void error_at(char* loc, char* fmt, ...) {
