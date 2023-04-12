@@ -251,8 +251,8 @@ struct Obj {
 struct Relocation {
   Relocation* next;
   int offset;
-  char** data_label;
-  int* code_label;
+  char** string_label;
+  int* internal_code_label;
   long addend;
 };
 
@@ -348,7 +348,6 @@ struct Node {
   // Goto or labeled statement, or labels-as-values
   char* label;
   int pc_label;
-  int unique_pc_label;
   Node* goto_next;
 
   // Switch

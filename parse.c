@@ -1488,8 +1488,8 @@ static Relocation* write_gvar_data(Relocation* cur,
   Relocation* rel = bumpcalloc(1, sizeof(Relocation), AL_Compile);
   assert(!(label && pc_label));  // Both shouldn't be set.
   rel->offset = offset;
-  rel->data_label = label;
-  rel->code_label = pc_label;
+  rel->string_label = label;
+  rel->internal_code_label = pc_label;
   rel->addend = (long)val;
   cur->next = rel;
   return cur->next;
@@ -1777,7 +1777,7 @@ static Node* stmt(Token** rest, Token* tok) {
     if (!C(brk_pc_label))
       error_tok(tok, "stray break");
     Node* node = new_node(ND_GOTO, tok);
-    node->unique_pc_label = C(brk_pc_label);
+    node->pc_label = C(brk_pc_label);
     *rest = skip(tok->next, ";");
     return node;
   }
@@ -1786,7 +1786,7 @@ static Node* stmt(Token** rest, Token* tok) {
     if (!C(cont_pc_label))
       error_tok(tok, "stray continue");
     Node* node = new_node(ND_GOTO, tok);
-    node->unique_pc_label = C(cont_pc_label);
+    node->pc_label = C(cont_pc_label);
     *rest = skip(tok->next, ";");
     return node;
   }
@@ -1794,7 +1794,7 @@ static Node* stmt(Token** rest, Token* tok) {
   if (tok->kind == TK_IDENT && equal(tok->next, ":")) {
     Node* node = new_node(ND_LABEL, tok);
     node->label = bumpstrndup(tok->loc, tok->len, AL_Compile);
-    node->unique_pc_label = codegen_pclabel();
+    node->pc_label = codegen_pclabel();
     node->lhs = stmt(rest, tok->next->next);
     node->goto_next = C(labels);
     C(labels) = node;
@@ -1960,7 +1960,7 @@ static int64_t eval2(Node* node, char*** label, int** pclabel) {
     case ND_ADDR:
       return eval_rval(node->lhs, label, pclabel);
     case ND_LABEL_VAL:
-      *pclabel = &node->unique_pc_label;
+      *pclabel = &node->pc_label;
       return 0;
     case ND_MEMBER:
       if (!label)
@@ -3228,12 +3228,12 @@ static void resolve_goto_labels(void) {
   for (Node* x = C(gotos); x; x = x->goto_next) {
     for (Node* y = C(labels); y; y = y->goto_next) {
       if (!strcmp(x->label, y->label)) {
-        x->unique_pc_label = y->unique_pc_label;
+        x->pc_label = y->pc_label;
         break;
       }
     }
 
-    if (x->unique_pc_label == 0)
+    if (x->pc_label == 0)
       error_tok(x->tok->next, "use of undeclared label");
   }
 

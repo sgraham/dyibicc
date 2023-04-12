@@ -1504,7 +1504,7 @@ static void gen_expr(Node* node) {
       return;
     }
     case ND_LABEL_VAL:
-      ///| lea rax, [=>node->unique_pc_label]
+      ///| lea rax, [=>node->pc_label]
       return;
     case ND_CAS:
     case ND_LOCKCE: {
@@ -1954,14 +1954,14 @@ static void gen_stmt(Node* node) {
         gen_stmt(n);
       return;
     case ND_GOTO:
-      ///| jmp =>node->unique_pc_label
+      ///| jmp =>node->pc_label
       return;
     case ND_GOTO_EXPR:
       gen_expr(node->lhs);
       ///| jmp rax
       return;
     case ND_LABEL:
-      ///|=>node->unique_pc_label:
+      ///|=>node->pc_label:
       gen_stmt(node->lhs);
       return;
     case ND_RETURN:
@@ -2209,16 +2209,17 @@ static void emit_data(Obj* prog) {
             bytes = (ByteArray){NULL, 0, 0};
           }
 
-          assert(!(rel->data_label && rel->code_label));  // Shouldn't be both.
-          assert(rel->data_label || rel->code_label);  // But should be at least one if we're here.
+          assert(!(rel->string_label && rel->internal_code_label));  // Shouldn't be both.
+          assert(rel->string_label ||
+                 rel->internal_code_label);  // But should be at least one if we're here.
 
-          if (rel->data_label) {
-            write_dyo_initializer_data_relocation(C(dyo_file), *rel->data_label, rel->addend);
+          if (rel->string_label) {
+            write_dyo_initializer_data_relocation(C(dyo_file), *rel->string_label, rel->addend);
           } else {
             int file_loc;
             write_dyo_initializer_code_relocation(C(dyo_file), -1, rel->addend, &file_loc);
-            intintarray_push(&C(pending_code_pclabels), (IntInt){file_loc, *rel->code_label},
-                             AL_Compile);
+            intintarray_push(&C(pending_code_pclabels),
+                             (IntInt){file_loc, *rel->internal_code_label}, AL_Compile);
           }
 
           rel = rel->next;
