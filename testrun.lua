@@ -91,6 +91,8 @@ local function runtest(platform, infile)
     if testgot ~= g_expected_text then
       stdout:write('output was:\n', testgot, '\nbut expected:\n', g_expected_text, '\n')
       return 1
+    else
+      stdout:write('OK\n')
     end
     for line in ftestout:lines() do
     end
