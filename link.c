@@ -406,7 +406,8 @@ bool link_dyos(void) {
         if (type == kTypeEntryPoint) {
           entry_point_offset = *(unsigned int*)&buf[0];
         } else if (type == kTypeX64Code) {
-          if (size == 0) size = 1;  // VirtualAlloc and mmap don't accept 0.
+          if (size == 0)
+            size = 1;  // VirtualAlloc and mmap don't accept 0.
           unsigned int page_sized = (unsigned int)align_to_u(size, page_size);
           // outaf("code %d, allocating %d\n", size, page_sized);
           dld->codeseg_base_address = allocate_writable_memory(page_sized);
