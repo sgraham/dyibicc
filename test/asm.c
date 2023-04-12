@@ -1,3 +1,7 @@
+// DISABLED
+// asm blocks are passed through to the system assembler in the original design,
+// and there isn't one of those now that we're jitting, so this functionality is
+// disabled for the time being.
 #include "test.h"
 
 char *asm_fn1(void) {

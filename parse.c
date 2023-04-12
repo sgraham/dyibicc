@@ -2090,6 +2090,10 @@ static Node* to_assign(Node* binary) {
   add_type(binary->rhs);
   Token* tok = binary->tok;
 
+  if (is_void(binary->lhs->ty) || is_void(binary->rhs->ty)) {
+    error_tok(tok, "%.*s expression with type void", tok->len, tok->loc);
+  }
+
   // Convert `A.x op= C` to `tmp = &A, (*tmp).x = (*tmp).x op C`.
   if (binary->lhs->kind == ND_MEMBER) {
     Obj* var = new_lvar("", pointer_to(binary->lhs->lhs->ty));
@@ -2389,6 +2393,10 @@ static Node* new_add(Node* lhs, Node* rhs, Token* tok) {
   add_type(lhs);
   add_type(rhs);
 
+  if (is_void(lhs->ty) || is_void(rhs->ty)) {
+    error_tok(tok, "%.*s expression with type void", tok->len, tok->loc);
+  }
+
   // num + num
   if (is_numeric(lhs->ty) && is_numeric(rhs->ty))
     return new_binary(ND_ADD, lhs, rhs, tok);
@@ -2418,6 +2426,10 @@ static Node* new_add(Node* lhs, Node* rhs, Token* tok) {
 static Node* new_sub(Node* lhs, Node* rhs, Token* tok) {
   add_type(lhs);
   add_type(rhs);
+
+  if (is_void(lhs->ty) || is_void(rhs->ty)) {
+    error_tok(tok, "%.*s expression with type void", tok->len, tok->loc);
+  }
 
   // num - num
   if (is_numeric(lhs->ty) && is_numeric(rhs->ty))

@@ -22,8 +22,8 @@ minilua: dynasm/minilua.c
 codegen.linux.c: codegen.in.c minilua
 	./minilua dynasm/dynasm.lua -o $@ codegen.in.c
 
-test: $(TEST_SRCS) dyibicc
-	for i in $(filter-out dyibicc,$^); do echo $$i; ./dyibicc -Itest test/common.c $$i || exit 1; echo; done
+test: testrun.lua minilua dyibicc
+	./minilua testrun.lua linux
 
 # Misc.
 

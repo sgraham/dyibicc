@@ -3,8 +3,8 @@
 SRCS=$(SRCS) codegen.win32.c
 
 CC=@cl
-#CFLAGS=/nologo /Od /Zi /D_CRT_SECURE_NO_DEPRECATE /DX64WIN=1 /W4 /WX
 CFLAGS=/nologo /Ox /GL /Zi /D_CRT_SECURE_NO_DEPRECATE /DX64WIN=1 /W4 /WX
+#CFLAGS=/nologo /Od /GL /fsanitize=address /Zi /D_CRT_SECURE_NO_DEPRECATE /DX64WIN=1 /W4 /WX
 LDFLAGS=gdi32.lib user32.lib onecore.lib /LTCG /OPT:REF /OPT:ICF
 #LDFLAGS=gdi32.lib user32.lib onecore.lib
 
@@ -25,7 +25,7 @@ minilua.exe: dynasm/minilua.c
 	$(CC) $(CFLAGS) /wd4132 /wd4324 $** /link /out:$@
 
 dumpdyo.exe: dumpdyo.obj dyo.obj hashmap.obj alloc.obj util.obj unicode.obj
-	$(CC) $(CFLAGS) $** /link /out:$@ 
+	$(CC) $(CFLAGS) $** /link /out:$@
 
 .c.obj:
 	$(CC) $(CFLAGS) /c $*.c
@@ -35,18 +35,14 @@ codegen.win32.c: codegen.in.c minilua.exe
 
 .SILENT:
 
-test: $(TEST_SRCS) dyibicc.exe .phony
-	@for %%x in ($**) do @if not %%x==dyibicc.exe (@if not %%x==.phony (@echo %%x & (dyibicc.exe -Itest test/common.c %%x || exit) && echo.))
+test: dyibicc.exe minilua.exe testrun.lua .phony
+	@minilua testrun.lua win
 
 sleepy: dyibicc.exe .phony
 	@start "" "C:\Program Files\Very Sleepy\sleepy.exe" /r "dyibicc.exe -ewmain -Ithird_party\sqlite-amalgamation-3410200 third_party\sqlite-amalgamation-3410200\shell.c third_party\sqlite-amalgamation-3410200\sqlite3.c"
 
 prof: dyibicc.exe .phony
 	timavg dyibicc.exe -Ithird_party\sqlite-amalgamation-3410200 third_party\sqlite-amalgamation-3410200\shell.c third_party\sqlite-amalgamation-3410200\sqlite3.c
-
-sleepy_generated: dyibicc.exe .phony
-	@python generate_test_codebase.py 50 100 15 5
-	@pushd test_codebase && start "" "C:\Program Files\Very Sleepy\sleepy.exe" /r "..\dyibicc.exe @build_all.rsp"
 
 clean:
 	del /f /q dyibicc.exe 2>nul

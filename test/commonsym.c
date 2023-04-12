@@ -1,3 +1,5 @@
+// DISABLED
+// Don't want to support this for now.
 #include "test.h"
 
 int x;

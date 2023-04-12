@@ -1,3 +1,5 @@
+// DISABLED
+// This file is only compiled with others as a "library"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>

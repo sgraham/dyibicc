@@ -231,9 +231,14 @@ static void verror_at(char* filename, char* input, int line_no, char* loc, char*
     end++;
 
   // Print out the line.
-  outaf(ANSI_WHITE);
+  if (user_context->use_ansi_codes)
+    outaf(ANSI_WHITE);
+
   int indent = outaf("%s:%d: ", filename, line_no);
-  outaf(ANSI_RESET);
+
+  if (user_context->use_ansi_codes)
+    outaf(ANSI_RESET);
+
   outaf("%.*s\n", (int)(end - line), line);
 
   // Show the error message.
@@ -241,9 +246,16 @@ static void verror_at(char* filename, char* input, int line_no, char* loc, char*
 
   outaf("%*s", pos, "");  // print pos spaces.
 
-  outaf("%s^ %serror: %s", ANSI_GREEN, ANSI_RED, ANSI_WHITE);
+  if (user_context->use_ansi_codes)
+    outaf("%s^ %serror: %s", ANSI_GREEN, ANSI_RED, ANSI_WHITE);
+  else
+    outaf("^ error: ");
+
   user_context->output_function(fmt, ap);
-  outaf("\n%s", ANSI_RESET);
+
+  outaf("\n");
+  if (user_context->use_ansi_codes)
+    outaf("%s", ANSI_RESET);
 }
 
 void error_at(char* loc, char* fmt, ...) {

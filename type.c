@@ -43,6 +43,10 @@ bool is_numeric(Type* ty) {
   return is_integer(ty) || is_flonum(ty);
 }
 
+bool is_void(Type* ty) {
+  return ty->kind == TY_VOID;
+}
+
 bool is_compatible(Type* t1, Type* t2) {
   if (t1 == t2)
     return true;

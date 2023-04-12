@@ -1,3 +1,5 @@
+// RUN: -Itest test/common.c {self}
+// RET: 0
 #include "test.h"
 
 _Noreturn noreturn_fn(int restrict x) {

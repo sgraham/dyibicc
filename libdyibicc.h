@@ -3,7 +3,8 @@
 #include <stdarg.h>
 #include <stdbool.h>
 
-// ANSI escape code decoding expected.
+// ANSI escape code decoding expected if use_ansi_codes is set in
+// DyibiccEnviromentData.
 typedef int (*DyibiccOutputFn)(const char* fmt, va_list ap);
 
 // Returns the address of a function by name.
@@ -19,6 +20,7 @@ typedef struct DyibiccEnviromentData {
   const char* dyibicc_include_dir;
   DyibiccFunctionLookupFn get_function_address;
   DyibiccOutputFn output_function;
+  bool use_ansi_codes;
 } DyibiccEnviromentData;
 
 typedef struct DyibiccContext {

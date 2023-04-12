@@ -92,6 +92,7 @@ int main(int argc, char** argv) {
       .dyibicc_include_dir = "./include",
       .get_function_address = NULL,
       .output_function = NULL,
+      .use_ansi_codes = isatty(fileno(stdout)),
   };
 
   DyibiccContext* ctx = dyibicc_set_environment(&env_data);

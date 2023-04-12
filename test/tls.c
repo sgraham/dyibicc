@@ -1,3 +1,5 @@
+// DISABLED
+// TLS isn't implemented yet.
 #include "test.h"
 #include <stdio.h>
 #include <pthread.h>

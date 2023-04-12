@@ -20,8 +20,12 @@
 #ifdef _MSC_VER
 #define NORETURN __declspec(noreturn)
 #define strdup _strdup
+#include <io.h>
+#define isatty _isatty
+#define fileno _fileno
 #else
 #define NORETURN _Noreturn
+#include <unistd.h>
 #endif
 
 #if !X64WIN
@@ -483,6 +487,7 @@ extern Type* ty_ldouble;
 bool is_integer(Type* ty);
 bool is_flonum(Type* ty);
 bool is_numeric(Type* ty);
+bool is_void(Type* ty);
 bool is_compatible(Type* t1, Type* t2);
 Type* copy_type(Type* ty);
 Type* pointer_to(Type* base);
@@ -624,6 +629,7 @@ typedef struct UserContext {
 
   DyibiccFunctionLookupFn get_function_address;
   DyibiccOutputFn output_function;
+  bool use_ansi_codes;
 
   size_t num_include_paths;
   char** include_paths;
