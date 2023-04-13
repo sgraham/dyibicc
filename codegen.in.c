@@ -2472,6 +2472,9 @@ static void write_text_exports(Obj* prog) {
     if (!fn->is_function || !fn->is_definition || !fn->is_live)
       continue;
 
+    //size_t idx = fn->is_static ? C(file_index) : user_context->num_files;
+    //hashmap_put(&user_context->exports[idx], strdup(fn->name),
+
     write_dyo_function_export(C(dyo_file), fn->name, fn->is_static,
                               dasm_getpclabel(&C(dynasm), fn->dasm_entry_label));
   }
@@ -2523,7 +2526,8 @@ void codegen_init(void) {
   C(dasm_label_main_entry) = -1;
 }
 
-void codegen(Obj* prog, FILE* dyo_out) {
+void codegen(Obj* prog, FILE* dyo_out, size_t file_index) {
+  C(file_index) = file_index;
   C(dyo_file) = dyo_out;
   write_dyo_begin(C(dyo_file));
 
@@ -2539,14 +2543,24 @@ void codegen(Obj* prog, FILE* dyo_out) {
   size_t code_size;
   dasm_link(&C(dynasm), &code_size);
 
+  DyoLinkData* dld = &user_context->files[C(file_index)];
+  if (dld->codeseg_base_address) {
+    free_executable_memory(dld->codeseg_base_address, dld->codeseg_size);
+  }
+  // VirtualAlloc and mmap don't accept 0.
+  if (code_size == 0)
+    code_size = 1;
+  unsigned int page_sized = (unsigned int)align_to_u(code_size, get_page_size());
+  dld->codeseg_size = page_sized;
+  dld->codeseg_base_address = allocate_writable_memory(page_sized);
+  outaf("code_size: %zu, page_sized: %zu\n", code_size, page_sized);
+
   write_text_exports(prog);
   write_imports();
   write_data_fixups();
   update_pending_code_relocations();
 
-  C(code_buf) = malloc(code_size);
-
-  dasm_encode(&C(dynasm), C(code_buf));
+  dasm_encode(&C(dynasm), dld->codeseg_base_address);
 
   int check_result = dasm_checkstep(&C(dynasm), DASM_SECTION_MAIN);
   if (check_result != DASM_S_OK) {
@@ -2559,16 +2573,13 @@ void codegen(Obj* prog, FILE* dyo_out) {
     write_dyo_entrypoint(C(dyo_file), offset);
   }
 
-  write_dyo_code(C(dyo_file), C(code_buf), code_size);
+  write_dyo_code(C(dyo_file), dld->codeseg_base_address, code_size);
 
   codegen_free();
 }
 
 // This can be called after a longjmp in update.
 void codegen_free(void) {
-  if (C(code_buf)) {
-    free(C(code_buf));
-  }
   if (C(dynasm)) {
     dasm_free(&C(dynasm));
   }

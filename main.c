@@ -258,7 +258,9 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
       (total_output_paths_len * sizeof(char)) +   // pointed to by DyoLinkData.output_dyo_name
       entry_point_name_len +                      // two other strings
       cache_dir_len +                             //
-      ((num_files + 1) * sizeof(HashMap));        // +1 beyond num_files for fully global dataseg
+      ((num_files + 1) * sizeof(HashMap)) +       // +1 beyond num_files for fully global dataseg
+      ((num_files + 1) * sizeof(HashMap))         // +1 beyond num_files for fully global exports
+      ;
 
   UserContext* data = calloc(1, total_size);
 
@@ -281,6 +283,9 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
   d += sizeof(DyoLinkData) * num_files;
 
   data->global_data = (HashMap*)d;
+  d += sizeof(HashMap) * (num_files + 1);
+
+  data->exports = (HashMap*)d;
   d += sizeof(HashMap) * (num_files + 1);
 
   if (env_data->entry_point_name) {
@@ -323,11 +328,12 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
     d += strlen(dyo_output_paths.data[j]) + 1;
   }
 
+  // These maps store an arbitrary number of symbols, and they must persist
+  // beyond AL_Link (to be saved for relink updates) so they must be manually
+  // managed.
   for (size_t j = 0; j < num_files + 1; ++j) {
-    // These maps store an arbitrary number of symbols, and they must persist
-    // beyond AL_Link (to be saved for relink updates) so they must be manually
-    // managed.
     data->global_data[j].alloc_lifetime = AL_Manual;
+    data->exports[j].alloc_lifetime = AL_Manual;
   }
 
   assert((size_t)(d - (char*)data) == total_size);
@@ -341,7 +347,7 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
 #define TOMBSTONE ((void*)-1)
 // These maps have keys strdup'd with AL_Manual, and values that are the data
 // segment allocations allocated by aligned_allocate.
-static void hashmap_custom_free(HashMap* map) {
+static void hashmap_custom_free_dataseg(HashMap* map) {
   assert(map->alloc_lifetime == AL_Manual);
   for (int i = 0; i < map->capacity; i++) {
     HashEntry* ent = &map->buckets[i];
@@ -353,11 +359,24 @@ static void hashmap_custom_free(HashMap* map) {
   alloc_free(map->buckets, map->alloc_lifetime);
 }
 
+static void hashmap_custom_free_codeseg(HashMap* map) {
+  assert(map->alloc_lifetime == AL_Manual);
+  for (int i = 0; i < map->capacity; i++) {
+    HashEntry* ent = &map->buckets[i];
+    if (ent->key && ent->key != TOMBSTONE) {
+      alloc_free(ent->key, map->alloc_lifetime);
+      // ent->val points into codeseg, not to be freed here.
+    }
+  }
+  alloc_free(map->buckets, map->alloc_lifetime);
+}
+
 void dyibicc_free(DyibiccContext* context) {
   UserContext* ctx = (UserContext*)context;
   assert(ctx == user_context && "only one context currently supported");
   for (size_t i = 0; i < ctx->num_files + 1; ++i) {
-    hashmap_custom_free(&ctx->global_data[i]);
+    hashmap_custom_free_dataseg(&ctx->global_data[i]);
+    hashmap_custom_free_codeseg(&ctx->exports[i]);
   }
   free(ctx);
   user_context = NULL;
@@ -426,7 +445,7 @@ bool dyibicc_update(DyibiccContext* context, char* filename, char* contents) {
         // TODO: need to figure out FILE vs longjmp, either will succeed or
         // error() which will leave this open. Probably the same for
         // preprocess().
-        codegen(prog, dyo_out);
+        codegen(prog, dyo_out, i);
         fclose(dyo_out);
 
         compiled_any = true;

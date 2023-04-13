@@ -45,6 +45,7 @@ typedef struct Member Member;
 typedef struct Relocation Relocation;
 typedef struct Hideset Hideset;
 typedef struct Token Token;
+typedef struct HashMap HashMap;
 
 //
 // alloc.c
@@ -113,6 +114,7 @@ char* dirname(char* s);
 char* basename(char* s);
 uint64_t align_to_u(uint64_t n, uint64_t align);
 int64_t align_to_s(int64_t n, int64_t align);
+unsigned int get_page_size(void);
 void strarray_push(StringArray* arr, char* s, AllocLifetime lifetime);
 void strintarray_push(StringIntArray* arr, StringInt item, AllocLifetime lifetime);
 void bytearray_push(ByteArray* arr, char b, AllocLifetime lifetime);
@@ -500,9 +502,13 @@ void add_type(Node* node);
 //
 // codegen.c
 //
+typedef struct CompileOutputs {
+  HashMap* codeseg_static_symbols;
+  HashMap* codeseg_global_symbols;
+} CompileOutputs;
 
 void codegen_init(void);
-void codegen(Obj* prog, FILE* dyo_out);
+void codegen(Obj* prog, FILE* dyo_out, size_t file_index);
 void codegen_free(void);
 int codegen_pclabel(void);
 #if X64WIN
@@ -529,12 +535,12 @@ typedef struct {
   void* val;
 } HashEntry;
 
-typedef struct {
+struct HashMap {
   HashEntry* buckets;
   int capacity;
   int used;
   AllocLifetime alloc_lifetime;
-} HashMap;
+};
 
 void* hashmap_get(HashMap* map, char* key);
 void* hashmap_get2(HashMap* map, char* key, int keylen);
@@ -644,6 +650,8 @@ typedef struct UserContext {
   // fully global (exported) symbols. These HashMaps are also special because
   // they're lifetime == AL_Manual.
   HashMap* global_data;
+
+  HashMap* exports;
 } UserContext;
 
 typedef struct dasm_State dasm_State;
@@ -684,8 +692,8 @@ typedef struct CompilerState {
   // codegen.in.c
   int codegen__depth;
   FILE* codegen__dyo_file;
+  size_t codegen__file_index;
   dasm_State* codegen__dynasm;
-  void* codegen__code_buf;
   Obj* codegen__current_fn;
   int codegen__numlabels;
   int codegen__dasm_label_main_entry;

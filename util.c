@@ -67,6 +67,16 @@ int64_t align_to_s(int64_t n, int64_t align) {
   return (n + align - 1) / align * align;
 }
 
+unsigned int get_page_size(void) {
+#if X64WIN
+  SYSTEM_INFO system_info;
+  GetSystemInfo(&system_info);
+  return system_info.dwPageSize;
+#else
+  return sysconf(_SC_PAGESIZE);
+#endif
+}
+
 void strarray_push(StringArray* arr, char* s, AllocLifetime lifetime) {
   if (!arr->data) {
     arr->data = bumpcalloc(8, sizeof(char*), lifetime);

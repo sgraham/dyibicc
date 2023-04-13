@@ -344,25 +344,10 @@ bool link_dyos(void) {
 
   UserContext* uc = user_context;
 
-#if X64WIN
-  SYSTEM_INFO system_info;
-  GetSystemInfo(&system_info);
-  unsigned int page_size = system_info.dwPageSize;
-#else
-  unsigned int page_size = sysconf(_SC_PAGESIZE);
-#endif
-
   if (uc->num_files == 0)
     return false;
 
   bool relinking = uc->files[0].codeseg_base_address != 0;
-
-  if (relinking) {
-    for (size_t i = 0; i < uc->num_files; ++i) {
-      DyoLinkData* dld = &uc->files[i];
-      free_executable_memory(dld->codeseg_base_address, dld->codeseg_size);
-    }
-  }
 
   // Tracks which data segment objects were created this update to know whether
   // to set them to their static initializers.
@@ -406,13 +391,6 @@ bool link_dyos(void) {
         if (type == kTypeEntryPoint) {
           entry_point_offset = *(unsigned int*)&buf[0];
         } else if (type == kTypeX64Code) {
-          if (size == 0)
-            size = 1;  // VirtualAlloc and mmap don't accept 0.
-          unsigned int page_sized = (unsigned int)align_to_u(size, page_size);
-          // outaf("code %d, allocating %d\n", size, page_sized);
-          dld->codeseg_base_address = allocate_writable_memory(page_sized);
-          dld->codeseg_size = page_sized;
-          memcpy(dld->codeseg_base_address, buf, size);
           if (entry_point_offset != 0xffffffff) {
             uc->entry_point = (DyibiccEntryPointFn)(dld->codeseg_base_address + entry_point_offset);
           }
