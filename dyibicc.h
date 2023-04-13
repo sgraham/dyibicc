@@ -654,10 +654,6 @@ typedef struct DyoLinkData {
 void free_link_fixups(DyoLinkData* dld);
 
 typedef struct UserContext {
-  DyibiccEntryPointFn entry_point;
-
-  // ^^^ Public definition matches above here. ^^^
-
   DyibiccFunctionLookupFn get_function_address;
   DyibiccOutputFn output_function;
   bool use_ansi_codes;
@@ -668,7 +664,6 @@ typedef struct UserContext {
   size_t num_files;
   DyoLinkData* files;
 
-  const char* entry_point_name;
   const char* cache_dir;
 
   // This is an array of num_files+1; 0..num_files-1 correspond to static
@@ -722,7 +717,6 @@ typedef struct CompilerState {
   dasm_State* codegen__dynasm;
   Obj* codegen__current_fn;
   int codegen__numlabels;
-  int codegen__dasm_label_main_entry;
   StringIntArray codegen__import_fixups;
   StringIntArray codegen__data_fixups;
   IntIntArray codegen__pending_code_pclabels;

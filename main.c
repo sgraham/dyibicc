@@ -215,9 +215,6 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
     ++num_include_paths;
   }
 
-  size_t entry_point_name_len =
-      env_data->entry_point_name ? strlen(env_data->entry_point_name) + 1 : 0;
-
   if (!env_data->cache_dir) {
     env_data->cache_dir = ".";
   }
@@ -256,15 +253,13 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
       (total_include_paths_len * sizeof(char)) +  // pointed to by include_paths
       (total_source_files_len * sizeof(char)) +   // pointed to by DyoLinkData.source_name
       (total_output_paths_len * sizeof(char)) +   // pointed to by DyoLinkData.output_dyo_name
-      entry_point_name_len +                      // two other strings
-      cache_dir_len +                             //
+      cache_dir_len +                             // another string
       ((num_files + 1) * sizeof(HashMap)) +       // +1 beyond num_files for fully global dataseg
       ((num_files + 1) * sizeof(HashMap))         // +1 beyond num_files for fully global exports
       ;
 
   UserContext* data = calloc(1, total_size);
 
-  data->entry_point = NULL;
   data->get_function_address = env_data->get_function_address;
   data->output_function = env_data->output_function;
   if (!data->output_function) {
@@ -287,12 +282,6 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
 
   data->exports = (HashMap*)d;
   d += sizeof(HashMap) * (num_files + 1);
-
-  if (env_data->entry_point_name) {
-    data->entry_point_name = d;
-    strcpy(d, env_data->entry_point_name);
-    d += strlen(env_data->entry_point_name) + 1;
-  }
 
   if (env_data->cache_dir) {
     data->cache_dir = d;
@@ -373,8 +362,6 @@ void dyibicc_free(DyibiccContext* context) {
   user_context = NULL;
 }
 
-#define OPT_E 0
-
 static FILE* open_file(char* path) {
   if (!path || strcmp(path, "-") == 0)
     return stdout;
@@ -400,7 +387,6 @@ bool dyibicc_update(DyibiccContext* context, char* filename, char* contents) {
 
   UserContext* ctx = (UserContext*)context;
   bool link_result = true;
-  ctx->entry_point = NULL;  // This must be "refound" every time, otherwise it could be stale.
 
   assert(ctx == user_context && "only one context currently supported");
 
@@ -455,4 +441,9 @@ bool dyibicc_update(DyibiccContext* context, char* filename, char* contents) {
   }
 
   return link_result;
+}
+
+void* dyibicc_find_export(DyibiccContext* context, char* name) {
+  UserContext* ctx = (UserContext*)context;
+  return hashmap_get(&ctx->exports[ctx->num_files], name);
 }

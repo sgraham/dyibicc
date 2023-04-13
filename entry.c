@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
 
   StringArray include_paths = {0};
   StringArray input_paths = {0};
-  char* entry_point_override = NULL;
+  char* entry_point_override = "main";
   parse_args(argc, argv, &entry_point_override, &include_paths, &input_paths);
   strarray_push(&include_paths, NULL, AL_Link);
   strarray_push(&input_paths, NULL, AL_Link);
@@ -87,7 +87,6 @@ int main(int argc, char** argv) {
   DyibiccEnviromentData env_data = {
       .include_paths = (const char**)include_paths.data,
       .files = (const char**)input_paths.data,
-      .entry_point_name = entry_point_override,
       .cache_dir = "dyocache",
       .dyibicc_include_dir = "./include",
       .get_function_address = NULL,
@@ -102,10 +101,11 @@ int main(int argc, char** argv) {
   int result = 0;
 
   if (dyibicc_update(ctx, NULL, NULL)) {
-    if (ctx->entry_point) {
+    void* entry_point = dyibicc_find_export(ctx, entry_point_override);
+    if (entry_point) {
       int myargc = 1;
       char* myargv[] = {"prog", NULL};
-      result = ((int (*)(int, char**))(ctx->entry_point))(myargc, myargv);
+      result = ((int (*)(int, char**))entry_point)(myargc, myargv);
     } else {
       printf("no entry point found\n");
       result = 254;

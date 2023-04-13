@@ -2452,11 +2452,6 @@ static void emit_text(Obj* prog) {
     // behavior is undefined for the other functions.
     if (strcmp(fn->name, "main") == 0) {
       ///| mov rax, 0
-      C(dasm_label_main_entry) = fn->dasm_entry_label;
-    }
-
-    if (user_context->entry_point_name && strcmp(fn->name, user_context->entry_point_name) == 0) {
-      C(dasm_label_main_entry) = fn->dasm_entry_label;
     }
 
     // Epilogue
@@ -2548,7 +2543,6 @@ void codegen_init(void) {
   dasm_growpc(&C(dynasm), 1 << 16);  // Arbitrary number to avoid lots of reallocs of that array.
 
   C(numlabels) = 1;
-  C(dasm_label_main_entry) = -1;
 }
 
 void codegen(Obj* prog, FILE* dyo_out, size_t file_index) {
@@ -2592,11 +2586,6 @@ void codegen(Obj* prog, FILE* dyo_out, size_t file_index) {
   if (check_result != DASM_S_OK) {
     outaf("check_result: 0x%08x\n", check_result);
     ABORT("dasm_checkstep failed");
-  }
-
-  if (C(dasm_label_main_entry) >= 0) {
-    int offset = dasm_getpclabel(&C(dynasm), C(dasm_label_main_entry));
-    write_dyo_entrypoint(C(dyo_file), offset);
   }
 
   write_dyo_code(C(dyo_file));

@@ -363,20 +363,17 @@ bool link_dyos(void) {
   }
 
   int num_dyos = 0;
-  // Map code blocks from each and save base address.
   // Allocate and global data and save address/size by name.
   for (size_t i = 0; i < uc->num_files; ++i) {
     FILE* dyo = dyo_files[i];
     if (!ensure_dyo_header(dyo))
       goto fail;
 
-    unsigned int entry_point_offset = 0xffffffff;
     int record_index = 0;
 
     StringArray strings = {NULL, 0, 0};
     strarray_push(&strings, NULL, AL_Link);  // 1-based
 
-    DyoLinkData* dld = &uc->files[num_dyos];
     for (;;) {
       unsigned int type;
       unsigned int size;
@@ -388,12 +385,7 @@ bool link_dyos(void) {
       } else {
         strarray_push(&strings, NULL, AL_Link);
 
-        if (type == kTypeEntryPoint) {
-          entry_point_offset = *(unsigned int*)&buf[0];
-        } else if (type == kTypeX64Code) {
-          if (entry_point_offset != 0xffffffff) {
-            uc->entry_point = (DyibiccEntryPointFn)(dld->codeseg_base_address + entry_point_offset);
-          }
+        if (type == kTypeX64Code) {
           ++num_dyos;
           break;
         } else if (type == kTypeInitializedData) {
@@ -472,7 +464,7 @@ bool link_dyos(void) {
     rewind(dyo);
   }
 
-  // Run through all imports and data relocs and fix up the addresses.
+  // Run through data relocs and fix up the addresses.
   num_dyos = 0;
   for (size_t i = 0; i < uc->num_files; ++i) {
     FILE* dyo = dyo_files[i];
