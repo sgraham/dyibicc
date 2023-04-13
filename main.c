@@ -359,24 +359,15 @@ static void hashmap_custom_free_dataseg(HashMap* map) {
   alloc_free(map->buckets, map->alloc_lifetime);
 }
 
-static void hashmap_custom_free_codeseg(HashMap* map) {
-  assert(map->alloc_lifetime == AL_Manual);
-  for (int i = 0; i < map->capacity; i++) {
-    HashEntry* ent = &map->buckets[i];
-    if (ent->key && ent->key != TOMBSTONE) {
-      alloc_free(ent->key, map->alloc_lifetime);
-      // ent->val points into codeseg, not to be freed here.
-    }
-  }
-  alloc_free(map->buckets, map->alloc_lifetime);
-}
-
 void dyibicc_free(DyibiccContext* context) {
   UserContext* ctx = (UserContext*)context;
   assert(ctx == user_context && "only one context currently supported");
   for (size_t i = 0; i < ctx->num_files + 1; ++i) {
     hashmap_custom_free_dataseg(&ctx->global_data[i]);
-    hashmap_custom_free_codeseg(&ctx->exports[i]);
+    hashmap_clear_manual_key_owned_value_unowned(&ctx->exports[i]);
+  }
+  for (size_t i = 0; i < ctx->num_files; ++i) {
+    free_link_fixups(&ctx->files[i]);
   }
   free(ctx);
   user_context = NULL;

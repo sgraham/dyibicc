@@ -442,59 +442,28 @@ bool link_dyos(void) {
     }
   }
 
+  // Process link fixups, currently on function imports.
   for (size_t i = 0; i < uc->num_files; ++i) {
-    FILE* dyo = dyo_files[i];
-    rewind(dyo);
-  }
+    DyoLinkData* dld = &uc->files[i];
+    for (int j = 0; j < dld->flen; ++j) {
+      unsigned int offset = dld->fixups[j].offset;
+      int addend = dld->fixups[j].addend;
+      assert(addend == 0);
+      char* name = dld->fixups[j].name;
 
-  // Get all exported symbols as hashmap of name => real address.
-  HashMap global_exports = {NULL, 0, 0, AL_Link};
-  HashMap* static_exports = alloca(sizeof(HashMap) * uc->num_files);
-  memset(static_exports, 0, sizeof(HashMap) * uc->num_files);
-  for (size_t i = 0; i < uc->num_files; ++i) {
-    static_exports[i].alloc_lifetime = AL_Link;
-  }
-  num_dyos = 0;
-  for (size_t i = 0; i < uc->num_files; ++i) {
-    FILE* dyo = dyo_files[i];
-    if (!ensure_dyo_header(dyo))
-      goto fail;
+      void* fixup_address = dld->codeseg_base_address + offset;
 
-    int record_index = 0;
-
-    StringArray strings = {NULL, 0, 0};
-    strarray_push(&strings, NULL, AL_Link);  // 1-based
-
-    DyoLinkData* dld = &uc->files[num_dyos];
-    for (;;) {
-      unsigned int type;
-      unsigned int size;
-      if (!read_dyo_record(dyo, &record_index, buf, BUF_SIZE, &type, &size))
-        goto fail;
-
-      if (type == kTypeString) {
-        strarray_push(&strings, bumpstrndup(buf, size, AL_Link), AL_Link);
-      } else {
-        strarray_push(&strings, NULL, AL_Link);
-
-        if (type == kTypeFunctionExport) {
-          unsigned int function_offset = *(unsigned int*)&buf[0];
-          int is_static = *(unsigned int*)&buf[4];
-          unsigned int string_record_index = *(unsigned int*)&buf[8];
-          // printf("%d \"%s\" at %p\n", string_record_index, strings.data[string_record_index],
-          //      base_address[num_dyos] + function_offset);
-          if (is_static) {
-            hashmap_put(&static_exports[num_dyos], strings.data[string_record_index],
-                        dld->codeseg_base_address + function_offset);
-          } else {
-            hashmap_put(&global_exports, strings.data[string_record_index],
-                        dld->codeseg_base_address + function_offset);
-          }
-        } else if (type == kTypeX64Code) {
-          ++num_dyos;
-          break;
+      void* target_address = hashmap_get(&uc->exports[uc->num_files], name);
+      if (target_address == NULL) {
+        target_address = symbol_lookup(name);
+        if (target_address == NULL) {
+          outaf("undefined import symbol: %s\n", name);
+          goto fail;
         }
       }
+      *((uintptr_t*)fixup_address) = (uintptr_t)target_address;
+      // printf("fixed up import %p to point at %p (%s)\n", fixup_address, target_address,
+      // strings.data[string_record_index]);
     }
   }
 
@@ -531,22 +500,7 @@ bool link_dyos(void) {
       } else {
         strarray_push(&strings, NULL, AL_Link);
 
-        if (type == kTypeImport) {
-          unsigned int fixup_offset = *(unsigned int*)&buf[0];
-          unsigned int string_record_index = *(unsigned int*)&buf[4];
-          void* fixup_address = dld->codeseg_base_address + fixup_offset;
-          void* target_address = hashmap_get(&global_exports, strings.data[string_record_index]);
-          if (target_address == NULL) {
-            target_address = symbol_lookup(strings.data[string_record_index]);
-            if (target_address == NULL) {
-              outaf("undefined import symbol: %s\n", strings.data[string_record_index]);
-              goto fail;
-            }
-          }
-          *((uintptr_t*)fixup_address) = (uintptr_t)target_address;
-          // printf("fixed up import %p to point at %p (%s)\n", fixup_address, target_address,
-          // strings.data[string_record_index]);
-        } else if (type == kTypeInitializedData) {
+        if (type == kTypeInitializedData) {
           unsigned int data_size = *(unsigned int*)&buf[0];
           unsigned int flags = *(unsigned int*)&buf[8];
           bool is_static = flags & 0x01;
@@ -620,9 +574,9 @@ bool link_dyos(void) {
           if (!target_address) {
             target_address = hashmap_get(&uc->global_data[uc->num_files], strings.data[name_index]);
             if (!target_address) {
-              target_address = hashmap_get(&static_exports[num_dyos], strings.data[name_index]);
+              target_address = hashmap_get(&uc->exports[num_dyos], strings.data[name_index]);
               if (!target_address) {
-                target_address = hashmap_get(&global_exports, strings.data[name_index]);
+                target_address = hashmap_get(&uc->exports[uc->num_files], strings.data[name_index]);
                 if (!target_address) {
                   target_address = symbol_lookup(strings.data[name_index]);
                   if (!target_address) {

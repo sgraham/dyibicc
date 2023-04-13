@@ -120,7 +120,6 @@ void strintarray_push(StringIntArray* arr, StringInt item, AllocLifetime lifetim
 void bytearray_push(ByteArray* arr, char b, AllocLifetime lifetime);
 void intintarray_push(IntIntArray* arr, IntInt item, AllocLifetime lifetime);
 char* format(AllocLifetime lifetime, char* fmt, ...) __attribute__((format(printf, 2, 3)));
-int64_t stat_single_file(const char* path);
 char* read_file(char* path, AllocLifetime lifetime);
 NORETURN void error(char* fmt, ...) __attribute__((format(printf, 1, 2)));
 NORETURN void error_at(char* loc, char* fmt, ...) __attribute__((format(printf, 2, 3)));
@@ -550,6 +549,8 @@ void hashmap_delete(HashMap* map, char* key);
 void hashmap_delete2(HashMap* map, char* key, int keylen);
 void hashmap_test(void);
 
+void hashmap_clear_manual_key_owned_value_unowned(HashMap* map);
+
 //
 // dyo.c
 //
@@ -584,7 +585,7 @@ bool write_dyo_initializer_bytes(FILE* f, char* data, int len);
 bool write_dyo_initializer_data_relocation(FILE* f, char* data, int addend);
 bool write_dyo_initializer_code_relocation(FILE* f, int pclabel, int addend, int* patch_loc);
 bool patch_dyo_initializer_code_relocation(FILE* f, int file_loc, int final_code_offset);
-bool write_dyo_code(FILE* f, void* data, size_t size);
+bool write_dyo_code(FILE* f);
 bool write_dyo_entrypoint(FILE* f, unsigned int loc);
 
 // Reading.
@@ -596,6 +597,13 @@ bool read_dyo_record(FILE* f,
                      unsigned int* type,
                      unsigned int* size);
 bool dump_dyo_file(FILE* f);
+
+//
+// sintern.c
+typedef unsigned int IStr;
+IStr strintern(const char* str);
+const char* istrptr(IStr str);
+void free_intern_pool(void);  // Invalidates all IStrs.
 
 //
 // link.c
@@ -620,12 +628,30 @@ struct Scope {
   HashMap tags;
 };
 
+typedef struct LinkFixup {
+  // The offset into the code segment.
+  unsigned int offset;
+
+  // Added to the target address.
+  int addend;
+
+  // Name of the symbol at which the fixup should point.
+  // TODO: Intern pool for all the import/export/global names.
+  char* name;
+} LinkFixup;
+
 typedef struct DyoLinkData {
   char* source_name;
   char* output_dyo_name;
   char* codeseg_base_address;  // Just the address, not a string.
   size_t codeseg_size;
+
+  LinkFixup* fixups;
+  int flen;
+  int fcap;
 } DyoLinkData;
+
+void free_link_fixups(DyoLinkData* dld);
 
 typedef struct UserContext {
   DyibiccEntryPointFn entry_point;

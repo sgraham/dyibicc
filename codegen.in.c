@@ -2467,20 +2467,45 @@ static void emit_text(Obj* prog) {
   }
 }
 
-static void write_text_exports(Obj* prog) {
+void linkfixup_push(DyoLinkData* dld, char* target, unsigned int offset, int addend) {
+  if (!dld->fixups) {
+    dld->fixups = calloc(8, sizeof(LinkFixup));
+    dld->fcap = 8;
+  }
+
+  if (dld->fcap == dld->flen) {
+    dld->fixups = realloc(dld->fixups, sizeof(LinkFixup) * dld->fcap * 2);
+    dld->fcap *= 2;
+  }
+
+  dld->fixups[dld->flen++] = (LinkFixup){offset, addend, strdup(target)};
+}
+
+static void fill_out_text_exports(Obj* prog, char* codeseg_base_address) {
+  // per-file from any previous need to be cleared out for this round.
+  hashmap_clear_manual_key_owned_value_unowned(&user_context->exports[C(file_index)]);
+
   for (Obj* fn = prog; fn; fn = fn->next) {
     if (!fn->is_function || !fn->is_definition || !fn->is_live)
       continue;
 
-    //size_t idx = fn->is_static ? C(file_index) : user_context->num_files;
-    //hashmap_put(&user_context->exports[idx], strdup(fn->name),
-
-    write_dyo_function_export(C(dyo_file), fn->name, fn->is_static,
-                              dasm_getpclabel(&C(dynasm), fn->dasm_entry_label));
+    int offset = dasm_getpclabel(&C(dynasm), fn->dasm_entry_label);
+    size_t idx = fn->is_static ? C(file_index) : user_context->num_files;
+    hashmap_put(&user_context->exports[idx], strdup(fn->name), codeseg_base_address + offset);
   }
 }
 
-static void write_imports(void) {
+void free_link_fixups(DyoLinkData* dld) {
+  for (int i = 0; i < dld->flen; ++i) {
+    free(dld->fixups[i].name);
+  }
+  free(dld->fixups);
+  dld->fixups = NULL;
+  dld->flen = 0;
+  dld->fcap = 0;
+}
+
+static void fill_out_imports(DyoLinkData* dld) {
   for (int i = 0; i < C(import_fixups).len; ++i) {
     int offset = dasm_getpclabel(&C(dynasm), C(import_fixups).data[i].i);
     // +2 is a hack taking advantage of the fact that import fixups are always
@@ -2490,7 +2515,7 @@ static void write_imports(void) {
     // slapped into place.
     offset += 2;
 
-    write_dyo_import(C(dyo_file), C(import_fixups).data[i].str, offset);
+    linkfixup_push(dld, C(import_fixups).data[i].str, offset, /*addend=*/0);
   }
 }
 
@@ -2553,10 +2578,11 @@ void codegen(Obj* prog, FILE* dyo_out, size_t file_index) {
   unsigned int page_sized = (unsigned int)align_to_u(code_size, get_page_size());
   dld->codeseg_size = page_sized;
   dld->codeseg_base_address = allocate_writable_memory(page_sized);
-  outaf("code_size: %zu, page_sized: %zu\n", code_size, page_sized);
+  // outaf("code_size: %zu, page_sized: %zu\n", code_size, page_sized);
 
-  write_text_exports(prog);
-  write_imports();
+  fill_out_text_exports(prog, dld->codeseg_base_address);
+  free_link_fixups(dld);
+  fill_out_imports(dld);
   write_data_fixups();
   update_pending_code_relocations();
 
@@ -2573,7 +2599,7 @@ void codegen(Obj* prog, FILE* dyo_out, size_t file_index) {
     write_dyo_entrypoint(C(dyo_file), offset);
   }
 
-  write_dyo_code(C(dyo_file), dld->codeseg_base_address, code_size);
+  write_dyo_code(C(dyo_file));
 
   codegen_free();
 }

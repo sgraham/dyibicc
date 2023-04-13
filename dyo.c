@@ -262,11 +262,8 @@ bool patch_dyo_initializer_code_relocation(FILE* f, int file_loc, int final_code
   return true;
 }
 
-bool write_dyo_code(FILE* f, void* data, size_t size) {
-  if (!write_record_header(f, kTypeX64Code, (int)size))
-    return false;
-
-  if (fwrite(data, size, 1, f) < 0)
+bool write_dyo_code(FILE* f) {
+  if (!write_record_header(f, kTypeX64Code, 0))
     return false;
 
   return true;

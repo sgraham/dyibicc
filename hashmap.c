@@ -138,6 +138,18 @@ void hashmap_delete2(HashMap* map, char* key, int keylen) {
     ent->key = TOMBSTONE;
 }
 
+void hashmap_clear_manual_key_owned_value_unowned(HashMap* map) {
+  assert(map->alloc_lifetime == AL_Manual);
+  for (int i = 0; i < map->capacity; i++) {
+    HashEntry* ent = &map->buckets[i];
+    if (ent->key && ent->key != TOMBSTONE) {
+      alloc_free(ent->key, map->alloc_lifetime);
+      // ent->val points into codeseg, not to be freed here.
+    }
+  }
+  alloc_free(map->buckets, map->alloc_lifetime);
+}
+
 #if 0
 void hashmap_test(void) {
   HashMap *map = bumpcalloc(1, sizeof(HashMap));

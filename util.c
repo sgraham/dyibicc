@@ -145,45 +145,6 @@ void intintarray_push(IntIntArray* arr, IntInt item, AllocLifetime lifetime) {
   arr->data[arr->len++] = item;
 }
 
-#ifdef _WIN64
-// From ninja.
-int64_t timestamp_from_filetime(const FILETIME* filetime) {
-  // FILETIME is in 100-nanosecond increments since the Windows epoch.
-  // We don't much care about epoch correctness but we do want the
-  // resulting value to fit in a 64-bit integer.
-  uint64_t mtime = ((uint64_t)filetime->dwHighDateTime << 32) | ((uint64_t)filetime->dwLowDateTime);
-  // 1600 epoch -> 2000 epoch (subtract 400 years).
-  return (int64_t)mtime - 12622770400LL * (1000000000LL / 100);
-}
-
-int64_t stat_single_file(const char* path) {
-  WIN32_FILE_ATTRIBUTE_DATA attrs;
-  if (!GetFileAttributesExA(path, GetFileExInfoStandard, &attrs)) {
-    DWORD win_err = GetLastError();
-    if (win_err == ERROR_FILE_NOT_FOUND || win_err == ERROR_PATH_NOT_FOUND)
-      return 0;
-    return -1;
-  }
-  return timestamp_from_filetime(&attrs.ftLastWriteTime);
-}
-#else
-
-int64_t stat_single_file(const char* path) {
-  struct stat st;
-  if (stat(path, &st) < 0) {
-    if (errno == ENOENT || errno == ENOTDIR)
-      return 0;
-    return -1;
-  }
-#if defined(st_mtime)  // A macro, so we're likely on modern POSIX.
-  return (int64_t)st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec;
-#else
-  return (int64_t)st.st_mtime * 1000000000LL + st.st_mtimensec;
-#endif
-}
-
-#endif
-
 // Returns the contents of a given file. Doesn't support '-' for reading from
 // stdin.
 char* read_file(char* path, AllocLifetime lifetime) {
