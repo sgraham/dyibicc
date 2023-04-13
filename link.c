@@ -434,7 +434,7 @@ bool link_dyos(void) {
     }
   }
 
-  // Process link fixups, currently on function imports.
+  // Process link fixups, currently only function imports.
   for (size_t i = 0; i < uc->num_files; ++i) {
     DyoLinkData* dld = &uc->files[i];
     for (int j = 0; j < dld->flen; ++j) {

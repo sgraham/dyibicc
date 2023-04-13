@@ -2216,10 +2216,8 @@ static void emit_data(Obj* prog) {
           if (rel->string_label) {
             write_dyo_initializer_data_relocation(C(dyo_file), *rel->string_label, rel->addend);
           } else {
-            int file_loc;
-            write_dyo_initializer_code_relocation(C(dyo_file), -1, rel->addend, &file_loc);
-            intintarray_push(&C(pending_code_pclabels),
-                             (IntInt){file_loc, *rel->internal_code_label}, AL_Compile);
+            int offset = dasm_getpclabel(&C(dynasm), *rel->internal_code_label);
+            write_dyo_initializer_code_relocation(C(dyo_file), offset, rel->addend);
           }
 
           rel = rel->next;
@@ -2528,16 +2526,6 @@ static void write_data_fixups(void) {
   }
 }
 
-static void update_pending_code_relocations(void) {
-  for (int i = 0; i < C(pending_code_pclabels).len; ++i) {
-    int file_loc = C(pending_code_pclabels).data[i].a;
-    int pclabel = C(pending_code_pclabels).data[i].b;
-    int offset = dasm_getpclabel(&C(dynasm), pclabel);
-    // outaf("update at %d, label %d, offset %d\n", file_loc, pclabel, offset);
-    patch_dyo_initializer_code_relocation(C(dyo_file), file_loc, offset);
-  }
-}
-
 void codegen_init(void) {
   dasm_init(&C(dynasm), DASM_MAXSECTION);
   dasm_growpc(&C(dynasm), 1 << 16);  // Arbitrary number to avoid lots of reallocs of that array.
@@ -2556,11 +2544,12 @@ void codegen(Obj* prog, FILE* dyo_out, size_t file_index) {
   dasm_setup(&C(dynasm), dynasm_actions);
 
   assign_lvar_offsets(prog);
-  emit_data(prog);
   emit_text(prog);
 
   size_t code_size;
   dasm_link(&C(dynasm), &code_size);
+
+  emit_data(prog);
 
   DyoLinkData* dld = &user_context->files[C(file_index)];
   if (dld->codeseg_base_address) {
@@ -2578,7 +2567,6 @@ void codegen(Obj* prog, FILE* dyo_out, size_t file_index) {
   free_link_fixups(dld);
   fill_out_imports(dld);
   write_data_fixups();
-  update_pending_code_relocations();
 
   dasm_encode(&C(dynasm), dld->codeseg_base_address);
 

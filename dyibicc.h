@@ -583,8 +583,7 @@ bool write_dyo_initialized_data(FILE* f,
 bool write_dyo_initializer_end(FILE* f);
 bool write_dyo_initializer_bytes(FILE* f, char* data, int len);
 bool write_dyo_initializer_data_relocation(FILE* f, char* data, int addend);
-bool write_dyo_initializer_code_relocation(FILE* f, int pclabel, int addend, int* patch_loc);
-bool patch_dyo_initializer_code_relocation(FILE* f, int file_loc, int final_code_offset);
+bool write_dyo_initializer_code_relocation(FILE* f, int offset, int addend);
 bool write_dyo_code(FILE* f);
 bool write_dyo_entrypoint(FILE* f, unsigned int loc);
 

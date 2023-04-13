@@ -225,39 +225,13 @@ bool write_dyo_initializer_data_relocation(FILE* f, char* name, int addend) {
   return true;
 }
 
-bool write_dyo_initializer_code_relocation(FILE* f, int pclabel, int addend, int* patch_loc) {
+bool write_dyo_initializer_code_relocation(FILE* f, int offset, int addend) {
   if (!write_record_header(f, kTypeInitializerCodeRelocation, 8))
     return false;
-  *patch_loc = ftell(f);
-  if (!write_int(f, pclabel))
+  if (!write_int(f, offset))
     return false;
   if (!write_int(f, addend))
     return false;
-
-  return true;
-}
-
-bool patch_dyo_initializer_code_relocation(FILE* f, int file_loc, int final_code_offset) {
-  long old = ftell(f);
-  if (old < 0) {
-    outaf("couldn't save old loc\n");
-    return false;
-  }
-
-  if (fseek(f, file_loc, SEEK_SET) < 0) {
-    outaf("couldn't seek to patch loc (%d)\n", file_loc);
-    return false;
-  }
-
-  if (!write_int(f, final_code_offset)) {
-    outaf("writing patch failed\n");
-    return false;
-  }
-
-  if (fseek(f, old, SEEK_SET) < 0) {
-    outaf("failed to restore loc\n");
-    return false;
-  }
 
   return true;
 }
