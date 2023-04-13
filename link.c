@@ -347,11 +347,7 @@ bool link_dyos(void) {
   if (uc->num_files == 0)
     return false;
 
-  bool relinking = uc->files[0].codeseg_base_address != 0;
-
-  // Tracks which data segment objects were created this update to know whether
-  // to set them to their static initializers.
-  khash_t(voidp)* created_this_update = kh_init(voidp);
+  //bool relinking = uc->files[0].codeseg_base_address != 0;
 
   FILE** dyo_files = alloca(sizeof(FILE*) * uc->num_files);
   for (size_t i = 0; i < uc->num_files; ++i) {
@@ -391,9 +387,9 @@ bool link_dyos(void) {
         } else if (type == kTypeInitializedData) {
           //unsigned int data_size = *(unsigned int*)&buf[0];
           //unsigned int align = *(unsigned int*)&buf[4];
-          unsigned int flags = *(unsigned int*)&buf[8];
-          unsigned int name_index = *(unsigned int*)&buf[12];
-          bool is_static = flags & 0x01;
+          //unsigned int flags = *(unsigned int*)&buf[8];
+          //unsigned int name_index = *(unsigned int*)&buf[12];
+          //bool is_static = flags & 0x01;
           //bool is_rodata = flags & 0x02;
           //bool was_freed = false;
           /*
@@ -427,13 +423,11 @@ bool link_dyos(void) {
           }
           hashmap_put(&uc->global_data[idx], bumpstrdup(strings.data[name_index], AL_Manual),
                       global_data);
-                      */
 
           // XXX
-          size_t idx = is_static ? num_dyos : uc->num_files;
-          void* global_data = hashmap_get(&uc->global_data[idx], strings.data[name_index]);
           int ret;
           kh_put(voidp, created_this_update, (khint64_t)global_data, &ret);
+                      */
         }
       }
     }
@@ -446,19 +440,31 @@ bool link_dyos(void) {
       void* fixup_address = dld->fixups[j].at;
       char* name = dld->fixups[j].name;
       int addend = dld->fixups[j].addend;
+      bool is_to_data = dld->fixups[j].is_to_data;
       assert(addend == 0);
 
-      void* target_address = hashmap_get(&uc->exports[uc->num_files], name);
-      if (target_address == NULL) {
-        target_address = symbol_lookup(name);
+      void* target_address;
+      if (is_to_data) {
+        target_address = hashmap_get(&uc->global_data[i], name);
+        if (!target_address) {
+          target_address = hashmap_get(&uc->global_data[uc->num_files], name);
+          if (!target_address) {
+            outaf("undefined ref to symbol: %s\n", name);
+            goto fail;
+          }
+        }
+      } else {
+        target_address = hashmap_get(&uc->exports[uc->num_files], name);
         if (target_address == NULL) {
-          outaf("undefined import symbol: %s\n", name);
-          goto fail;
+          target_address = symbol_lookup(name);
+          if (target_address == NULL) {
+            outaf("undefined import symbol: %s\n", name);
+            goto fail;
+          }
         }
       }
+
       *((uintptr_t*)fixup_address) = (uintptr_t)target_address;
-      // printf("fixed up import %p to point at %p (%s)\n", fixup_address, target_address,
-      // strings.data[string_record_index]);
     }
   }
 
@@ -505,10 +511,12 @@ bool link_dyos(void) {
           size_t idx = is_static ? num_dyos : uc->num_files;
           current_data_base = hashmap_get(&uc->global_data[idx], strings.data[name_index]);
 
+          /*
           // Don't reinitialize data from previous links.
           khiter_t it = kh_get(voidp, created_this_update, (khint64_t)current_data_base);
           if (relinking && it == kh_end(created_this_update))
             continue;
+            */
 
           if (!current_data_base) {
             outaf("init data not allocated\n");
@@ -517,6 +525,7 @@ bool link_dyos(void) {
           current_data_pointer = current_data_base;
           current_data_end = current_data_base + data_size;
         } else if (type == kTypeCodeReferenceToGlobal) {
+#if 0
           unsigned int fixup_offset = *(unsigned int*)&buf[0];
           unsigned int string_record_index = *(unsigned int*)&buf[4];
           void* fixup_address = dld->codeseg_base_address + fixup_offset;
@@ -533,26 +542,33 @@ bool link_dyos(void) {
           *((uintptr_t*)fixup_address) = (uintptr_t)target_address;
           // printf("fixed up data %p to point at %p (%s)\n", fixup_address, target_address,
           // strings.data[string_record_index]);
+#endif
         } else if (type == kTypeInitializerEnd) {
           assert(current_data_base);
           current_data_base = current_data_pointer = current_data_end = NULL;
         } else if (type == kTypeInitializerBytes) {
+          /*
           // Don't reinitialize data from previous links.
           khiter_t it = kh_get(voidp, created_this_update, (khint64_t)current_data_base);
           if (relinking && it == kh_end(created_this_update))
             continue;
+            */
 
+#if 0
           assert(current_data_base);
           if (current_data_pointer + size > current_data_end) {
             ABORT("initializer overrun bytes");
           }
           memcpy(current_data_pointer, buf, size);
+#endif
           current_data_pointer += size;
         } else if (type == kTypeInitializerDataRelocation) {
+          /*
           // Don't reinitialize data from previous links.
           khiter_t it = kh_get(voidp, created_this_update, (khint64_t)current_data_base);
           if (relinking && it == kh_end(created_this_update))
             continue;
+            */
 
           // This is the same as kTypeCodeReferenceToGlobal, except that a)
           // there's an additional addend added to the target location; and b)
@@ -587,10 +603,12 @@ bool link_dyos(void) {
           // target_address, strings.data[name_index]);
           current_data_pointer += 8;
         } else if (type == kTypeInitializerCodeRelocation) {
+          /*
           // Don't reinitialize data from previous links.
           khiter_t it = kh_get(voidp, created_this_update, (khint64_t)current_data_base);
           if (relinking && it == kh_end(created_this_update))
             continue;
+            */
 
           assert(current_data_base);
           if (current_data_pointer + 8 > current_data_end) {
@@ -624,12 +642,16 @@ bool link_dyos(void) {
     }
   }
 
+  /*
   kh_destroy(voidp, created_this_update);
+  */
   free(read_buffer);
   return true;
 
 fail:
+  /*
   kh_destroy(voidp, created_this_update);
+  */
   free(read_buffer);
   return false;
 }

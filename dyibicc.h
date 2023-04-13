@@ -637,6 +637,8 @@ typedef struct LinkFixup {
 
   // Added to the address that |name| resolves to.
   int addend;
+
+  bool is_to_data;  // Not sure if we want this, or better to combine all symbols.
 } LinkFixup;
 
 typedef struct DyoLinkData {

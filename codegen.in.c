@@ -2260,6 +2260,8 @@ static void emit_data(Obj* prog) {
     // TODO: intern
     hashmap_put(&uc->global_data[idx], strdup(var->name), global_data);
 
+    char* fillp = global_data;
+
     // .data or .tdata
     if (var->init_data) {
       Relocation* rel = var->rel;
@@ -2286,8 +2288,8 @@ static void emit_data(Obj* prog) {
           rel = rel->next;
           pos += 8;
         } else {
+          *fillp++ = var->init_data[pos++];
           bytearray_push(&bytes, var->init_data[pos], AL_Compile);
-          ++pos;
         }
       }
 
@@ -2523,7 +2525,7 @@ static void emit_text(Obj* prog) {
   }
 }
 
-void linkfixup_push(DyoLinkData* dld, char* target, char* fixup, int addend) {
+void linkfixup_push(DyoLinkData* dld, char* target, char* fixup, int addend, bool is_to_data) {
   if (!dld->fixups) {
     dld->fixups = calloc(8, sizeof(LinkFixup));
     dld->fcap = 8;
@@ -2534,7 +2536,7 @@ void linkfixup_push(DyoLinkData* dld, char* target, char* fixup, int addend) {
     dld->fcap *= 2;
   }
 
-  dld->fixups[dld->flen++] = (LinkFixup){fixup, strdup(target), addend};
+  dld->fixups[dld->flen++] = (LinkFixup){fixup, strdup(target), addend, is_to_data};
 }
 
 static void fill_out_text_exports(Obj* prog, char* codeseg_base_address) {
@@ -2572,11 +2574,11 @@ static void fill_out_imports(DyoLinkData* dld) {
     offset += 2;
 
     char* fixup = dld->codeseg_base_address + offset;
-    linkfixup_push(dld, C(import_fixups).data[i].str, fixup, /*addend=*/0);
+    linkfixup_push(dld, C(import_fixups).data[i].str, fixup, /*addend=*/0, /*is_to_data=*/false);
   }
 }
 
-static void write_data_fixups(void) {
+static void write_data_fixups(DyoLinkData* dld) {
   for (int i = 0; i < C(data_fixups).len; ++i) {
     int offset = dasm_getpclabel(&C(dynasm), C(data_fixups).data[i].i);
     // +2 is a hack taking advantage of the fact that import fixups are always
@@ -2586,7 +2588,9 @@ static void write_data_fixups(void) {
     // slapped into place.
     offset += 2;
 
-    write_dyo_code_reference_to_global(C(dyo_file), C(data_fixups).data[i].str, offset);
+    //write_dyo_code_reference_to_global(C(dyo_file), C(data_fixups).data[i].str, offset);
+    char* fixup = dld->codeseg_base_address + offset;
+    linkfixup_push(dld, C(data_fixups).data[i].str, fixup, /*addend=*/0, /*is_to_data=*/true);
   }
 }
 
@@ -2630,7 +2634,7 @@ void codegen(Obj* prog, FILE* dyo_out, size_t file_index) {
   fill_out_text_exports(prog, dld->codeseg_base_address);
   free_link_fixups(dld);
   fill_out_imports(dld);
-  write_data_fixups();
+  write_data_fixups(dld);
 
   dasm_encode(&C(dynasm), dld->codeseg_base_address);
 
