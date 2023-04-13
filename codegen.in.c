@@ -2261,6 +2261,7 @@ static void emit_data(Obj* prog) {
     hashmap_put(&uc->global_data[idx], strdup(var->name), global_data);
 
     char* fillp = global_data;
+    DyoLinkData* dld = &uc->files[C(file_index)];
 
     // .data or .tdata
     if (var->init_data) {
@@ -2283,10 +2284,12 @@ static void emit_data(Obj* prog) {
           } else {
             int offset = dasm_getpclabel(&C(dynasm), *rel->internal_code_label);
             write_dyo_initializer_code_relocation(C(dyo_file), offset, rel->addend);
+            *((uintptr_t*)fillp) = (uintptr_t)(dld->codeseg_base_address + offset + rel->addend);
           }
 
           rel = rel->next;
           pos += 8;
+          fillp += 8;
         } else {
           *fillp++ = var->init_data[pos++];
           bytearray_push(&bytes, var->init_data[pos], AL_Compile);
@@ -2617,8 +2620,6 @@ void codegen(Obj* prog, FILE* dyo_out, size_t file_index) {
   size_t code_size;
   dasm_link(&C(dynasm), &code_size);
 
-  emit_data(prog);
-
   DyoLinkData* dld = &user_context->files[C(file_index)];
   if (dld->codeseg_base_address) {
     free_executable_memory(dld->codeseg_base_address, dld->codeseg_size);
@@ -2630,6 +2631,9 @@ void codegen(Obj* prog, FILE* dyo_out, size_t file_index) {
   dld->codeseg_size = page_sized;
   dld->codeseg_base_address = allocate_writable_memory(page_sized);
   // outaf("code_size: %zu, page_sized: %zu\n", code_size, page_sized);
+
+  // This needs to point into code for fixups, so has to go late-ish.
+  emit_data(prog);
 
   fill_out_text_exports(prog, dld->codeseg_base_address);
   free_link_fixups(dld);

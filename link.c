@@ -489,7 +489,7 @@ bool link_dyos(void) {
     char* current_data_pointer = NULL;
     char* current_data_end = NULL;
 
-    DyoLinkData* dld = &uc->files[num_dyos];
+    //DyoLinkData* dld = &uc->files[num_dyos];
     for (;;) {
       unsigned int type;
       unsigned int size;
@@ -610,6 +610,7 @@ bool link_dyos(void) {
             continue;
             */
 
+#if 0
           assert(current_data_base);
           if (current_data_pointer + 8 > current_data_end) {
             ABORT("initializer overrun reloc");
@@ -617,10 +618,12 @@ bool link_dyos(void) {
           int offset = *(unsigned int*)&buf[0];
           int addend = *(int*)&buf[4];
 
+          printf("here at offset %d, addend %d\n", offset, addend);
           void* target_address = dld->codeseg_base_address + offset + addend;
           *((uintptr_t*)current_data_pointer) = (uintptr_t)target_address + addend;
           // printf("fixed up code reloc %p to point at %p\n", current_data_pointer,
           // target_address);
+#endif
           current_data_pointer += 8;
         } else if (type == kTypeX64Code) {
           ++num_dyos;
