@@ -389,13 +389,14 @@ bool link_dyos(void) {
           ++num_dyos;
           break;
         } else if (type == kTypeInitializedData) {
-          unsigned int data_size = *(unsigned int*)&buf[0];
-          unsigned int align = *(unsigned int*)&buf[4];
+          //unsigned int data_size = *(unsigned int*)&buf[0];
+          //unsigned int align = *(unsigned int*)&buf[4];
           unsigned int flags = *(unsigned int*)&buf[8];
           unsigned int name_index = *(unsigned int*)&buf[12];
           bool is_static = flags & 0x01;
-          bool is_rodata = flags & 0x02;
-          bool was_freed = false;
+          //bool is_rodata = flags & 0x02;
+          //bool was_freed = false;
+          /*
 
           // Don't recreate non-rodata if relinking. TBD what data should be
           // recreated vs. preserved, maybe some sort of annotations.
@@ -426,7 +427,11 @@ bool link_dyos(void) {
           }
           hashmap_put(&uc->global_data[idx], bumpstrdup(strings.data[name_index], AL_Manual),
                       global_data);
+                      */
 
+          // XXX
+          size_t idx = is_static ? num_dyos : uc->num_files;
+          void* global_data = hashmap_get(&uc->global_data[idx], strings.data[name_index]);
           int ret;
           kh_put(voidp, created_this_update, (khint64_t)global_data, &ret);
         }
@@ -438,12 +443,10 @@ bool link_dyos(void) {
   for (size_t i = 0; i < uc->num_files; ++i) {
     DyoLinkData* dld = &uc->files[i];
     for (int j = 0; j < dld->flen; ++j) {
-      unsigned int offset = dld->fixups[j].offset;
+      void* fixup_address = dld->fixups[j].at;
+      char* name = dld->fixups[j].name;
       int addend = dld->fixups[j].addend;
       assert(addend == 0);
-      char* name = dld->fixups[j].name;
-
-      void* fixup_address = dld->codeseg_base_address + offset;
 
       void* target_address = hashmap_get(&uc->exports[uc->num_files], name);
       if (target_address == NULL) {

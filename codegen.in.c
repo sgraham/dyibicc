@@ -2194,8 +2194,71 @@ static void emit_data(Obj* prog) {
     int align =
         (var->ty->kind == TY_ARRAY && var->ty->size >= 16) ? MAX(16, var->align) : var->align;
 
+    // - rodata, always free existing entry in either static/extern
+    // global_data, and then recreate and reinitialize
+    //
+    // - if writeable data has an entry, it shouldn't be recreated. the
+    // dyo version doesn't reprocess kTypeInitializerDataRelocation or
+    // kTypeInitializerCodeRelocation; that's possibly a bug, but it'll
+    // need some testing to get a case where it comes up.
+    //
+    // TODO: if it changes from static to extern, is it the same
+    // variable? currently they're separate, so a switch causes a
+    // reinit, a leak, and some confusion.
+    //
+    // can't easily make a large single data segment allocation for all
+    // data because 1) the rodata change size link-over-link (put in
+    // codeseg?); 2) wdata don't move or reinit, but new ones get added
+    // as code evolves and we can't blow away or move the old ones.
+    //
+    // for now, just continue with individual regular aligned_allocate
+    // for all data objects and maintain their addresses here.
+    //
+    // LinkFixup won't work as is
+    // - offset is codeseg relative. it can be made a pointer for the
+    // codeseg imports instead because it's recreated for each compile
+    // anyway
+    // - need to remap initializer_code_relocation to name, but...
+    // actually we have the real address at this point now, so if the
+    // data was allocated it can just be written directly i think rather
+    // than deferred to a relocation
+
     write_dyo_initialized_data(C(dyo_file), var->ty->size, align, var->is_static, var->is_rodata,
                                var->name);
+
+    UserContext* uc = user_context;
+    bool was_freed = false;
+    size_t idx = var->is_static ? C(file_index) : uc->num_files;
+    void* prev = hashmap_get(&user_context->global_data[idx], var->name);
+    if (prev) {
+      if (var->is_rodata) {
+        aligned_free(prev);
+        was_freed = true;
+      } else {
+        // data already created and initialized, don't reinit.
+        continue;
+      }
+    }
+
+    void* global_data = aligned_allocate(var->ty->size, align);
+    memset(global_data, 0, var->ty->size);
+
+    // TODO: Is this wrong (or above)? If writable |x| in one file
+    // already existed and |x| in another is added, then it'll be
+    // silently ignored. If it's rodata it'll be silently replaced here
+    // by getting thrown away above and then recreated.
+    // Need to figure out where/how to have a duplicate symbol check.
+#if 0
+      if (!was_freed) {
+        void* prev = hashmap_get(&uc->global_data[idx], strings.data[name_index]);
+        if (prev) {
+          outaf("duplicated symbol: %s\n", strings.data[name_index]);
+          goto fail;
+        }
+      }
+#endif
+    // TODO: intern
+    hashmap_put(&uc->global_data[idx], strdup(var->name), global_data);
 
     // .data or .tdata
     if (var->init_data) {
@@ -2460,7 +2523,7 @@ static void emit_text(Obj* prog) {
   }
 }
 
-void linkfixup_push(DyoLinkData* dld, char* target, unsigned int offset, int addend) {
+void linkfixup_push(DyoLinkData* dld, char* target, char* fixup, int addend) {
   if (!dld->fixups) {
     dld->fixups = calloc(8, sizeof(LinkFixup));
     dld->fcap = 8;
@@ -2471,7 +2534,7 @@ void linkfixup_push(DyoLinkData* dld, char* target, unsigned int offset, int add
     dld->fcap *= 2;
   }
 
-  dld->fixups[dld->flen++] = (LinkFixup){offset, addend, strdup(target)};
+  dld->fixups[dld->flen++] = (LinkFixup){fixup, strdup(target), addend};
 }
 
 static void fill_out_text_exports(Obj* prog, char* codeseg_base_address) {
@@ -2508,7 +2571,8 @@ static void fill_out_imports(DyoLinkData* dld) {
     // slapped into place.
     offset += 2;
 
-    linkfixup_push(dld, C(import_fixups).data[i].str, offset, /*addend=*/0);
+    char* fixup = dld->codeseg_base_address + offset;
+    linkfixup_push(dld, C(import_fixups).data[i].str, fixup, /*addend=*/0);
   }
 }
 

@@ -628,15 +628,15 @@ struct Scope {
 };
 
 typedef struct LinkFixup {
-  // The offset into the code segment.
-  unsigned int offset;
-
-  // Added to the target address.
-  int addend;
+  // The address to fix up.
+  void* at;
 
   // Name of the symbol at which the fixup should point.
   // TODO: Intern pool for all the import/export/global names.
   char* name;
+
+  // Added to the address that |name| resolves to.
+  int addend;
 } LinkFixup;
 
 typedef struct DyoLinkData {
