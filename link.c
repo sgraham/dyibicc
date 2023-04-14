@@ -347,7 +347,7 @@ bool link_dyos(void) {
   if (uc->num_files == 0)
     return false;
 
-  //bool relinking = uc->files[0].codeseg_base_address != 0;
+  // bool relinking = uc->files[0].codeseg_base_address != 0;
 
   FILE** dyo_files = alloca(sizeof(FILE*) * uc->num_files);
   for (size_t i = 0; i < uc->num_files; ++i) {
@@ -385,13 +385,13 @@ bool link_dyos(void) {
           ++num_dyos;
           break;
         } else if (type == kTypeInitializedData) {
-          //unsigned int data_size = *(unsigned int*)&buf[0];
-          //unsigned int align = *(unsigned int*)&buf[4];
-          //unsigned int flags = *(unsigned int*)&buf[8];
-          //unsigned int name_index = *(unsigned int*)&buf[12];
-          //bool is_static = flags & 0x01;
-          //bool is_rodata = flags & 0x02;
-          //bool was_freed = false;
+          // unsigned int data_size = *(unsigned int*)&buf[0];
+          // unsigned int align = *(unsigned int*)&buf[4];
+          // unsigned int flags = *(unsigned int*)&buf[8];
+          // unsigned int name_index = *(unsigned int*)&buf[12];
+          // bool is_static = flags & 0x01;
+          // bool is_rodata = flags & 0x02;
+          // bool was_freed = false;
           /*
 
           // Don't recreate non-rodata if relinking. TBD what data should be
@@ -440,31 +440,28 @@ bool link_dyos(void) {
       void* fixup_address = dld->fixups[j].at;
       char* name = dld->fixups[j].name;
       int addend = dld->fixups[j].addend;
-      bool is_to_data = dld->fixups[j].is_to_data;
-      assert(addend == 0);
+      // bool is_to_data = dld->fixups[j].is_to_data;
+      // assert(addend == 0);
 
-      void* target_address;
-      if (is_to_data) {
-        target_address = hashmap_get(&uc->global_data[i], name);
+      void* target_address = hashmap_get(&uc->global_data[i], name);
+      if (!target_address) {
+        target_address = hashmap_get(&uc->exports[i], name);
         if (!target_address) {
           target_address = hashmap_get(&uc->global_data[uc->num_files], name);
           if (!target_address) {
-            outaf("undefined ref to symbol: %s\n", name);
-            goto fail;
-          }
-        }
-      } else {
-        target_address = hashmap_get(&uc->exports[uc->num_files], name);
-        if (target_address == NULL) {
-          target_address = symbol_lookup(name);
-          if (target_address == NULL) {
-            outaf("undefined import symbol: %s\n", name);
-            goto fail;
+            target_address = hashmap_get(&uc->exports[uc->num_files], name);
+            if (!target_address) {
+              target_address = symbol_lookup(name);
+              if (!target_address) {
+                outaf("undefined symbol: %s\n", name);
+                goto fail;
+              }
+            }
           }
         }
       }
 
-      *((uintptr_t*)fixup_address) = (uintptr_t)target_address;
+      *((uintptr_t*)fixup_address) = (uintptr_t)target_address + addend;
     }
   }
 
@@ -489,7 +486,7 @@ bool link_dyos(void) {
     char* current_data_pointer = NULL;
     char* current_data_end = NULL;
 
-    //DyoLinkData* dld = &uc->files[num_dyos];
+    // DyoLinkData* dld = &uc->files[num_dyos];
     for (;;) {
       unsigned int type;
       unsigned int size;
@@ -578,6 +575,7 @@ bool link_dyos(void) {
           if (current_data_pointer + 8 > current_data_end) {
             ABORT("initializer overrun reloc");
           }
+#if 0
           unsigned int name_index = *(unsigned int*)&buf[0];
           int addend = *(int*)&buf[4];
 
@@ -599,6 +597,7 @@ bool link_dyos(void) {
             }
           }
           *((uintptr_t*)current_data_pointer) = (uintptr_t)target_address + addend;
+#endif
           // printf("fixed up data reloc %p to point at %p (%s)\n", current_data_pointer,
           // target_address, strings.data[name_index]);
           current_data_pointer += 8;
