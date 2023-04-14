@@ -148,6 +148,9 @@ void hashmap_clear_manual_key_owned_value_unowned(HashMap* map) {
     }
   }
   alloc_free(map->buckets, map->alloc_lifetime);
+  map->buckets = NULL;
+  map->used = 0;
+  map->capacity = 0;
 }
 
 #if 0
