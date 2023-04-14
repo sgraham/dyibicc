@@ -2236,9 +2236,6 @@ static void emit_data(Obj* prog) {
     // data was allocated it can just be written directly i think rather
     // than deferred to a relocation
 
-    write_dyo_initialized_data(C(dyo_file), var->ty->size, align, var->is_static, var->is_rodata,
-                               var->name);
-
     UserContext* uc = user_context;
     bool was_freed = false;
     size_t idx = var->is_static ? C(file_index) : uc->num_files;
@@ -2280,24 +2277,16 @@ static void emit_data(Obj* prog) {
     if (var->init_data) {
       Relocation* rel = var->rel;
       int pos = 0;
-      ByteArray bytes = {NULL, 0, 0};
       while (pos < var->ty->size) {
         if (rel && rel->offset == pos) {
-          if (bytes.len > 0) {
-            write_dyo_initializer_bytes(C(dyo_file), bytes.data, bytes.len);
-            bytes = (ByteArray){NULL, 0, 0};
-          }
-
           assert(!(rel->string_label && rel->internal_code_label));  // Shouldn't be both.
           assert(rel->string_label ||
                  rel->internal_code_label);  // But should be at least one if we're here.
 
           if (rel->string_label) {
-            write_dyo_initializer_data_relocation(C(dyo_file), *rel->string_label, rel->addend);
             linkfixup_push(dld, *rel->string_label, fillp, rel->addend);
           } else {
             int offset = dasm_getpclabel(&C(dynasm), *rel->internal_code_label);
-            write_dyo_initializer_code_relocation(C(dyo_file), offset, rel->addend);
             *((uintptr_t*)fillp) = (uintptr_t)(dld->codeseg_base_address + offset + rel->addend);
           }
 
@@ -2306,21 +2295,13 @@ static void emit_data(Obj* prog) {
           fillp += 8;
         } else {
           *fillp++ = var->init_data[pos++];
-          bytearray_push(&bytes, var->init_data[pos], AL_Compile);
         }
       }
 
-      if (bytes.len > 0) {
-        write_dyo_initializer_bytes(C(dyo_file), bytes.data, bytes.len);
-        bytes = (ByteArray){NULL, 0, 0};
-      }
-
-      write_dyo_initializer_end(C(dyo_file));
       continue;
     }
 
-    // .bss or .tbss
-    write_dyo_initializer_end(C(dyo_file));
+    // If no init_data, then already allocated and cleared (.bss).
   }
 }
 
@@ -2588,10 +2569,8 @@ void codegen_init(void) {
   C(numlabels) = 1;
 }
 
-void codegen(Obj* prog, FILE* dyo_out, size_t file_index) {
+void codegen(Obj* prog, size_t file_index) {
   C(file_index) = file_index;
-  C(dyo_file) = dyo_out;
-  write_dyo_begin(C(dyo_file));
 
   void* globals[dynasm_globals_MAX + 1];
   dasm_setupglobal(&C(dynasm), globals, dynasm_globals_MAX + 1);
@@ -2629,8 +2608,6 @@ void codegen(Obj* prog, FILE* dyo_out, size_t file_index) {
     outaf("check_result: 0x%08x\n", check_result);
     ABORT("dasm_checkstep failed");
   }
-
-  write_dyo_code(C(dyo_file));
 
   codegen_free();
 }

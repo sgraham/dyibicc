@@ -2,14 +2,11 @@
 **/\#*
 **/*.o
 **/a.out
-**/*.dyo
 /tmp*
 x.bat
 /third_party
 /test/*.exe
-/test_codebase/
 .vs/
-dyocache/
 tags
 test/x.c
 minilua

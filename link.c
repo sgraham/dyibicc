@@ -338,102 +338,12 @@ static void* symbol_lookup(char* name) {
 }
 
 bool link_dyos(void) {
-#define BUF_SIZE (16 << 20)
-  void* read_buffer = malloc(BUF_SIZE);
-  char* buf = read_buffer;
-
   UserContext* uc = user_context;
 
   if (uc->num_files == 0)
     return false;
 
-  // bool relinking = uc->files[0].codeseg_base_address != 0;
-
-  FILE** dyo_files = alloca(sizeof(FILE*) * uc->num_files);
-  for (size_t i = 0; i < uc->num_files; ++i) {
-    DyoLinkData* dld = &uc->files[i];
-    dyo_files[i] = fopen(dld->output_dyo_name, "rb");
-    if (!dyo_files[i]) {
-      error("couldn't open '%s'", dld->output_dyo_name);
-    }
-  }
-
-  int num_dyos = 0;
-  // Allocate and global data and save address/size by name.
-  for (size_t i = 0; i < uc->num_files; ++i) {
-    FILE* dyo = dyo_files[i];
-    if (!ensure_dyo_header(dyo))
-      goto fail;
-
-    int record_index = 0;
-
-    StringArray strings = {NULL, 0, 0};
-    strarray_push(&strings, NULL, AL_Link);  // 1-based
-
-    for (;;) {
-      unsigned int type;
-      unsigned int size;
-      if (!read_dyo_record(dyo, &record_index, buf, BUF_SIZE, &type, &size))
-        goto fail;
-
-      if (type == kTypeString) {
-        strarray_push(&strings, bumpstrndup(buf, size, AL_Link), AL_Link);
-      } else {
-        strarray_push(&strings, NULL, AL_Link);
-
-        if (type == kTypeX64Code) {
-          ++num_dyos;
-          break;
-        } else if (type == kTypeInitializedData) {
-          // unsigned int data_size = *(unsigned int*)&buf[0];
-          // unsigned int align = *(unsigned int*)&buf[4];
-          // unsigned int flags = *(unsigned int*)&buf[8];
-          // unsigned int name_index = *(unsigned int*)&buf[12];
-          // bool is_static = flags & 0x01;
-          // bool is_rodata = flags & 0x02;
-          // bool was_freed = false;
-          /*
-
-          // Don't recreate non-rodata if relinking. TBD what data should be
-          // recreated vs. preserved, maybe some sort of annotations.
-          if (relinking) {
-            size_t idx = is_static ? num_dyos : uc->num_files;
-            void* prev = hashmap_get(&uc->global_data[idx], strings.data[name_index]);
-            if (prev) {
-              if (is_rodata) {
-                aligned_free(prev);
-                was_freed = true;
-              } else {
-                continue;
-              }
-            }
-          }
-
-          void* global_data = aligned_allocate(data_size, align);
-          memset(global_data, 0, data_size);
-
-          // The keys need to be strdup'd to stick around for subsequent links.
-          size_t idx = is_static ? num_dyos : uc->num_files;
-          if (!was_freed) {
-            void* prev = hashmap_get(&uc->global_data[idx], strings.data[name_index]);
-            if (prev) {
-              outaf("duplicated symbol: %s\n", strings.data[name_index]);
-              goto fail;
-            }
-          }
-          hashmap_put(&uc->global_data[idx], bumpstrdup(strings.data[name_index], AL_Manual),
-                      global_data);
-
-          // XXX
-          int ret;
-          kh_put(voidp, created_this_update, (khint64_t)global_data, &ret);
-                      */
-        }
-      }
-    }
-  }
-
-  // Process link fixups, currently only function imports.
+  // Process fixups.
   for (size_t i = 0; i < uc->num_files; ++i) {
     DyoLinkData* dld = &uc->files[i];
     for (int j = 0; j < dld->flen; ++j) {
@@ -454,7 +364,7 @@ bool link_dyos(void) {
               target_address = symbol_lookup(name);
               if (!target_address) {
                 outaf("undefined symbol: %s\n", name);
-                goto fail;
+                return false;
               }
             }
           }
@@ -466,194 +376,13 @@ bool link_dyos(void) {
   }
 
   for (size_t i = 0; i < uc->num_files; ++i) {
-    FILE* dyo = dyo_files[i];
-    rewind(dyo);
-  }
-
-  // Run through data relocs and fix up the addresses.
-  num_dyos = 0;
-  for (size_t i = 0; i < uc->num_files; ++i) {
-    FILE* dyo = dyo_files[i];
-    if (!ensure_dyo_header(dyo))
-      goto fail;
-
-    int record_index = 0;
-
-    StringArray strings = {NULL, 0, 0};
-    strarray_push(&strings, NULL, AL_Link);  // 1-based
-
-    char* current_data_base = NULL;
-    char* current_data_pointer = NULL;
-    char* current_data_end = NULL;
-
-    // DyoLinkData* dld = &uc->files[num_dyos];
-    for (;;) {
-      unsigned int type;
-      unsigned int size;
-      if (!read_dyo_record(dyo, &record_index, buf, BUF_SIZE, &type, &size))
-        goto fail;
-
-      if (type == kTypeString) {
-        strarray_push(&strings, bumpstrndup(buf, size, AL_Link), AL_Link);
-      } else {
-        strarray_push(&strings, NULL, AL_Link);
-
-        if (type == kTypeInitializedData) {
-          unsigned int data_size = *(unsigned int*)&buf[0];
-          unsigned int flags = *(unsigned int*)&buf[8];
-          bool is_static = flags & 0x01;
-          // bool is_rodata = flags & 0x02;
-          unsigned int name_index = *(unsigned int*)&buf[12];
-
-          size_t idx = is_static ? num_dyos : uc->num_files;
-          current_data_base = hashmap_get(&uc->global_data[idx], strings.data[name_index]);
-
-          /*
-          // Don't reinitialize data from previous links.
-          khiter_t it = kh_get(voidp, created_this_update, (khint64_t)current_data_base);
-          if (relinking && it == kh_end(created_this_update))
-            continue;
-            */
-
-          if (!current_data_base) {
-            outaf("init data not allocated\n");
-            goto fail;
-          }
-          current_data_pointer = current_data_base;
-          current_data_end = current_data_base + data_size;
-        } else if (type == kTypeCodeReferenceToGlobal) {
-#if 0
-          unsigned int fixup_offset = *(unsigned int*)&buf[0];
-          unsigned int string_record_index = *(unsigned int*)&buf[4];
-          void* fixup_address = dld->codeseg_base_address + fixup_offset;
-          void* target_address =
-              hashmap_get(&uc->global_data[num_dyos], strings.data[string_record_index]);
-          if (!target_address) {
-            target_address =
-                hashmap_get(&uc->global_data[uc->num_files], strings.data[string_record_index]);
-            if (!target_address) {
-              outaf("undefined ref to symbol: %s\n", strings.data[string_record_index]);
-              goto fail;
-            }
-          }
-          *((uintptr_t*)fixup_address) = (uintptr_t)target_address;
-          // printf("fixed up data %p to point at %p (%s)\n", fixup_address, target_address,
-          // strings.data[string_record_index]);
-#endif
-        } else if (type == kTypeInitializerEnd) {
-          assert(current_data_base);
-          current_data_base = current_data_pointer = current_data_end = NULL;
-        } else if (type == kTypeInitializerBytes) {
-          /*
-          // Don't reinitialize data from previous links.
-          khiter_t it = kh_get(voidp, created_this_update, (khint64_t)current_data_base);
-          if (relinking && it == kh_end(created_this_update))
-            continue;
-            */
-
-#if 0
-          assert(current_data_base);
-          if (current_data_pointer + size > current_data_end) {
-            ABORT("initializer overrun bytes");
-          }
-          memcpy(current_data_pointer, buf, size);
-#endif
-          current_data_pointer += size;
-        } else if (type == kTypeInitializerDataRelocation) {
-          /*
-          // Don't reinitialize data from previous links.
-          khiter_t it = kh_get(voidp, created_this_update, (khint64_t)current_data_base);
-          if (relinking && it == kh_end(created_this_update))
-            continue;
-            */
-
-          // This is the same as kTypeCodeReferenceToGlobal, except that a)
-          // there's an additional addend added to the target location; and b)
-          // the location to fixup is implicit (the current init location)
-          // rather than specified as an offset.
-          assert(current_data_base);
-          if (current_data_pointer + 8 > current_data_end) {
-            ABORT("initializer overrun reloc");
-          }
-#if 0
-          unsigned int name_index = *(unsigned int*)&buf[0];
-          int addend = *(int*)&buf[4];
-
-          void* target_address = hashmap_get(&uc->global_data[num_dyos], strings.data[name_index]);
-          if (!target_address) {
-            target_address = hashmap_get(&uc->global_data[uc->num_files], strings.data[name_index]);
-            if (!target_address) {
-              target_address = hashmap_get(&uc->exports[num_dyos], strings.data[name_index]);
-              if (!target_address) {
-                target_address = hashmap_get(&uc->exports[uc->num_files], strings.data[name_index]);
-                if (!target_address) {
-                  target_address = symbol_lookup(strings.data[name_index]);
-                  if (!target_address) {
-                    outaf("undefined data reloc symbol: %s\n", strings.data[name_index]);
-                    goto fail;
-                  }
-                }
-              }
-            }
-          }
-          *((uintptr_t*)current_data_pointer) = (uintptr_t)target_address + addend;
-#endif
-          // printf("fixed up data reloc %p to point at %p (%s)\n", current_data_pointer,
-          // target_address, strings.data[name_index]);
-          current_data_pointer += 8;
-        } else if (type == kTypeInitializerCodeRelocation) {
-          /*
-          // Don't reinitialize data from previous links.
-          khiter_t it = kh_get(voidp, created_this_update, (khint64_t)current_data_base);
-          if (relinking && it == kh_end(created_this_update))
-            continue;
-            */
-
-#if 0
-          assert(current_data_base);
-          if (current_data_pointer + 8 > current_data_end) {
-            ABORT("initializer overrun reloc");
-          }
-          int offset = *(unsigned int*)&buf[0];
-          int addend = *(int*)&buf[4];
-
-          printf("here at offset %d, addend %d\n", offset, addend);
-          void* target_address = dld->codeseg_base_address + offset + addend;
-          *((uintptr_t*)current_data_pointer) = (uintptr_t)target_address + addend;
-          // printf("fixed up code reloc %p to point at %p\n", current_data_pointer,
-          // target_address);
-#endif
-          current_data_pointer += 8;
-        } else if (type == kTypeX64Code) {
-          ++num_dyos;
-          break;
-        }
-      }
-    }
-  }
-
-  for (size_t i = 0; i < uc->num_files; ++i) {
-    FILE* dyo = dyo_files[i];
-    fclose(dyo);
-  }
-
-  for (size_t i = 0; i < uc->num_files; ++i) {
     DyoLinkData* dld = &uc->files[i];
     if (!make_memory_executable(dld->codeseg_base_address, dld->codeseg_size)) {
-      goto fail;
+      outaf("failed to make %p size %zu executable\n", dld->codeseg_base_address,
+            dld->codeseg_size);
+      return false;
     }
   }
 
-  /*
-  kh_destroy(voidp, created_this_update);
-  */
-  free(read_buffer);
   return true;
-
-fail:
-  /*
-  kh_destroy(voidp, created_this_update);
-  */
-  free(read_buffer);
-  return false;
 }

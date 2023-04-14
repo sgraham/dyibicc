@@ -215,36 +215,14 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
     ++num_include_paths;
   }
 
-  if (!env_data->cache_dir) {
-    env_data->cache_dir = ".";
-  }
-  size_t cache_dir_len = strlen(env_data->cache_dir) + 1;
   // Don't currently need dyibicc_include_dir once sys_inc_paths are added to.
-
-  StringArray dyo_output_paths = {0};
-  size_t total_output_paths_len = 0;
 
   size_t total_source_files_len = 0;
   size_t num_files = 0;
   for (const char** p = env_data->files; *p; ++p) {
     total_source_files_len += strlen(*p) + 1;
-    char* source_name_copy = bumpstrdup(*p, AL_Temp);
-    for (char* q = source_name_copy; *q; ++q) {
-      if (!isalnum(*q) && *q != '-' && *q != '_')
-        *q = '@';
-    }
-    char* output_name = format(AL_Temp, "%s/%s.dyo", env_data->cache_dir, source_name_copy);
-    strarray_push(&dyo_output_paths, output_name, AL_Temp);
-    total_output_paths_len += strlen(output_name) + 1;
-
     ++num_files;
   }
-
-#if X64WIN
-  _mkdir(env_data->cache_dir);
-#else
-  mkdir(env_data->cache_dir, 0644);
-#endif
 
   size_t total_size =
       sizeof(UserContext) +                       // base structure
@@ -252,8 +230,6 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
       (num_files * sizeof(DyoLinkData)) +         // array in base structure
       (total_include_paths_len * sizeof(char)) +  // pointed to by include_paths
       (total_source_files_len * sizeof(char)) +   // pointed to by DyoLinkData.source_name
-      (total_output_paths_len * sizeof(char)) +   // pointed to by DyoLinkData.output_dyo_name
-      cache_dir_len +                             // another string
       ((num_files + 1) * sizeof(HashMap)) +       // +1 beyond num_files for fully global dataseg
       ((num_files + 1) * sizeof(HashMap))         // +1 beyond num_files for fully global exports
       ;
@@ -309,14 +285,6 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
     d += strlen(*p) + 1;
   }
 
-  i = 0;
-  for (int j = 0; j < dyo_output_paths.len; ++j) {
-    DyoLinkData* dld = &data->files[i++];
-    dld->output_dyo_name = d;
-    strcpy(d, dyo_output_paths.data[j]);
-    d += strlen(dyo_output_paths.data[j]) + 1;
-  }
-
   // These maps store an arbitrary number of symbols, and they must persist
   // beyond AL_Link (to be saved for relink updates) so they must be manually
   // managed.
@@ -360,16 +328,6 @@ void dyibicc_free(DyibiccContext* context) {
   }
   free(ctx);
   user_context = NULL;
-}
-
-static FILE* open_file(char* path) {
-  if (!path || strcmp(path, "-") == 0)
-    return stdout;
-
-  FILE* out = fopen(path, "wb");
-  if (!out)
-    error("cannot open output file: %s: %s", path, strerror(errno));
-  return out;
 }
 
 bool dyibicc_update(DyibiccContext* context, char* filename, char* contents) {
@@ -418,12 +376,7 @@ bool dyibicc_update(DyibiccContext* context, char* filename, char* contents) {
         codegen_init();  // Initializes dynasm so that parse() can assign labels.
 
         Obj* prog = parse(tok);
-        FILE* dyo_out = open_file(dld->output_dyo_name);
-        // TODO: need to figure out FILE vs longjmp, either will succeed or
-        // error() which will leave this open. Probably the same for
-        // preprocess().
-        codegen(prog, dyo_out, i);
-        fclose(dyo_out);
+        codegen(prog, i);
 
         compiled_any = true;
 

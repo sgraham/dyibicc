@@ -507,7 +507,7 @@ typedef struct CompileOutputs {
 } CompileOutputs;
 
 void codegen_init(void);
-void codegen(Obj* prog, FILE* dyo_out, size_t file_index);
+void codegen(Obj* prog, size_t file_index);
 void codegen_free(void);
 int codegen_pclabel(void);
 #if X64WIN
