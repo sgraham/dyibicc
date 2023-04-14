@@ -552,59 +552,6 @@ void hashmap_test(void);
 void hashmap_clear_manual_key_owned_value_unowned(HashMap* map);
 
 //
-// dyo.c
-//
-
-typedef enum DyoRecordType {
-  kTypeString = 0x01000000,
-  kTypeImport = 0x02000000,
-  kTypeFunctionExport = 0x03000000,
-  kTypeCodeReferenceToGlobal = 0x04000000,
-  kTypeInitializedData = 0x05000000,
-  kTypeInitializerEnd = 0x06000000,
-  kTypeInitializerBytes = 0x07000000,
-  kTypeInitializerDataRelocation = 0x08000000,
-  kTypeInitializerCodeRelocation = 0x09000000,
-  kTypeX64Code = 0x64000000,
-  kTypeEntryPoint = 0x65000000,
-} DyoRecordType;
-
-// Writing.
-bool write_dyo_begin(FILE* f);
-bool write_dyo_import(FILE* f, char* name, unsigned int loc);
-bool write_dyo_function_export(FILE* f, char* name, bool is_static, unsigned int loc);
-bool write_dyo_code_reference_to_global(FILE* f, char* name, unsigned int offset);
-bool write_dyo_initialized_data(FILE* f,
-                                int size,
-                                int align,
-                                bool is_static,
-                                bool is_rodata,
-                                char* name);
-bool write_dyo_initializer_end(FILE* f);
-bool write_dyo_initializer_bytes(FILE* f, char* data, int len);
-bool write_dyo_initializer_data_relocation(FILE* f, char* data, int addend);
-bool write_dyo_initializer_code_relocation(FILE* f, int offset, int addend);
-bool write_dyo_code(FILE* f);
-bool write_dyo_entrypoint(FILE* f, unsigned int loc);
-
-// Reading.
-bool ensure_dyo_header(FILE* f);
-bool read_dyo_record(FILE* f,
-                     int* record_index,
-                     char* buf,
-                     unsigned int buf_size,
-                     unsigned int* type,
-                     unsigned int* size);
-bool dump_dyo_file(FILE* f);
-
-//
-// sintern.c
-typedef unsigned int IStr;
-IStr strintern(const char* str);
-const char* istrptr(IStr str);
-void free_intern_pool(void);  // Invalidates all IStrs.
-
-//
 // link.c
 //
 bool link_dyos(void);

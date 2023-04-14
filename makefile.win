@@ -15,7 +15,7 @@ LDFLAGS=gdi32.lib user32.lib onecore.lib
 
 OBJS=$(SRCS:.c=.obj)
 
-all: dyibicc.exe dumpdyo.exe
+all: dyibicc.exe
 
 dyibicc.exe: $(OBJS)
 	$(CC) $(CFLAGS) $** /link /out:$@ $(LDFLAGS)
@@ -24,9 +24,6 @@ $(OBJS): dyibicc.h libdyibicc.h
 
 minilua.exe: dynasm/minilua.c
 	$(CC) $(CFLAGS) /wd4132 /wd4324 $** /link /out:$@
-
-dumpdyo.exe: dumpdyo.obj dyo.obj hashmap.obj alloc.obj util.obj unicode.obj
-	$(CC) $(CFLAGS) $** /link /out:$@
 
 .c.obj:
 	$(CC) $(CFLAGS) /c $*.c
@@ -47,11 +44,9 @@ prof: dyibicc.exe .phony
 
 clean:
 	del /f /q dyibicc.exe 2>nul
-	del /f /q dumpdyo.exe 2>nul
 	del /f /q minilua.exe 2>nul
 	del /f /q codegen.win32.c 2>nul
 	del /f /q *.obj 2>nul
-	del /f /q *.dyo 2>nul
 	del /f /q *.ilk 2>nul
 	del /f /q *.pdb 2>nul
 	del /f /q *.exp 2>nul

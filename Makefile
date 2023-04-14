@@ -11,9 +11,6 @@ OBJS=$(SRCS:.c=.o)
 dyibicc: $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ -ldl $(LDFLAGS)
 
-dumpdyo: dumpdyo.o dyo.o hashmap.o alloc.o
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
-
 $(OBJS): dyibicc.h libdyibicc.h
 
 minilua: dynasm/minilua.c
@@ -28,7 +25,7 @@ test: testrun.lua minilua dyibicc
 # Misc.
 
 clean:
-	rm -rf dyibicc dumpdyo codegen.linux.c test/*.s test/*.exe minilua minilua.exe *.dyo
+	rm -rf dyibicc codegen.linux.c test/*.s test/*.exe minilua minilua.exe
 	find * -type f '(' -name '*~' -o -name '*.o' ')' -exec rm {} ';'
 	clang-format -i *.c *.h
 
