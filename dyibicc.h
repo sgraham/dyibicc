@@ -718,8 +718,7 @@ typedef struct CompilerState {
   dasm_State* codegen__dynasm;
   Obj* codegen__current_fn;
   int codegen__numlabels;
-  StringIntArray codegen__import_fixups;
-  StringIntArray codegen__data_fixups;
+  StringIntArray codegen__fixups;
   IntIntArray codegen__pending_code_pclabels;
 
   // main.c

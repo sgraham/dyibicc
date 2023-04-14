@@ -216,8 +216,7 @@ static void gen_addr(Node* node) {
           ///| lea rax, [=>node->var->dasm_entry_label]
         } else {
           int fixup_location = codegen_pclabel();
-          strintarray_push(&C(import_fixups), (StringInt){node->var->name, fixup_location},
-                           AL_Compile);
+          strintarray_push(&C(fixups), (StringInt){node->var->name, fixup_location}, AL_Compile);
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4310)  // dynasm casts the top and bottom of the 64bit arg
@@ -233,7 +232,7 @@ static void gen_addr(Node* node) {
 
       // Global variable
       int fixup_location = codegen_pclabel();
-      strintarray_push(&C(data_fixups), (StringInt){node->var->name, fixup_location}, AL_Compile);
+      strintarray_push(&C(fixups), (StringInt){node->var->name, fixup_location}, AL_Compile);
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4310)  // dynasm casts the top and bottom of the 64bit arg
@@ -2395,7 +2394,7 @@ static void emit_text(Obj* prog) {
     if (fn->stack_size >= 4096) {
       ///| mov rax, fn->stack_size
       int fixup_location = codegen_pclabel();
-      strintarray_push(&C(import_fixups), (StringInt){"__chkstk", fixup_location}, AL_Compile);
+      strintarray_push(&C(fixups), (StringInt){"__chkstk", fixup_location}, AL_Compile);
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4310)  // dynasm casts the top and bottom of the 64bit arg
@@ -2567,9 +2566,9 @@ void free_link_fixups(DyoLinkData* dld) {
   dld->fcap = 0;
 }
 
-static void fill_out_imports(DyoLinkData* dld) {
-  for (int i = 0; i < C(import_fixups).len; ++i) {
-    int offset = dasm_getpclabel(&C(dynasm), C(import_fixups).data[i].i);
+static void fill_out_fixups(DyoLinkData* dld) {
+  for (int i = 0; i < C(fixups).len; ++i) {
+    int offset = dasm_getpclabel(&C(dynasm), C(fixups).data[i].i);
     // +2 is a hack taking advantage of the fact that import fixups are always
     // of the form `mov64 rax, <ADDR>` which is encoded as:
     //   48 B8 <8 byte address>
@@ -2578,23 +2577,7 @@ static void fill_out_imports(DyoLinkData* dld) {
     offset += 2;
 
     char* fixup = dld->codeseg_base_address + offset;
-    linkfixup_push(dld, C(import_fixups).data[i].str, fixup, /*addend=*/0);
-  }
-}
-
-static void fill_out_data_fixups(DyoLinkData* dld) {
-  for (int i = 0; i < C(data_fixups).len; ++i) {
-    int offset = dasm_getpclabel(&C(dynasm), C(data_fixups).data[i].i);
-    // +2 is a hack taking advantage of the fact that import fixups are always
-    // of the form `mov64 rax, <ADDR>` which is encoded as:
-    //   48 B8 <8 byte address>
-    // so skip over the mov64 prefix and point directly at the address to be
-    // slapped into place.
-    offset += 2;
-
-    // write_dyo_code_reference_to_global(C(dyo_file), C(data_fixups).data[i].str, offset);
-    char* fixup = dld->codeseg_base_address + offset;
-    linkfixup_push(dld, C(data_fixups).data[i].str, fixup, /*addend=*/0);
+    linkfixup_push(dld, C(fixups).data[i].str, fixup, /*addend=*/0);
   }
 }
 
@@ -2637,8 +2620,7 @@ void codegen(Obj* prog, FILE* dyo_out, size_t file_index) {
 
   free_link_fixups(dld);
   emit_data(prog);  // This needs to point into code for fixups, so has to go late-ish.
-  fill_out_imports(dld);
-  fill_out_data_fixups(dld);
+  fill_out_fixups(dld);
 
   dasm_encode(&C(dynasm), dld->codeseg_base_address);
 
