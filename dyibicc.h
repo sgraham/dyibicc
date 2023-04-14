@@ -586,7 +586,7 @@ typedef struct LinkFixup {
   int addend;
 } LinkFixup;
 
-typedef struct DyoLinkData {
+typedef struct FileLinkData {
   char* source_name;
   char* codeseg_base_address;  // Just the address, not a string.
   size_t codeseg_size;
@@ -594,9 +594,9 @@ typedef struct DyoLinkData {
   LinkFixup* fixups;
   int flen;
   int fcap;
-} DyoLinkData;
+} FileLinkData;
 
-void free_link_fixups(DyoLinkData* dld);
+void free_link_fixups(FileLinkData* fld);
 
 typedef struct UserContext {
   DyibiccFunctionLookupFn get_function_address;
@@ -607,10 +607,10 @@ typedef struct UserContext {
   char** include_paths;
 
   size_t num_files;
-  DyoLinkData* files;
+  FileLinkData* files;
 
   // This is an array of num_files+1; 0..num_files-1 correspond to static
-  // globals in the files in DyoLinkData, and global_data[num_files] is the
+  // globals in the files in FileLinkData, and global_data[num_files] is the
   // fully global (exported) symbols. These HashMaps are also special because
   // they're lifetime == AL_Manual.
   HashMap* global_data;

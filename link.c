@@ -345,13 +345,11 @@ bool link_all_files(void) {
 
   // Process fixups.
   for (size_t i = 0; i < uc->num_files; ++i) {
-    DyoLinkData* dld = &uc->files[i];
-    for (int j = 0; j < dld->flen; ++j) {
-      void* fixup_address = dld->fixups[j].at;
-      char* name = dld->fixups[j].name;
-      int addend = dld->fixups[j].addend;
-      // bool is_to_data = dld->fixups[j].is_to_data;
-      // assert(addend == 0);
+    FileLinkData* fld = &uc->files[i];
+    for (int j = 0; j < fld->flen; ++j) {
+      void* fixup_address = fld->fixups[j].at;
+      char* name = fld->fixups[j].name;
+      int addend = fld->fixups[j].addend;
 
       void* target_address = hashmap_get(&uc->global_data[i], name);
       if (!target_address) {
@@ -376,10 +374,10 @@ bool link_all_files(void) {
   }
 
   for (size_t i = 0; i < uc->num_files; ++i) {
-    DyoLinkData* dld = &uc->files[i];
-    if (!make_memory_executable(dld->codeseg_base_address, dld->codeseg_size)) {
-      outaf("failed to make %p size %zu executable\n", dld->codeseg_base_address,
-            dld->codeseg_size);
+    FileLinkData* fld = &uc->files[i];
+    if (!make_memory_executable(fld->codeseg_base_address, fld->codeseg_size)) {
+      outaf("failed to make %p size %zu executable\n", fld->codeseg_base_address,
+            fld->codeseg_size);
       return false;
     }
   }

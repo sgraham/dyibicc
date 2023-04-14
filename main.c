@@ -227,9 +227,9 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
   size_t total_size =
       sizeof(UserContext) +                       // base structure
       (num_include_paths * sizeof(char*)) +       // array in base structure
-      (num_files * sizeof(DyoLinkData)) +         // array in base structure
+      (num_files * sizeof(FileLinkData)) +         // array in base structure
       (total_include_paths_len * sizeof(char)) +  // pointed to by include_paths
-      (total_source_files_len * sizeof(char)) +   // pointed to by DyoLinkData.source_name
+      (total_source_files_len * sizeof(char)) +   // pointed to by FileLinkData.source_name
       ((num_files + 1) * sizeof(HashMap)) +       // +1 beyond num_files for fully global dataseg
       ((num_files + 1) * sizeof(HashMap))         // +1 beyond num_files for fully global exports
       ;
@@ -250,8 +250,8 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
   d += sizeof(char*) * num_include_paths;
 
   data->num_files = num_files;
-  data->files = (DyoLinkData*)d;
-  d += sizeof(DyoLinkData) * num_files;
+  data->files = (FileLinkData*)d;
+  d += sizeof(FileLinkData) * num_files;
 
   data->global_data = (HashMap*)d;
   d += sizeof(HashMap) * (num_files + 1);
@@ -273,7 +273,7 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
 
   i = 0;
   for (const char** p = env_data->files; *p; ++p) {
-    DyoLinkData* dld = &data->files[i++];
+    FileLinkData* dld = &data->files[i++];
     dld->source_name = d;
     strcpy(dld->source_name, *p);
     d += strlen(*p) + 1;
@@ -347,7 +347,7 @@ bool dyibicc_update(DyibiccContext* context, char* filename, char* contents) {
   bool compiled_any = false;
   {
     for (size_t i = 0; i < ctx->num_files; ++i) {
-      DyoLinkData* dld = &ctx->files[i];
+      FileLinkData* dld = &ctx->files[i];
 
       if (filename && strcmp(dld->source_name, filename) != 0) {
         // If a specific update is provided, we only compile that one.
