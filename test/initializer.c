@@ -38,6 +38,8 @@ union { int a; } g51[2] = {};
 const char str_braced[] = {"foo"};
 
 static void some_static_func() {}
+void non_static_func() {}
+int false_fn();
 
 typedef char T60[];
 T60 g60 = {1, 2, 3};
@@ -292,9 +294,12 @@ int main() {
   ASSERT(4, sizeof(str_braced));
 
   static void* funcpointers[] = {
-    some_static_func,
+      some_static_func,  // This TU
+      non_static_func,   // This TU, non-static
+      false_fn,          // A different TU
+      printf,            // Embedder lookup
   };
-  ASSERT(8, sizeof(funcpointers));
+  ASSERT(32, sizeof(funcpointers));
 
   printf("OK\n");
   return 0;

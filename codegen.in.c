@@ -216,8 +216,7 @@ static void gen_addr(Node* node) {
           ///| lea rax, [=>node->var->dasm_entry_label]
         } else {
           int fixup_location = codegen_pclabel();
-          strintarray_push(&C(import_fixups), (StringInt){node->var->name, fixup_location},
-                           AL_Compile);
+          strintarray_push(&C(fixups), (StringInt){node->var->name, fixup_location}, AL_Compile);
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4310)  // dynasm casts the top and bottom of the 64bit arg
@@ -233,7 +232,7 @@ static void gen_addr(Node* node) {
 
       // Global variable
       int fixup_location = codegen_pclabel();
-      strintarray_push(&C(data_fixups), (StringInt){node->var->name, fixup_location}, AL_Compile);
+      strintarray_push(&C(fixups), (StringInt){node->var->name, fixup_location}, AL_Compile);
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4310)  // dynasm casts the top and bottom of the 64bit arg
@@ -2180,6 +2179,20 @@ static void assign_lvar_offsets(Obj* prog) {
 
 #endif  // SysV
 
+void linkfixup_push(FileLinkData* fld, char* target, char* fixup, int addend) {
+  if (!fld->fixups) {
+    fld->fixups = calloc(8, sizeof(LinkFixup));
+    fld->fcap = 8;
+  }
+
+  if (fld->fcap == fld->flen) {
+    fld->fixups = realloc(fld->fixups, sizeof(LinkFixup) * fld->fcap * 2);
+    fld->fcap *= 2;
+  }
+
+  fld->fixups[fld->flen++] = (LinkFixup){fixup, strdup(target), addend};
+}
+
 static void emit_data(Obj* prog) {
   for (Obj* var = prog; var; var = var->next) {
     // outaf("var->name %s %d %d %d %d\n", var->name, var->is_function, var->is_definition,
@@ -2194,53 +2207,101 @@ static void emit_data(Obj* prog) {
     int align =
         (var->ty->kind == TY_ARRAY && var->ty->size >= 16) ? MAX(16, var->align) : var->align;
 
-    write_dyo_initialized_data(C(dyo_file), var->ty->size, align, var->is_static, var->is_rodata,
-                               var->name);
+    // - rodata, always free existing entry in either static/extern
+    // global_data, and then recreate and reinitialize
+    //
+    // - if writeable data has an entry, it shouldn't be recreated. the
+    // dyo version doesn't reprocess kTypeInitializerDataRelocation or
+    // kTypeInitializerCodeRelocation; that's possibly a bug, but it'll
+    // need some testing to get a case where it comes up.
+    //
+    // TODO: if it changes from static to extern, is it the same
+    // variable? currently they're separate, so a switch causes a
+    // reinit, a leak, and some confusion.
+    //
+    // can't easily make a large single data segment allocation for all
+    // data because 1) the rodata change size link-over-link (put in
+    // codeseg?); 2) wdata don't move or reinit, but new ones get added
+    // as code evolves and we can't blow away or move the old ones.
+    //
+    // for now, just continue with individual regular aligned_allocate
+    // for all data objects and maintain their addresses here.
+    //
+    // LinkFixup won't work as is
+    // - offset is codeseg relative. it can be made a pointer for the
+    // codeseg imports instead because it's recreated for each compile
+    // anyway
+    // - need to remap initializer_code_relocation to name, but...
+    // actually we have the real address at this point now, so if the
+    // data was allocated it can just be written directly i think rather
+    // than deferred to a relocation
+
+    UserContext* uc = user_context;
+    bool was_freed = false;
+    size_t idx = var->is_static ? C(file_index) : uc->num_files;
+    void* prev = hashmap_get(&user_context->global_data[idx], var->name);
+    if (prev) {
+      if (var->is_rodata) {
+        aligned_free(prev);
+        was_freed = true;
+      } else {
+        // data already created and initialized, don't reinit.
+        continue;
+      }
+    }
+
+    void* global_data = aligned_allocate(var->ty->size, align);
+    memset(global_data, 0, var->ty->size);
+
+    // TODO: Is this wrong (or above)? If writable |x| in one file
+    // already existed and |x| in another is added, then it'll be
+    // silently ignored. If it's rodata it'll be silently replaced here
+    // by getting thrown away above and then recreated.
+    // Need to figure out where/how to have a duplicate symbol check.
+#if 0
+      if (!was_freed) {
+        void* prev = hashmap_get(&uc->global_data[idx], strings.data[name_index]);
+        if (prev) {
+          outaf("duplicated symbol: %s\n", strings.data[name_index]);
+          goto fail;
+        }
+      }
+#endif
+    // TODO: intern
+    hashmap_put(&uc->global_data[idx], strdup(var->name), global_data);
+
+    char* fillp = global_data;
+    FileLinkData* fld = &uc->files[C(file_index)];
 
     // .data or .tdata
     if (var->init_data) {
       Relocation* rel = var->rel;
       int pos = 0;
-      ByteArray bytes = {NULL, 0, 0};
       while (pos < var->ty->size) {
         if (rel && rel->offset == pos) {
-          if (bytes.len > 0) {
-            write_dyo_initializer_bytes(C(dyo_file), bytes.data, bytes.len);
-            bytes = (ByteArray){NULL, 0, 0};
-          }
-
           assert(!(rel->string_label && rel->internal_code_label));  // Shouldn't be both.
           assert(rel->string_label ||
                  rel->internal_code_label);  // But should be at least one if we're here.
 
           if (rel->string_label) {
-            write_dyo_initializer_data_relocation(C(dyo_file), *rel->string_label, rel->addend);
+            linkfixup_push(fld, *rel->string_label, fillp, rel->addend);
           } else {
-            int file_loc;
-            write_dyo_initializer_code_relocation(C(dyo_file), -1, rel->addend, &file_loc);
-            intintarray_push(&C(pending_code_pclabels),
-                             (IntInt){file_loc, *rel->internal_code_label}, AL_Compile);
+            int offset = dasm_getpclabel(&C(dynasm), *rel->internal_code_label);
+            *((uintptr_t*)fillp) = (uintptr_t)(fld->codeseg_base_address + offset + rel->addend);
           }
 
           rel = rel->next;
           pos += 8;
+          fillp += 8;
         } else {
-          bytearray_push(&bytes, var->init_data[pos], AL_Compile);
-          ++pos;
+          *fillp++ = var->init_data[pos++];
         }
       }
 
-      if (bytes.len > 0) {
-        write_dyo_initializer_bytes(C(dyo_file), bytes.data, bytes.len);
-        bytes = (ByteArray){NULL, 0, 0};
-      }
-
-      write_dyo_initializer_end(C(dyo_file));
       continue;
     }
 
-    // .bss or .tbss
-    write_dyo_initializer_end(C(dyo_file));
+    // If no init_data, then already allocated and cleared (.bss).
   }
 }
 
@@ -2314,7 +2375,7 @@ static void emit_text(Obj* prog) {
     if (fn->stack_size >= 4096) {
       ///| mov rax, fn->stack_size
       int fixup_location = codegen_pclabel();
-      strintarray_push(&C(import_fixups), (StringInt){"__chkstk", fixup_location}, AL_Compile);
+      strintarray_push(&C(fixups), (StringInt){"__chkstk", fixup_location}, AL_Compile);
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4310)  // dynasm casts the top and bottom of the 64bit arg
@@ -2452,11 +2513,6 @@ static void emit_text(Obj* prog) {
     // behavior is undefined for the other functions.
     if (strcmp(fn->name, "main") == 0) {
       ///| mov rax, 0
-      C(dasm_label_main_entry) = fn->dasm_entry_label;
-    }
-
-    if (user_context->entry_point_name && strcmp(fn->name, user_context->entry_point_name) == 0) {
-      C(dasm_label_main_entry) = fn->dasm_entry_label;
     }
 
     // Epilogue
@@ -2467,19 +2523,33 @@ static void emit_text(Obj* prog) {
   }
 }
 
-static void write_text_exports(Obj* prog) {
+static void fill_out_text_exports(Obj* prog, char* codeseg_base_address) {
+  // per-file from any previous need to be cleared out for this round.
+  hashmap_clear_manual_key_owned_value_unowned(&user_context->exports[C(file_index)]);
+
   for (Obj* fn = prog; fn; fn = fn->next) {
     if (!fn->is_function || !fn->is_definition || !fn->is_live)
       continue;
 
-    write_dyo_function_export(C(dyo_file), fn->name, fn->is_static,
-                              dasm_getpclabel(&C(dynasm), fn->dasm_entry_label));
+    int offset = dasm_getpclabel(&C(dynasm), fn->dasm_entry_label);
+    size_t idx = fn->is_static ? C(file_index) : user_context->num_files;
+    hashmap_put(&user_context->exports[idx], strdup(fn->name), codeseg_base_address + offset);
   }
 }
 
-static void write_imports(void) {
-  for (int i = 0; i < C(import_fixups).len; ++i) {
-    int offset = dasm_getpclabel(&C(dynasm), C(import_fixups).data[i].i);
+void free_link_fixups(FileLinkData* fld) {
+  for (int i = 0; i < fld->flen; ++i) {
+    free(fld->fixups[i].name);
+  }
+  free(fld->fixups);
+  fld->fixups = NULL;
+  fld->flen = 0;
+  fld->fcap = 0;
+}
+
+static void fill_out_fixups(FileLinkData* fld) {
+  for (int i = 0; i < C(fixups).len; ++i) {
+    int offset = dasm_getpclabel(&C(dynasm), C(fixups).data[i].i);
     // +2 is a hack taking advantage of the fact that import fixups are always
     // of the form `mov64 rax, <ADDR>` which is encoded as:
     //   48 B8 <8 byte address>
@@ -2487,31 +2557,8 @@ static void write_imports(void) {
     // slapped into place.
     offset += 2;
 
-    write_dyo_import(C(dyo_file), C(import_fixups).data[i].str, offset);
-  }
-}
-
-static void write_data_fixups(void) {
-  for (int i = 0; i < C(data_fixups).len; ++i) {
-    int offset = dasm_getpclabel(&C(dynasm), C(data_fixups).data[i].i);
-    // +2 is a hack taking advantage of the fact that import fixups are always
-    // of the form `mov64 rax, <ADDR>` which is encoded as:
-    //   48 B8 <8 byte address>
-    // so skip over the mov64 prefix and point directly at the address to be
-    // slapped into place.
-    offset += 2;
-
-    write_dyo_code_reference_to_global(C(dyo_file), C(data_fixups).data[i].str, offset);
-  }
-}
-
-static void update_pending_code_relocations(void) {
-  for (int i = 0; i < C(pending_code_pclabels).len; ++i) {
-    int file_loc = C(pending_code_pclabels).data[i].a;
-    int pclabel = C(pending_code_pclabels).data[i].b;
-    int offset = dasm_getpclabel(&C(dynasm), pclabel);
-    // outaf("update at %d, label %d, offset %d\n", file_loc, pclabel, offset);
-    patch_dyo_initializer_code_relocation(C(dyo_file), file_loc, offset);
+    char* fixup = fld->codeseg_base_address + offset;
+    linkfixup_push(fld, C(fixups).data[i].str, fixup, /*addend=*/0);
   }
 }
 
@@ -2520,12 +2567,10 @@ void codegen_init(void) {
   dasm_growpc(&C(dynasm), 1 << 16);  // Arbitrary number to avoid lots of reallocs of that array.
 
   C(numlabels) = 1;
-  C(dasm_label_main_entry) = -1;
 }
 
-void codegen(Obj* prog, FILE* dyo_out) {
-  C(dyo_file) = dyo_out;
-  write_dyo_begin(C(dyo_file));
+void codegen(Obj* prog, size_t file_index) {
+  C(file_index) = file_index;
 
   void* globals[dynasm_globals_MAX + 1];
   dasm_setupglobal(&C(dynasm), globals, dynasm_globals_MAX + 1);
@@ -2533,20 +2578,30 @@ void codegen(Obj* prog, FILE* dyo_out) {
   dasm_setup(&C(dynasm), dynasm_actions);
 
   assign_lvar_offsets(prog);
-  emit_data(prog);
   emit_text(prog);
 
   size_t code_size;
   dasm_link(&C(dynasm), &code_size);
 
-  write_text_exports(prog);
-  write_imports();
-  write_data_fixups();
-  update_pending_code_relocations();
+  FileLinkData* fld = &user_context->files[C(file_index)];
+  if (fld->codeseg_base_address) {
+    free_executable_memory(fld->codeseg_base_address, fld->codeseg_size);
+  }
+  // VirtualAlloc and mmap don't accept 0.
+  if (code_size == 0)
+    code_size = 1;
+  unsigned int page_sized = (unsigned int)align_to_u(code_size, get_page_size());
+  fld->codeseg_size = page_sized;
+  fld->codeseg_base_address = allocate_writable_memory(page_sized);
+  // outaf("code_size: %zu, page_sized: %zu\n", code_size, page_sized);
 
-  C(code_buf) = malloc(code_size);
+  fill_out_text_exports(prog, fld->codeseg_base_address);
 
-  dasm_encode(&C(dynasm), C(code_buf));
+  free_link_fixups(fld);
+  emit_data(prog);  // This needs to point into code for fixups, so has to go late-ish.
+  fill_out_fixups(fld);
+
+  dasm_encode(&C(dynasm), fld->codeseg_base_address);
 
   int check_result = dasm_checkstep(&C(dynasm), DASM_SECTION_MAIN);
   if (check_result != DASM_S_OK) {
@@ -2554,21 +2609,11 @@ void codegen(Obj* prog, FILE* dyo_out) {
     ABORT("dasm_checkstep failed");
   }
 
-  if (C(dasm_label_main_entry) >= 0) {
-    int offset = dasm_getpclabel(&C(dynasm), C(dasm_label_main_entry));
-    write_dyo_entrypoint(C(dyo_file), offset);
-  }
-
-  write_dyo_code(C(dyo_file), C(code_buf), code_size);
-
   codegen_free();
 }
 
 // This can be called after a longjmp in update.
 void codegen_free(void) {
-  if (C(code_buf)) {
-    free(C(code_buf));
-  }
   if (C(dynasm)) {
     dasm_free(&C(dynasm));
   }

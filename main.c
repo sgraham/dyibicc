@@ -215,54 +215,27 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
     ++num_include_paths;
   }
 
-  size_t entry_point_name_len =
-      env_data->entry_point_name ? strlen(env_data->entry_point_name) + 1 : 0;
-
-  if (!env_data->cache_dir) {
-    env_data->cache_dir = ".";
-  }
-  size_t cache_dir_len = strlen(env_data->cache_dir) + 1;
   // Don't currently need dyibicc_include_dir once sys_inc_paths are added to.
-
-  StringArray dyo_output_paths = {0};
-  size_t total_output_paths_len = 0;
 
   size_t total_source_files_len = 0;
   size_t num_files = 0;
   for (const char** p = env_data->files; *p; ++p) {
     total_source_files_len += strlen(*p) + 1;
-    char* source_name_copy = bumpstrdup(*p, AL_Temp);
-    for (char* q = source_name_copy; *q; ++q) {
-      if (!isalnum(*q) && *q != '-' && *q != '_')
-        *q = '@';
-    }
-    char* output_name = format(AL_Temp, "%s/%s.dyo", env_data->cache_dir, source_name_copy);
-    strarray_push(&dyo_output_paths, output_name, AL_Temp);
-    total_output_paths_len += strlen(output_name) + 1;
-
     ++num_files;
   }
-
-#if X64WIN
-  _mkdir(env_data->cache_dir);
-#else
-  mkdir(env_data->cache_dir, 0644);
-#endif
 
   size_t total_size =
       sizeof(UserContext) +                       // base structure
       (num_include_paths * sizeof(char*)) +       // array in base structure
-      (num_files * sizeof(DyoLinkData)) +         // array in base structure
+      (num_files * sizeof(FileLinkData)) +        // array in base structure
       (total_include_paths_len * sizeof(char)) +  // pointed to by include_paths
-      (total_source_files_len * sizeof(char)) +   // pointed to by DyoLinkData.source_name
-      (total_output_paths_len * sizeof(char)) +   // pointed to by DyoLinkData.output_dyo_name
-      entry_point_name_len +                      // two other strings
-      cache_dir_len +                             //
-      ((num_files + 1) * sizeof(HashMap));        // +1 beyond num_files for fully global dataseg
+      (total_source_files_len * sizeof(char)) +   // pointed to by FileLinkData.source_name
+      ((num_files + 1) * sizeof(HashMap)) +       // +1 beyond num_files for fully global dataseg
+      ((num_files + 1) * sizeof(HashMap))         // +1 beyond num_files for fully global exports
+      ;
 
   UserContext* data = calloc(1, total_size);
 
-  data->entry_point = NULL;
   data->get_function_address = env_data->get_function_address;
   data->output_function = env_data->output_function;
   if (!data->output_function) {
@@ -277,23 +250,14 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
   d += sizeof(char*) * num_include_paths;
 
   data->num_files = num_files;
-  data->files = (DyoLinkData*)d;
-  d += sizeof(DyoLinkData) * num_files;
+  data->files = (FileLinkData*)d;
+  d += sizeof(FileLinkData) * num_files;
 
   data->global_data = (HashMap*)d;
   d += sizeof(HashMap) * (num_files + 1);
 
-  if (env_data->entry_point_name) {
-    data->entry_point_name = d;
-    strcpy(d, env_data->entry_point_name);
-    d += strlen(env_data->entry_point_name) + 1;
-  }
-
-  if (env_data->cache_dir) {
-    data->cache_dir = d;
-    strcpy(d, env_data->cache_dir);
-    d += strlen(env_data->cache_dir) + 1;
-  }
+  data->exports = (HashMap*)d;
+  d += sizeof(HashMap) * (num_files + 1);
 
   int i = 0;
   for (const char** p = env_data->include_paths; *p; ++p) {
@@ -309,28 +273,23 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
 
   i = 0;
   for (const char** p = env_data->files; *p; ++p) {
-    DyoLinkData* dld = &data->files[i++];
+    FileLinkData* dld = &data->files[i++];
     dld->source_name = d;
     strcpy(dld->source_name, *p);
     d += strlen(*p) + 1;
   }
 
-  i = 0;
-  for (int j = 0; j < dyo_output_paths.len; ++j) {
-    DyoLinkData* dld = &data->files[i++];
-    dld->output_dyo_name = d;
-    strcpy(d, dyo_output_paths.data[j]);
-    d += strlen(dyo_output_paths.data[j]) + 1;
-  }
-
+  // These maps store an arbitrary number of symbols, and they must persist
+  // beyond AL_Link (to be saved for relink updates) so they must be manually
+  // managed.
   for (size_t j = 0; j < num_files + 1; ++j) {
-    // These maps store an arbitrary number of symbols, and they must persist
-    // beyond AL_Link (to be saved for relink updates) so they must be manually
-    // managed.
     data->global_data[j].alloc_lifetime = AL_Manual;
+    data->exports[j].alloc_lifetime = AL_Manual;
   }
 
-  assert((size_t)(d - (char*)data) == total_size);
+  if ((size_t)(d - (char*)data) != total_size) {
+    ABORT("incorrect size calculation");
+  }
 
   alloc_reset(AL_Temp);
 
@@ -341,7 +300,7 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
 #define TOMBSTONE ((void*)-1)
 // These maps have keys strdup'd with AL_Manual, and values that are the data
 // segment allocations allocated by aligned_allocate.
-static void hashmap_custom_free(HashMap* map) {
+static void hashmap_custom_free_dataseg(HashMap* map) {
   assert(map->alloc_lifetime == AL_Manual);
   for (int i = 0; i < map->capacity; i++) {
     HashEntry* ent = &map->buckets[i];
@@ -357,22 +316,14 @@ void dyibicc_free(DyibiccContext* context) {
   UserContext* ctx = (UserContext*)context;
   assert(ctx == user_context && "only one context currently supported");
   for (size_t i = 0; i < ctx->num_files + 1; ++i) {
-    hashmap_custom_free(&ctx->global_data[i]);
+    hashmap_custom_free_dataseg(&ctx->global_data[i]);
+    hashmap_clear_manual_key_owned_value_unowned(&ctx->exports[i]);
+  }
+  for (size_t i = 0; i < ctx->num_files; ++i) {
+    free_link_fixups(&ctx->files[i]);
   }
   free(ctx);
   user_context = NULL;
-}
-
-#define OPT_E 0
-
-static FILE* open_file(char* path) {
-  if (!path || strcmp(path, "-") == 0)
-    return stdout;
-
-  FILE* out = fopen(path, "wb");
-  if (!out)
-    error("cannot open output file: %s: %s", path, strerror(errno));
-  return out;
 }
 
 bool dyibicc_update(DyibiccContext* context, char* filename, char* contents) {
@@ -390,14 +341,13 @@ bool dyibicc_update(DyibiccContext* context, char* filename, char* contents) {
 
   UserContext* ctx = (UserContext*)context;
   bool link_result = true;
-  ctx->entry_point = NULL;  // This must be "refound" every time, otherwise it could be stale.
 
   assert(ctx == user_context && "only one context currently supported");
 
   bool compiled_any = false;
   {
     for (size_t i = 0; i < ctx->num_files; ++i) {
-      DyoLinkData* dld = &ctx->files[i];
+      FileLinkData* dld = &ctx->files[i];
 
       if (filename && strcmp(dld->source_name, filename) != 0) {
         // If a specific update is provided, we only compile that one.
@@ -422,12 +372,7 @@ bool dyibicc_update(DyibiccContext* context, char* filename, char* contents) {
         codegen_init();  // Initializes dynasm so that parse() can assign labels.
 
         Obj* prog = parse(tok);
-        FILE* dyo_out = open_file(dld->output_dyo_name);
-        // TODO: need to figure out FILE vs longjmp, either will succeed or
-        // error() which will leave this open. Probably the same for
-        // preprocess().
-        codegen(prog, dyo_out);
-        fclose(dyo_out);
+        codegen(prog, i);
 
         compiled_any = true;
 
@@ -438,11 +383,16 @@ bool dyibicc_update(DyibiccContext* context, char* filename, char* contents) {
     if (compiled_any) {
       alloc_init(AL_Link);
 
-      link_result = link_dyos();
+      link_result = link_all_files();
 
       alloc_reset(AL_Link);
     }
   }
 
   return link_result;
+}
+
+void* dyibicc_find_export(DyibiccContext* context, char* name) {
+  UserContext* ctx = (UserContext*)context;
+  return hashmap_get(&ctx->exports[ctx->num_files], name);
 }

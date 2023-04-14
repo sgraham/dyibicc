@@ -45,6 +45,7 @@ typedef struct Member Member;
 typedef struct Relocation Relocation;
 typedef struct Hideset Hideset;
 typedef struct Token Token;
+typedef struct HashMap HashMap;
 
 //
 // alloc.c
@@ -113,12 +114,12 @@ char* dirname(char* s);
 char* basename(char* s);
 uint64_t align_to_u(uint64_t n, uint64_t align);
 int64_t align_to_s(int64_t n, int64_t align);
+unsigned int get_page_size(void);
 void strarray_push(StringArray* arr, char* s, AllocLifetime lifetime);
 void strintarray_push(StringIntArray* arr, StringInt item, AllocLifetime lifetime);
 void bytearray_push(ByteArray* arr, char b, AllocLifetime lifetime);
 void intintarray_push(IntIntArray* arr, IntInt item, AllocLifetime lifetime);
 char* format(AllocLifetime lifetime, char* fmt, ...) __attribute__((format(printf, 2, 3)));
-int64_t stat_single_file(const char* path);
 char* read_file(char* path, AllocLifetime lifetime);
 NORETURN void error(char* fmt, ...) __attribute__((format(printf, 1, 2)));
 NORETURN void error_at(char* loc, char* fmt, ...) __attribute__((format(printf, 2, 3)));
@@ -500,9 +501,13 @@ void add_type(Node* node);
 //
 // codegen.c
 //
+typedef struct CompileOutputs {
+  HashMap* codeseg_static_symbols;
+  HashMap* codeseg_global_symbols;
+} CompileOutputs;
 
 void codegen_init(void);
-void codegen(Obj* prog, FILE* dyo_out);
+void codegen(Obj* prog, size_t file_index);
 void codegen_free(void);
 int codegen_pclabel(void);
 #if X64WIN
@@ -529,12 +534,12 @@ typedef struct {
   void* val;
 } HashEntry;
 
-typedef struct {
+struct HashMap {
   HashEntry* buckets;
   int capacity;
   int used;
   AllocLifetime alloc_lifetime;
-} HashMap;
+};
 
 void* hashmap_get(HashMap* map, char* key);
 void* hashmap_get2(HashMap* map, char* key, int keylen);
@@ -544,57 +549,12 @@ void hashmap_delete(HashMap* map, char* key);
 void hashmap_delete2(HashMap* map, char* key, int keylen);
 void hashmap_test(void);
 
-//
-// dyo.c
-//
-
-typedef enum DyoRecordType {
-  kTypeString = 0x01000000,
-  kTypeImport = 0x02000000,
-  kTypeFunctionExport = 0x03000000,
-  kTypeCodeReferenceToGlobal = 0x04000000,
-  kTypeInitializedData = 0x05000000,
-  kTypeInitializerEnd = 0x06000000,
-  kTypeInitializerBytes = 0x07000000,
-  kTypeInitializerDataRelocation = 0x08000000,
-  kTypeInitializerCodeRelocation = 0x09000000,
-  kTypeX64Code = 0x64000000,
-  kTypeEntryPoint = 0x65000000,
-} DyoRecordType;
-
-// Writing.
-bool write_dyo_begin(FILE* f);
-bool write_dyo_import(FILE* f, char* name, unsigned int loc);
-bool write_dyo_function_export(FILE* f, char* name, bool is_static, unsigned int loc);
-bool write_dyo_code_reference_to_global(FILE* f, char* name, unsigned int offset);
-bool write_dyo_initialized_data(FILE* f,
-                                int size,
-                                int align,
-                                bool is_static,
-                                bool is_rodata,
-                                char* name);
-bool write_dyo_initializer_end(FILE* f);
-bool write_dyo_initializer_bytes(FILE* f, char* data, int len);
-bool write_dyo_initializer_data_relocation(FILE* f, char* data, int addend);
-bool write_dyo_initializer_code_relocation(FILE* f, int pclabel, int addend, int* patch_loc);
-bool patch_dyo_initializer_code_relocation(FILE* f, int file_loc, int final_code_offset);
-bool write_dyo_code(FILE* f, void* data, size_t size);
-bool write_dyo_entrypoint(FILE* f, unsigned int loc);
-
-// Reading.
-bool ensure_dyo_header(FILE* f);
-bool read_dyo_record(FILE* f,
-                     int* record_index,
-                     char* buf,
-                     unsigned int buf_size,
-                     unsigned int* type,
-                     unsigned int* size);
-bool dump_dyo_file(FILE* f);
+void hashmap_clear_manual_key_owned_value_unowned(HashMap* map);
 
 //
 // link.c
 //
-bool link_dyos(void);
+bool link_all_files(void);
 
 //
 // Entire compiler state in one struct and linker in a second for clearing, esp.
@@ -614,18 +574,31 @@ struct Scope {
   HashMap tags;
 };
 
-typedef struct DyoLinkData {
+typedef struct LinkFixup {
+  // The address to fix up.
+  void* at;
+
+  // Name of the symbol at which the fixup should point.
+  // TODO: Intern pool for all the import/export/global names.
+  char* name;
+
+  // Added to the address that |name| resolves to.
+  int addend;
+} LinkFixup;
+
+typedef struct FileLinkData {
   char* source_name;
-  char* output_dyo_name;
   char* codeseg_base_address;  // Just the address, not a string.
   size_t codeseg_size;
-} DyoLinkData;
+
+  LinkFixup* fixups;
+  int flen;
+  int fcap;
+} FileLinkData;
+
+void free_link_fixups(FileLinkData* fld);
 
 typedef struct UserContext {
-  DyibiccEntryPointFn entry_point;
-
-  // ^^^ Public definition matches above here. ^^^
-
   DyibiccFunctionLookupFn get_function_address;
   DyibiccOutputFn output_function;
   bool use_ansi_codes;
@@ -634,16 +607,15 @@ typedef struct UserContext {
   char** include_paths;
 
   size_t num_files;
-  DyoLinkData* files;
-
-  const char* entry_point_name;
-  const char* cache_dir;
+  FileLinkData* files;
 
   // This is an array of num_files+1; 0..num_files-1 correspond to static
-  // globals in the files in DyoLinkData, and global_data[num_files] is the
+  // globals in the files in FileLinkData, and global_data[num_files] is the
   // fully global (exported) symbols. These HashMaps are also special because
   // they're lifetime == AL_Manual.
   HashMap* global_data;
+
+  HashMap* exports;
 } UserContext;
 
 typedef struct dasm_State dasm_State;
@@ -683,14 +655,11 @@ typedef struct CompilerState {
 
   // codegen.in.c
   int codegen__depth;
-  FILE* codegen__dyo_file;
+  size_t codegen__file_index;
   dasm_State* codegen__dynasm;
-  void* codegen__code_buf;
   Obj* codegen__current_fn;
   int codegen__numlabels;
-  int codegen__dasm_label_main_entry;
-  StringIntArray codegen__import_fixups;
-  StringIntArray codegen__data_fixups;
+  StringIntArray codegen__fixups;
   IntIntArray codegen__pending_code_pclabels;
 
   // main.c

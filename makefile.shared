@@ -1,6 +1,5 @@
 SRCS=\
 alloc.c \
-dyo.c \
 entry.c \
 hashmap.c \
 link.c \
