@@ -412,6 +412,3 @@ int main() {
   printf("OK\n");
   return 0;
 }
-
-// RUN: -Itest test/common.c {self}
-// RET: 0

@@ -1,0 +1,28 @@
+From luajit 2.1 at 505e2c03de35e2718eef0d2d3660712e06dadf1f with a small patch:
+
+--- a/dynasm.lua
++++ b/dynasm.lua
+@@ -829,7 +829,7 @@ local function doline(line)
+   if g_opt.flushline then wflush() end
+
+   -- Assembler line?
+-  local indent, aline = match(line, "^(%s*)%|(.*)$")
++  local indent, aline = match(line, "^(%s*)%///|(.*)$")
+   if not aline then
+     -- No, plain C code line, need to flush first.
+     wflush()
+
+
+to make the dynasm prefix ///| rather than |.
+
+This is so that clang-format doesn't destroy things when dynasm lines get
+formatted. LuaJIT's jit is written primarily in asm assembled by DynASM and
+there's only an occasional sprinkle of C, so having only | as a prefix makes
+sense. Here though, the code is mostly C with a sprinkle of DynASM (handling the
+messy encoding details), so it makes more sense to integrate the asm in special
+C-comments.
+
+Additionally something like this is nice in .vimrc to highlight dynasm lines:
+
+autocmd BufRead,BufEnter *.in.c syn region cDynasm start="^\s*\(///|\)" skip="\\$" end="$" keepend
+autocmd BufRead,BufEnter *.in.c hi def link cDynasm SpecialChar

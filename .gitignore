@@ -1,14 +1,4 @@
-**/*~
-**/\#*
-**/*.o
-**/a.out
-/tmp*
-x.bat
-/third_party
-/test/*.exe
+out/
 .vs/
 tags
 test/x.c
-minilua
-codegen.linux.c
-codegen.win32.c
