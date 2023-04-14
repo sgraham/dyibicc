@@ -554,7 +554,7 @@ void hashmap_clear_manual_key_owned_value_unowned(HashMap* map);
 //
 // link.c
 //
-bool link_dyos(void);
+bool link_all_files(void);
 
 //
 // Entire compiler state in one struct and linker in a second for clearing, esp.
@@ -584,13 +584,10 @@ typedef struct LinkFixup {
 
   // Added to the address that |name| resolves to.
   int addend;
-
-  bool is_to_data;  // Not sure if we want this, or better to combine all symbols.
 } LinkFixup;
 
 typedef struct DyoLinkData {
   char* source_name;
-  char* output_dyo_name;
   char* codeseg_base_address;  // Just the address, not a string.
   size_t codeseg_size;
 
@@ -611,8 +608,6 @@ typedef struct UserContext {
 
   size_t num_files;
   DyoLinkData* files;
-
-  const char* cache_dir;
 
   // This is an array of num_files+1; 0..num_files-1 correspond to static
   // globals in the files in DyoLinkData, and global_data[num_files] is the
@@ -660,7 +655,6 @@ typedef struct CompilerState {
 
   // codegen.in.c
   int codegen__depth;
-  FILE* codegen__dyo_file;
   size_t codegen__file_index;
   dasm_State* codegen__dynasm;
   Obj* codegen__current_fn;

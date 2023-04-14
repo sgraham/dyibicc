@@ -259,12 +259,6 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
   data->exports = (HashMap*)d;
   d += sizeof(HashMap) * (num_files + 1);
 
-  if (env_data->cache_dir) {
-    data->cache_dir = d;
-    strcpy(d, env_data->cache_dir);
-    d += strlen(env_data->cache_dir) + 1;
-  }
-
   int i = 0;
   for (const char** p = env_data->include_paths; *p; ++p) {
     data->include_paths[i++] = d;
@@ -293,7 +287,9 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
     data->exports[j].alloc_lifetime = AL_Manual;
   }
 
-  assert((size_t)(d - (char*)data) == total_size);
+  if ((size_t)(d - (char*)data) != total_size) {
+    ABORT("incorrect size calculation");
+  }
 
   alloc_reset(AL_Temp);
 
@@ -387,7 +383,7 @@ bool dyibicc_update(DyibiccContext* context, char* filename, char* contents) {
     if (compiled_any) {
       alloc_init(AL_Link);
 
-      link_result = link_dyos();
+      link_result = link_all_files();
 
       alloc_reset(AL_Link);
     }

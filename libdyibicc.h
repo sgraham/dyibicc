@@ -13,7 +13,6 @@ typedef void* (*DyibiccFunctionLookupFn)(const char* name);
 typedef struct DyibiccEnviromentData {
   const char** include_paths;
   const char** files;
-  const char* cache_dir;
   const char* dyibicc_include_dir;
   DyibiccFunctionLookupFn get_function_address;
   DyibiccOutputFn output_function;

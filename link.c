@@ -337,7 +337,7 @@ static void* symbol_lookup(char* name) {
 #endif
 }
 
-bool link_dyos(void) {
+bool link_all_files(void) {
   UserContext* uc = user_context;
 
   if (uc->num_files == 0)
