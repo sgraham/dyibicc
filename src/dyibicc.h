@@ -1,5 +1,32 @@
 #define _POSIX_C_SOURCE 200809L
 #define _DEFAULT_SOURCE
+
+#ifdef _MSC_VER
+#pragma warning(disable : 4061)  // enumerator 'X' in switch of enum 'Y' is not explicitly handled
+                                 // by a case label
+#pragma warning(disable : 4062)  // enumerator 'X' in switch of enum 'Y' is not handled
+#pragma warning(disable : 4668)  // C:\Program Files (x86)\Windows
+                                 // Kits\10\\include\10.0.22621.0\\um\winioctl.h(10847): warning
+                                 // C4668: '_WIN32_WINNT_WIN10_TH2' is not defined as a preprocessor
+                                 // macro, replacing with '0' for '#if/#elif'
+#pragma warning(disable : 4820)  // Padding bytes added
+#pragma warning(disable : 5045)  // Compiler will insert Spectre mitigation for memory load if
+                                 // /Qspectre switch specified
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+#endif
+
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wmissing-field-initializers"
+#pragma clang diagnostic ignored "-Wswitch"
+#endif
+
+#ifdef __GNUC__
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#pragma GCC diagnostic ignored "-Wswitch"
+#endif
+
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
@@ -14,6 +41,13 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
+
+// We use this as the global indication that we should be targeting the Win ABI
+// rather than SysV. It's here rather than in config so that libdyibcc.c doesn't
+// need special defines added.
+#if defined(_WIN64) && defined(_M_AMD64)
+#define X64WIN 1
+#endif
 
 #include "libdyibicc.h"
 
@@ -57,18 +91,21 @@ typedef enum AllocLifetime {
   AL_Manual,
 } AllocLifetime;
 
-void alloc_init(AllocLifetime lifetime);
-void alloc_reset(AllocLifetime lifetime);
+IMPLSTATIC void alloc_init(AllocLifetime lifetime);
+IMPLSTATIC void alloc_reset(AllocLifetime lifetime);
 
-void* bumpcalloc(size_t num, size_t size, AllocLifetime lifetime);
-void* bumplamerealloc(void* old, size_t old_size, size_t new_size, AllocLifetime lifetime);
-void alloc_free(void* p, AllocLifetime lifetime);  // AL_Manual only.
+IMPLSTATIC void* bumpcalloc(size_t num, size_t size, AllocLifetime lifetime);
+IMPLSTATIC void* bumplamerealloc(void* old,
+                                 size_t old_size,
+                                 size_t new_size,
+                                 AllocLifetime lifetime);
+IMPLSTATIC void alloc_free(void* p, AllocLifetime lifetime);  // AL_Manual only.
 
-void* aligned_allocate(size_t size, size_t alignment);
-void aligned_free(void* p);
-void* allocate_writable_memory(size_t size);
-bool make_memory_executable(void* m, size_t size);
-void free_executable_memory(void* p, size_t size);
+IMPLSTATIC void* aligned_allocate(size_t size, size_t alignment);
+IMPLSTATIC void aligned_free(void* p);
+IMPLSTATIC void* allocate_writable_memory(size_t size);
+IMPLSTATIC bool make_memory_executable(void* m, size_t size);
+IMPLSTATIC void free_executable_memory(void* p, size_t size);
 
 //
 // util.c
@@ -108,25 +145,24 @@ typedef struct IntIntArray {
   int len;
 } IntIntArray;
 
-char* bumpstrndup(const char* s, size_t n, AllocLifetime lifetime);
-char* bumpstrdup(const char* s, AllocLifetime lifetime);
-char* dirname(char* s);
-char* basename(char* s);
-uint64_t align_to_u(uint64_t n, uint64_t align);
-int64_t align_to_s(int64_t n, int64_t align);
-unsigned int get_page_size(void);
-void strarray_push(StringArray* arr, char* s, AllocLifetime lifetime);
-void strintarray_push(StringIntArray* arr, StringInt item, AllocLifetime lifetime);
-void bytearray_push(ByteArray* arr, char b, AllocLifetime lifetime);
-void intintarray_push(IntIntArray* arr, IntInt item, AllocLifetime lifetime);
-char* format(AllocLifetime lifetime, char* fmt, ...) __attribute__((format(printf, 2, 3)));
-char* read_file(char* path, AllocLifetime lifetime);
-NORETURN void error(char* fmt, ...) __attribute__((format(printf, 1, 2)));
-NORETURN void error_at(char* loc, char* fmt, ...) __attribute__((format(printf, 2, 3)));
-NORETURN void error_tok(Token* tok, char* fmt, ...) __attribute__((format(printf, 2, 3)));
-NORETURN void error_internal(char* file, int line, char* msg);
-int outaf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
-void warn_tok(Token* tok, char* fmt, ...) __attribute__((format(printf, 2, 3)));
+IMPLSTATIC char* bumpstrndup(const char* s, size_t n, AllocLifetime lifetime);
+IMPLSTATIC char* bumpstrdup(const char* s, AllocLifetime lifetime);
+IMPLSTATIC char* dirname(char* s);
+IMPLSTATIC uint64_t align_to_u(uint64_t n, uint64_t align);
+IMPLSTATIC int64_t align_to_s(int64_t n, int64_t align);
+IMPLSTATIC unsigned int get_page_size(void);
+IMPLSTATIC void strarray_push(StringArray* arr, char* s, AllocLifetime lifetime);
+IMPLSTATIC void strintarray_push(StringIntArray* arr, StringInt item, AllocLifetime lifetime);
+IMPLSTATIC char* format(AllocLifetime lifetime, char* fmt, ...)
+    __attribute__((format(printf, 2, 3)));
+IMPLSTATIC char* read_file(char* path, AllocLifetime lifetime);
+IMPLSTATIC NORETURN void error(char* fmt, ...) __attribute__((format(printf, 1, 2)));
+IMPLSTATIC NORETURN void error_at(char* loc, char* fmt, ...) __attribute__((format(printf, 2, 3)));
+IMPLSTATIC NORETURN void error_tok(Token* tok, char* fmt, ...)
+    __attribute__((format(printf, 2, 3)));
+IMPLSTATIC NORETURN void error_internal(char* file, int line, char* msg);
+IMPLSTATIC int outaf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+IMPLSTATIC void warn_tok(Token* tok, char* fmt, ...) __attribute__((format(printf, 2, 3)));
 
 //
 // tokenize.c
@@ -174,15 +210,15 @@ struct Token {
   Token* origin;     // If this is expanded from a macro, the original token
 };
 
-bool equal(Token* tok, char* op);
-Token* skip(Token* tok, char* op);
-bool consume(Token** rest, Token* tok, char* str);
-void convert_pp_tokens(Token* tok);
-File* new_file(char* name, char* contents);
-Token* tokenize_string_literal(Token* tok, Type* basety);
-Token* tokenize(File* file);
-Token* tokenize_file(char* filename);
-Token* tokenize_filecontents(char* path, char* contents);
+IMPLSTATIC bool equal(Token* tok, char* op);
+IMPLSTATIC Token* skip(Token* tok, char* op);
+IMPLSTATIC bool consume(Token** rest, Token* tok, char* str);
+IMPLSTATIC void convert_pp_tokens(Token* tok);
+IMPLSTATIC File* new_file(char* name, char* contents);
+IMPLSTATIC Token* tokenize_string_literal(Token* tok, Type* basety);
+IMPLSTATIC Token* tokenize(File* file);
+IMPLSTATIC Token* tokenize_file(char* filename);
+IMPLSTATIC Token* tokenize_filecontents(char* path, char* contents);
 
 #define unreachable() error_internal(__FILE__, __LINE__, "unreachable")
 #define ABORT(msg) error_internal(__FILE__, __LINE__, msg)
@@ -191,11 +227,11 @@ Token* tokenize_filecontents(char* path, char* contents);
 // preprocess.c
 //
 
-char* search_include_paths(char* filename);
-void init_macros(void);
-void define_macro(char* name, char* buf);
-void undef_macro(char* name);
-Token* preprocess(Token* tok);
+IMPLSTATIC char* search_include_paths(char* filename);
+IMPLSTATIC void init_macros(void);
+IMPLSTATIC void define_macro(char* name, char* buf);
+IMPLSTATIC void undef_macro(char* name);
+IMPLSTATIC Token* preprocess(Token* tok);
 
 //
 // parse.c
@@ -379,9 +415,9 @@ struct Node {
   long double fval;
 };
 
-Node* new_cast(Node* expr, Type* ty);
-int64_t const_expr(Token** rest, Token* tok);
-Obj* parse(Token* tok);
+IMPLSTATIC Node* new_cast(Node* expr, Type* ty);
+IMPLSTATIC int64_t const_expr(Token** rest, Token* tok);
+IMPLSTATIC Obj* parse(Token* tok);
 
 //
 // type.c
@@ -467,36 +503,36 @@ struct Member {
   int bit_width;
 };
 
-extern Type* ty_void;
-extern Type* ty_bool;
+IMPLEXTERN Type* ty_void;
+IMPLEXTERN Type* ty_bool;
 
-extern Type* ty_char;
-extern Type* ty_short;
-extern Type* ty_int;
-extern Type* ty_long;
+IMPLEXTERN Type* ty_char;
+IMPLEXTERN Type* ty_short;
+IMPLEXTERN Type* ty_int;
+IMPLEXTERN Type* ty_long;
 
-extern Type* ty_uchar;
-extern Type* ty_ushort;
-extern Type* ty_uint;
-extern Type* ty_ulong;
+IMPLEXTERN Type* ty_uchar;
+IMPLEXTERN Type* ty_ushort;
+IMPLEXTERN Type* ty_uint;
+IMPLEXTERN Type* ty_ulong;
 
-extern Type* ty_float;
-extern Type* ty_double;
-extern Type* ty_ldouble;
+IMPLEXTERN Type* ty_float;
+IMPLEXTERN Type* ty_double;
+IMPLEXTERN Type* ty_ldouble;
 
-bool is_integer(Type* ty);
-bool is_flonum(Type* ty);
-bool is_numeric(Type* ty);
-bool is_void(Type* ty);
-bool is_compatible(Type* t1, Type* t2);
-Type* copy_type(Type* ty);
-Type* pointer_to(Type* base);
-Type* func_type(Type* return_ty);
-Type* array_of(Type* base, int size);
-Type* vla_of(Type* base, Node* expr);
-Type* enum_type(void);
-Type* struct_type(void);
-void add_type(Node* node);
+IMPLSTATIC bool is_integer(Type* ty);
+IMPLSTATIC bool is_flonum(Type* ty);
+IMPLSTATIC bool is_numeric(Type* ty);
+IMPLSTATIC bool is_void(Type* ty);
+IMPLSTATIC bool is_compatible(Type* t1, Type* t2);
+IMPLSTATIC Type* copy_type(Type* ty);
+IMPLSTATIC Type* pointer_to(Type* base);
+IMPLSTATIC Type* func_type(Type* return_ty);
+IMPLSTATIC Type* array_of(Type* base, int size);
+IMPLSTATIC Type* vla_of(Type* base, Node* expr);
+IMPLSTATIC Type* enum_type(void);
+IMPLSTATIC Type* struct_type(void);
+IMPLSTATIC void add_type(Node* node);
 
 //
 // codegen.c
@@ -506,23 +542,23 @@ typedef struct CompileOutputs {
   HashMap* codeseg_global_symbols;
 } CompileOutputs;
 
-void codegen_init(void);
-void codegen(Obj* prog, size_t file_index);
-void codegen_free(void);
-int codegen_pclabel(void);
+IMPLSTATIC void codegen_init(void);
+IMPLSTATIC void codegen(Obj* prog, size_t file_index);
+IMPLSTATIC void codegen_free(void);
+IMPLSTATIC int codegen_pclabel(void);
 #if X64WIN
-bool type_passed_in_register(Type* ty);
+IMPLSTATIC bool type_passed_in_register(Type* ty);
 #endif
 
 //
 // unicode.c
 //
 
-int encode_utf8(char* buf, uint32_t c);
-uint32_t decode_utf8(char** new_pos, char* p);
-bool is_ident1(uint32_t c);
-bool is_ident2(uint32_t c);
-int display_width(char* p, int len);
+IMPLSTATIC int encode_utf8(char* buf, uint32_t c);
+IMPLSTATIC uint32_t decode_utf8(char** new_pos, char* p);
+IMPLSTATIC bool is_ident1(uint32_t c);
+IMPLSTATIC bool is_ident2(uint32_t c);
+IMPLSTATIC int display_width(char* p, int len);
 
 //
 // hashmap.c
@@ -541,20 +577,18 @@ struct HashMap {
   AllocLifetime alloc_lifetime;
 };
 
-void* hashmap_get(HashMap* map, char* key);
-void* hashmap_get2(HashMap* map, char* key, int keylen);
-void hashmap_put(HashMap* map, char* key, void* val);
-void hashmap_put2(HashMap* map, char* key, int keylen, void* val);
-void hashmap_delete(HashMap* map, char* key);
-void hashmap_delete2(HashMap* map, char* key, int keylen);
-void hashmap_test(void);
-
-void hashmap_clear_manual_key_owned_value_unowned(HashMap* map);
+IMPLSTATIC void* hashmap_get(HashMap* map, char* key);
+IMPLSTATIC void* hashmap_get2(HashMap* map, char* key, int keylen);
+IMPLSTATIC void hashmap_put(HashMap* map, char* key, void* val);
+IMPLSTATIC void hashmap_put2(HashMap* map, char* key, int keylen, void* val);
+IMPLSTATIC void hashmap_delete(HashMap* map, char* key);
+IMPLSTATIC void hashmap_delete2(HashMap* map, char* key, int keylen);
+IMPLSTATIC void hashmap_clear_manual_key_owned_value_unowned(HashMap* map);
 
 //
 // link.c
 //
-bool link_all_files(void);
+IMPLSTATIC bool link_all_files(void);
 
 //
 // Entire compiler state in one struct and linker in a second for clearing, esp.
@@ -596,7 +630,7 @@ typedef struct FileLinkData {
   int fcap;
 } FileLinkData;
 
-void free_link_fixups(FileLinkData* fld);
+IMPLSTATIC void free_link_fixups(FileLinkData* fld);
 
 typedef struct UserContext {
   DyibiccFunctionLookupFn get_function_address;
@@ -671,7 +705,7 @@ typedef struct LinkerState {
   HashMap link__runtime_function_map;
 } LinkerState;
 
-extern UserContext* user_context;
-extern jmp_buf toplevel_update_jmpbuf;
-extern CompilerState compiler_state;
-extern LinkerState linker_state;
+IMPLEXTERN UserContext* user_context;
+IMPLEXTERN jmp_buf toplevel_update_jmpbuf;
+IMPLEXTERN CompilerState compiler_state;
+IMPLEXTERN LinkerState linker_state;

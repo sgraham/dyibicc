@@ -110,35 +110,35 @@ static HashEntry* get_or_insert_entry(HashMap* map, char* key, int keylen) {
   unreachable();
 }
 
-void* hashmap_get(HashMap* map, char* key) {
+IMPLSTATIC void* hashmap_get(HashMap* map, char* key) {
   return hashmap_get2(map, key, (int)strlen(key));
 }
 
-void* hashmap_get2(HashMap* map, char* key, int keylen) {
+IMPLSTATIC void* hashmap_get2(HashMap* map, char* key, int keylen) {
   HashEntry* ent = get_entry(map, key, keylen);
   return ent ? ent->val : NULL;
 }
 
-void hashmap_put(HashMap* map, char* key, void* val) {
+IMPLSTATIC void hashmap_put(HashMap* map, char* key, void* val) {
   hashmap_put2(map, key, (int)strlen(key), val);
 }
 
-void hashmap_put2(HashMap* map, char* key, int keylen, void* val) {
+IMPLSTATIC void hashmap_put2(HashMap* map, char* key, int keylen, void* val) {
   HashEntry* ent = get_or_insert_entry(map, key, keylen);
   ent->val = val;
 }
 
-void hashmap_delete(HashMap* map, char* key) {
+IMPLSTATIC void hashmap_delete(HashMap* map, char* key) {
   hashmap_delete2(map, key, (int)strlen(key));
 }
 
-void hashmap_delete2(HashMap* map, char* key, int keylen) {
+IMPLSTATIC void hashmap_delete2(HashMap* map, char* key, int keylen) {
   HashEntry* ent = get_entry(map, key, keylen);
   if (ent)
     ent->key = TOMBSTONE;
 }
 
-void hashmap_clear_manual_key_owned_value_unowned(HashMap* map) {
+IMPLSTATIC void hashmap_clear_manual_key_owned_value_unowned(HashMap* map) {
   assert(map->alloc_lifetime == AL_Manual);
   for (int i = 0; i < map->capacity; i++) {
     HashEntry* ent = &map->buckets[i];
@@ -152,36 +152,3 @@ void hashmap_clear_manual_key_owned_value_unowned(HashMap* map) {
   map->used = 0;
   map->capacity = 0;
 }
-
-#if 0
-void hashmap_test(void) {
-  HashMap *map = bumpcalloc(1, sizeof(HashMap));
-
-  for (int i = 0; i < 5000; i++)
-    hashmap_put(map, format("key %d", i), (void *)(size_t)i);
-  for (int i = 1000; i < 2000; i++)
-    hashmap_delete(map, format("key %d", i));
-  for (int i = 1500; i < 1600; i++)
-    hashmap_put(map, format("key %d", i), (void *)(size_t)i);
-  for (int i = 6000; i < 7000; i++)
-    hashmap_put(map, format("key %d", i), (void *)(size_t)i);
-
-  for (int i = 0; i < 1000; i++)
-    assert((size_t)hashmap_get(map, format("key %d", i)) == i);
-  for (int i = 1000; i < 1500; i++)
-    assert(hashmap_get(map, "no such key") == NULL);
-  for (int i = 1500; i < 1600; i++)
-    assert((size_t)hashmap_get(map, format("key %d", i)) == i);
-  for (int i = 1600; i < 2000; i++)
-    assert(hashmap_get(map, "no such key") == NULL);
-  for (int i = 2000; i < 5000; i++)
-    assert((size_t)hashmap_get(map, format("key %d", i)) == i);
-  for (int i = 5000; i < 6000; i++)
-    assert(hashmap_get(map, "no such key") == NULL);
-  for (int i = 6000; i < 7000; i++)
-    hashmap_put(map, format("key %d", i), (void *)(size_t)i);
-
-  assert(hashmap_get(map, "no such key") == NULL);
-  printf("OK\n");
-}
-#endif

@@ -1,4 +1,4 @@
-﻿#include "dyibicc.h"
+#include "dyibicc.h"
 
 #if X64WIN
 #include <windows.h>
@@ -25,10 +25,10 @@ void __asan_unpoison_memory_region(void const volatile* addr, size_t size);
 
 #define NUM_BUMP_HEAPS (AL_Link + 1)
 
-UserContext* user_context;
-jmp_buf toplevel_update_jmpbuf;
-CompilerState compiler_state;
-LinkerState linker_state;
+IMPLSTATIC UserContext* user_context;
+IMPLSTATIC jmp_buf toplevel_update_jmpbuf;
+IMPLSTATIC CompilerState compiler_state;
+IMPLSTATIC LinkerState linker_state;
 
 typedef struct HeapData {
   char* base;
@@ -42,7 +42,7 @@ static HeapData heap[NUM_BUMP_HEAPS] = {
     {NULL, NULL, 128 << 20},   // AL_Link
 };
 
-void alloc_init(AllocLifetime lifetime) {
+IMPLSTATIC void alloc_init(AllocLifetime lifetime) {
   assert(lifetime < NUM_BUMP_HEAPS);
   HeapData* hd = &heap[lifetime];
 
@@ -55,7 +55,7 @@ void alloc_init(AllocLifetime lifetime) {
   }
 }
 
-void alloc_reset(AllocLifetime lifetime) {
+IMPLSTATIC void alloc_reset(AllocLifetime lifetime) {
   assert(lifetime < NUM_BUMP_HEAPS);
   HeapData* hd = &heap[lifetime];
   // We allow double resets because we may longjmp out during error handling,
@@ -68,7 +68,7 @@ void alloc_reset(AllocLifetime lifetime) {
   }
 }
 
-void* bumpcalloc(size_t num, size_t size, AllocLifetime lifetime) {
+IMPLSTATIC void* bumpcalloc(size_t num, size_t size, AllocLifetime lifetime) {
   if (lifetime == AL_Manual) {
     return calloc(num, size);
   }
@@ -85,20 +85,23 @@ void* bumpcalloc(size_t num, size_t size, AllocLifetime lifetime) {
   return ret;
 }
 
-void alloc_free(void* p, AllocLifetime lifetime) {
+IMPLSTATIC void alloc_free(void* p, AllocLifetime lifetime) {
   (void)lifetime;
   assert(lifetime == AL_Manual);
   free(p);
 }
 
-void* bumplamerealloc(void* old, size_t old_size, size_t new_size, AllocLifetime lifetime) {
+IMPLSTATIC void* bumplamerealloc(void* old,
+                                 size_t old_size,
+                                 size_t new_size,
+                                 AllocLifetime lifetime) {
   void* newptr = bumpcalloc(1, new_size, lifetime);
   memcpy(newptr, old, MIN(old_size, new_size));
   ASAN_POISON_MEMORY_REGION(old, old_size);
   return newptr;
 }
 
-void* aligned_allocate(size_t size, size_t alignment) {
+IMPLSTATIC void* aligned_allocate(size_t size, size_t alignment) {
   size = align_to_u(size, alignment);
 #if X64WIN
   return _aligned_malloc(size, alignment);
@@ -107,7 +110,7 @@ void* aligned_allocate(size_t size, size_t alignment) {
 #endif
 }
 
-void aligned_free(void* p) {
+IMPLSTATIC void aligned_free(void* p) {
 #if X64WIN
   _aligned_free(p);
 #else
@@ -118,7 +121,7 @@ void aligned_free(void* p) {
 // Allocates RW memory of given size and returns a pointer to it. On failure,
 // prints out the error and returns NULL. Unlike malloc, the memory is allocated
 // on a page boundary so it's suitable for calling mprotect.
-void* allocate_writable_memory(size_t size) {
+IMPLSTATIC void* allocate_writable_memory(size_t size) {
 #if X64WIN
   void* p = VirtualAlloc(0, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
   if (!p) {
@@ -139,7 +142,7 @@ void* allocate_writable_memory(size_t size) {
 
 // Sets a RX permission on the given memory, which must be page-aligned. Returns
 // 0 on success. On failure, prints out the error and returns -1.
-bool make_memory_executable(void* m, size_t size) {
+IMPLSTATIC bool make_memory_executable(void* m, size_t size) {
 #if X64WIN
   DWORD old_protect;
   if (!VirtualProtect(m, size, PAGE_EXECUTE_READ, &old_protect)) {
@@ -155,7 +158,7 @@ bool make_memory_executable(void* m, size_t size) {
 #endif
 }
 
-void free_executable_memory(void* p, size_t size) {
+IMPLSTATIC void free_executable_memory(void* p, size_t size) {
 #if X64WIN
   (void)size;  // If |size| is passed, free will fail.
   if (!VirtualFree(p, 0, MEM_RELEASE)) {

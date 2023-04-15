@@ -7,18 +7,18 @@
 #define C(x) compiler_state.tokenize__##x
 
 // Consumes the current token if it matches `op`.
-bool equal(Token* tok, char* op) {
+IMPLSTATIC bool equal(Token* tok, char* op) {
   return strncmp(tok->loc, op, tok->len) == 0 && op[tok->len] == '\0';
 }
 
 // Ensure that the current token is `op`.
-Token* skip(Token* tok, char* op) {
+IMPLSTATIC Token* skip(Token* tok, char* op) {
   if (!equal(tok, op))
     error_tok(tok, "expected '%s'", op);
   return tok->next;
 }
 
-bool consume(Token** rest, Token* tok, char* str) {
+IMPLSTATIC bool consume(Token** rest, Token* tok, char* str) {
   if (equal(tok, str)) {
     *rest = tok->next;
     return true;
@@ -430,7 +430,7 @@ static void convert_pp_number(Token* tok) {
   tok->ty = ty;
 }
 
-void convert_pp_tokens(Token* tok) {
+IMPLSTATIC void convert_pp_tokens(Token* tok) {
   for (Token* t = tok; t->kind != TK_EOF; t = t->next) {
     if (t->kind == TK_IDENT && is_keyword(t))
       t->kind = TK_KEYWORD;
@@ -614,7 +614,7 @@ Token* tokenize(File* file) {
   return head.next;
 }
 
-File* new_file(char* name, char* contents) {
+IMPLSTATIC File* new_file(char* name, char* contents) {
   File* file = bumpcalloc(1, sizeof(File), AL_Compile);
   file->name = name;
   file->display_name = name;

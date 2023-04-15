@@ -1,4 +1,4 @@
-﻿#include "dyibicc.h"
+#include "dyibicc.h"
 
 static void usage(int status) {
   printf("dyibicc [-E] [-e symbolname] [-I <path>] <file0> [<file1>...]\n");

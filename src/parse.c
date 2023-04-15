@@ -206,7 +206,7 @@ static Node* new_vla_ptr(Obj* var, Token* tok) {
   return node;
 }
 
-Node* new_cast(Node* expr, Type* ty) {
+IMPLSTATIC Node* new_cast(Node* expr, Type* ty) {
   add_type(expr);
 
   Node* node = bumpcalloc(1, sizeof(Node), AL_Compile);
@@ -1952,7 +1952,10 @@ static int64_t eval2(Node* node, char*** label, int** pclabel) {
           case 2:
             return node->ty->is_unsigned ? (uint16_t)val : (int16_t)val;
           case 4:
-            return node->ty->is_unsigned ? (uint32_t)val : (int32_t)val;
+            if (node->ty->is_unsigned)
+              return (uint32_t)val;
+            else
+              return (int32_t)val;
         }
       }
       return val;
@@ -2039,7 +2042,7 @@ static bool is_const_expr(Node* node) {
   return false;
 }
 
-int64_t const_expr(Token** rest, Token* tok) {
+IMPLSTATIC int64_t const_expr(Token** rest, Token* tok) {
   Node* node = conditional(rest, tok);
   return eval(node);
 }
@@ -3410,7 +3413,7 @@ static void declare_builtin_functions(void) {
 }
 
 // program = (typedef | function-definition | global-variable)*
-Obj* parse(Token* tok) {
+IMPLSTATIC Obj* parse(Token* tok) {
   C(scope) = &C(empty_scope);
 
   declare_builtin_functions();

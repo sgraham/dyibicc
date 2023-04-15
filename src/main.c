@@ -1,4 +1,4 @@
-﻿// Notes and todos
+// Notes and todos
 // ---------------
 //
 // Windows x64 .pdata generation:

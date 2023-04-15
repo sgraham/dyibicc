@@ -8,6 +8,7 @@ import sys
 ROOT_DIR = os.path.normpath(
     os.path.join(os.path.abspath(os.path.dirname(__file__)), '..'))
 
+# Update build_amalg.py too.
 FILELIST = [
     'alloc.c',
     'entry.c',
@@ -25,17 +26,17 @@ FILELIST = [
 CONFIGS = {
     'w': {
         'r': {
-            'COMPILE': 'cl /showIncludes /nologo /FS /Ox /GL /Zi /D_CRT_SECURE_NO_DEPRECATE /DX64WIN=1 /W4 /WX /I$root /c $in /Fo$out /Fddyibicc.pdb',
+            'COMPILE': 'cl /showIncludes /nologo /FS /Ox /GL /Zi /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo$out /Fddyibicc.pdb',
             'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /LTCG /DEBUG /OPT:REF /OPT:ICF $in /out:$out',
             'ML': 'cl /nologo /wd4132 /wd4324 $in /link /out:$out',
         },
         'd': {
-            'COMPILE': 'cl /showIncludes /nologo /FS /Od /Zi /D_CRT_SECURE_NO_DEPRECATE /DX64WIN=1 /W4 /WX /I$root /c $in /Fo:$out /Fddyibicc.pdb',
+            'COMPILE': 'cl /showIncludes /nologo /FS /Od /Zi /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo:$out /Fddyibicc.pdb',
             'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /DEBUG $in /out:$out',
             'ML': 'cl /nologo /wd4132 /wd4324 $in /link /out:$out',
         },
         'a': {
-            'COMPILE': 'cl /showIncludes /nologo /FS /Od /fsanitize=address /Zi /D_CRT_SECURE_NO_DEPRECATE /DX64WIN=1 /W4 /WX /I$root /c $in /Fo:$out /Fddyibicc.pdb',
+            'COMPILE': 'cl /showIncludes /nologo /FS /Od /fsanitize=address /Zi /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo:$out /Fddyibicc.pdb',
             'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /DEBUG $in /out:$out',
             'ML': 'cl /nologo /wd4132 /wd4324 $in /link /out:$out',
         },
@@ -47,17 +48,17 @@ CONFIGS = {
     },
     'l': {
         'd': {
-            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -O0 -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -pthread -I$root -c $in -o $out',
+            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -O0 -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -I$root -c $in -o $out',
             'LINK': 'clang -o $out $in -pthread -lm -ldl',
             'ML': 'clang -o $out $in -lm',
         },
         'r': {
-            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -Oz -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -pthread -c -I$root $in -o $out',
+            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -Oz -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -c -I$root $in -o $out',
             'LINK': 'clang -o $out $in -pthread -lm -ldl',
             'ML': 'clang -o $out $in -lm',
         },
         'a': {
-            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -O0 -fsanitize=address -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -pthread -c -I$root $in -o $out',
+            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -O0 -fsanitize=address -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -c -I$root $in -o $out',
             'LINK': 'clang -fsanitize=address -o $out $in -pthread -lm -ldl',
             'ML': 'clang -o $out $in -lm',
         },
@@ -172,14 +173,18 @@ def generate(platform, config, settings, cmdlines, tests):
 
         f.write('\n')
         f.write('rule gen\n')
-        f.write('  command = %s $root/gen.py\n' % sys.executable)
+        f.write('  command = %s $root/gen.py $in\n' % sys.executable)
         f.write('  description = GEN build.ninja\n')
         f.write('  generator = 1\n')
         f.write('build build.ninja: gen | $root/gen.py\n')
 
 
 def main():
-    os.chdir(ROOT_DIR)
+    if len(sys.argv) != 1:
+        print('usage: gen.py')
+        return 1
+
+    os.chdir(ROOT_DIR)  # Necessary when regenerating manifest from ninja
     tests = get_tests()
     for platform, pdata in CONFIGS.items():
         if (sys.platform == 'win32' and platform == 'w') or \

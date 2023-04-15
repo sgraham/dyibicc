@@ -1,7 +1,7 @@
 #include "dyibicc.h"
 
 // Encode a given character in UTF-8.
-int encode_utf8(char* buf, uint32_t c) {
+IMPLSTATIC int encode_utf8(char* buf, uint32_t c) {
   if (c <= 0x7F) {
     buf[0] = (char)c;
     return 1;
@@ -34,7 +34,7 @@ int encode_utf8(char* buf, uint32_t c) {
 // encoded in one to four bytes. One byte UTF-8 code points are
 // identical to ASCII. Non-ASCII characters are encoded using more
 // than one byte.
-uint32_t decode_utf8(char** new_pos, char* p) {
+IMPLSTATIC uint32_t decode_utf8(char** new_pos, char* p) {
 #if 0
 
   if ((unsigned char)*p < 128) {
@@ -137,7 +137,7 @@ static bool in_range(uint32_t* range, uint32_t c) {
 // For example, ¾ (U+00BE) is a valid identifier because characters in
 // 0x00BE-0x00C0 are allowed, while neither ⟘ (U+27D8) nor '　'
 // (U+3000, full-width space) are allowed because they are out of range.
-bool is_ident1(uint32_t c) {
+IMPLSTATIC bool is_ident1(uint32_t c) {
   // Slight performance improvement to early out before full test.
   if (c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
     return true;
@@ -162,7 +162,7 @@ bool is_ident1(uint32_t c) {
 
 // Returns true if a given character is acceptable as a non-first
 // character of an identifier.
-bool is_ident2(uint32_t c) {
+IMPLSTATIC bool is_ident2(uint32_t c) {
   // Slight performance improvement to early out before full test.
   if (c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
     return true;
@@ -228,7 +228,7 @@ static int char_width(uint32_t c) {
 
 // Returns the number of columns needed to display a given
 // string in a fixed-width font.
-int display_width(char* p, int len) {
+IMPLSTATIC int display_width(char* p, int len) {
   char* start = p;
   int w = 0;
   while (p - start < len) {

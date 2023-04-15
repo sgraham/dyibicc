@@ -1,24 +1,24 @@
 #include "dyibicc.h"
 
-Type* ty_void = &(Type){TY_VOID, 1, 1};
-Type* ty_bool = &(Type){TY_BOOL, 1, 1};
+IMPLSTATIC Type* ty_void = &(Type){TY_VOID, 1, 1};
+IMPLSTATIC Type* ty_bool = &(Type){TY_BOOL, 1, 1};
 
-Type* ty_char = &(Type){TY_CHAR, 1, 1};
-Type* ty_short = &(Type){TY_SHORT, 2, 2};
-Type* ty_int = &(Type){TY_INT, 4, 4};
-Type* ty_long = &(Type){TY_LONG, 8, 8};
+IMPLSTATIC Type* ty_char = &(Type){TY_CHAR, 1, 1};
+IMPLSTATIC Type* ty_short = &(Type){TY_SHORT, 2, 2};
+IMPLSTATIC Type* ty_int = &(Type){TY_INT, 4, 4};
+IMPLSTATIC Type* ty_long = &(Type){TY_LONG, 8, 8};
 
-Type* ty_uchar = &(Type){TY_CHAR, 1, 1, true};
-Type* ty_ushort = &(Type){TY_SHORT, 2, 2, true};
-Type* ty_uint = &(Type){TY_INT, 4, 4, true};
-Type* ty_ulong = &(Type){TY_LONG, 8, 8, true};
+IMPLSTATIC Type* ty_uchar = &(Type){TY_CHAR, 1, 1, true};
+IMPLSTATIC Type* ty_ushort = &(Type){TY_SHORT, 2, 2, true};
+IMPLSTATIC Type* ty_uint = &(Type){TY_INT, 4, 4, true};
+IMPLSTATIC Type* ty_ulong = &(Type){TY_LONG, 8, 8, true};
 
-Type* ty_float = &(Type){TY_FLOAT, 4, 4};
-Type* ty_double = &(Type){TY_DOUBLE, 8, 8};
+IMPLSTATIC Type* ty_float = &(Type){TY_FLOAT, 4, 4};
+IMPLSTATIC Type* ty_double = &(Type){TY_DOUBLE, 8, 8};
 #if X64WIN
-Type* ty_ldouble = &(Type){TY_LDOUBLE, 8, 8};
+IMPLSTATIC Type* ty_ldouble = &(Type){TY_LDOUBLE, 8, 8};
 #else
-Type* ty_ldouble = &(Type){TY_LDOUBLE, 16, 16};
+IMPLSTATIC Type* ty_ldouble = &(Type){TY_LDOUBLE, 16, 16};
 #endif
 
 static Type* new_type(TypeKind kind, int size, int align) {
@@ -29,25 +29,25 @@ static Type* new_type(TypeKind kind, int size, int align) {
   return ty;
 }
 
-bool is_integer(Type* ty) {
+IMPLSTATIC bool is_integer(Type* ty) {
   TypeKind k = ty->kind;
   return k == TY_BOOL || k == TY_CHAR || k == TY_SHORT || k == TY_INT || k == TY_LONG ||
          k == TY_ENUM;
 }
 
-bool is_flonum(Type* ty) {
+IMPLSTATIC bool is_flonum(Type* ty) {
   return ty->kind == TY_FLOAT || ty->kind == TY_DOUBLE || ty->kind == TY_LDOUBLE;
 }
 
-bool is_numeric(Type* ty) {
+IMPLSTATIC bool is_numeric(Type* ty) {
   return is_integer(ty) || is_flonum(ty);
 }
 
-bool is_void(Type* ty) {
+IMPLSTATIC bool is_void(Type* ty) {
   return ty->kind == TY_VOID;
 }
 
-bool is_compatible(Type* t1, Type* t2) {
+IMPLSTATIC bool is_compatible(Type* t1, Type* t2) {
   if (t1 == t2)
     return true;
 
@@ -95,21 +95,21 @@ bool is_compatible(Type* t1, Type* t2) {
   return false;
 }
 
-Type* copy_type(Type* ty) {
+IMPLSTATIC Type* copy_type(Type* ty) {
   Type* ret = bumpcalloc(1, sizeof(Type), AL_Compile);
   *ret = *ty;
   ret->origin = ty;
   return ret;
 }
 
-Type* pointer_to(Type* base) {
+IMPLSTATIC Type* pointer_to(Type* base) {
   Type* ty = new_type(TY_PTR, 8, 8);
   ty->base = base;
   ty->is_unsigned = true;
   return ty;
 }
 
-Type* func_type(Type* return_ty) {
+IMPLSTATIC Type* func_type(Type* return_ty) {
   // The C spec disallows sizeof(<function type>), but
   // GCC allows that and the expression is evaluated to 1.
   Type* ty = new_type(TY_FUNC, 1, 1);
@@ -117,25 +117,25 @@ Type* func_type(Type* return_ty) {
   return ty;
 }
 
-Type* array_of(Type* base, int len) {
+IMPLSTATIC Type* array_of(Type* base, int len) {
   Type* ty = new_type(TY_ARRAY, base->size * len, base->align);
   ty->base = base;
   ty->array_len = len;
   return ty;
 }
 
-Type* vla_of(Type* base, Node* len) {
+IMPLSTATIC Type* vla_of(Type* base, Node* len) {
   Type* ty = new_type(TY_VLA, 8, 8);
   ty->base = base;
   ty->vla_len = len;
   return ty;
 }
 
-Type* enum_type(void) {
+IMPLSTATIC Type* enum_type(void) {
   return new_type(TY_ENUM, 4, 4);
 }
 
-Type* struct_type(void) {
+IMPLSTATIC Type* struct_type(void) {
   return new_type(TY_STRUCT, 0, 1);
 }
 
@@ -181,7 +181,7 @@ static void usual_arith_conv(Node** lhs, Node** rhs) {
   *rhs = new_cast(*rhs, ty);
 }
 
-void add_type(Node* node) {
+IMPLSTATIC void add_type(Node* node) {
   if (!node || node->ty)
     return;
 

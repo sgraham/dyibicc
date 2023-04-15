@@ -1,4 +1,5 @@
 out/
 .vs/
+embed/
 tags
 test/x.c

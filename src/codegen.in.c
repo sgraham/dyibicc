@@ -69,7 +69,7 @@ static int dasmargreg[] = {REG_DI, REG_SI, REG_DX, REG_CX, REG_R8, REG_R9};
 static void gen_expr(Node* node);
 static void gen_stmt(Node* node);
 
-int codegen_pclabel(void) {
+IMPLSTATIC int codegen_pclabel(void) {
   int ret = C(numlabels);
   dasm_growpc(&C(dynasm), ++C(numlabels));
   return ret;
@@ -579,7 +579,8 @@ static DynasmCastFunc dynasm_cast_table[][11] = {
 
 // clang-format on
 
-static void cast(Type* from, Type* to) {
+// This can't be "cast()" when amalgamated because parse has a cast() as well.
+static void cg_cast(Type* from, Type* to) {
   if (to->kind == TY_VOID)
     return;
 
@@ -1225,7 +1226,7 @@ static void gen_expr(Node* node) {
       return;
     case ND_CAST:
       gen_expr(node->lhs);
-      cast(node->lhs->ty, node->ty);
+      cg_cast(node->lhs->ty, node->ty);
       return;
     case ND_MEMZERO:
       // `rep stosb` is equivalent to `memset(rdi, al, rcx)`.
@@ -2179,7 +2180,7 @@ static void assign_lvar_offsets(Obj* prog) {
 
 #endif  // SysV
 
-void linkfixup_push(FileLinkData* fld, char* target, char* fixup, int addend) {
+static void linkfixup_push(FileLinkData* fld, char* target, char* fixup, int addend) {
   if (!fld->fixups) {
     fld->fixups = calloc(8, sizeof(LinkFixup));
     fld->fcap = 8;
@@ -2237,13 +2238,13 @@ static void emit_data(Obj* prog) {
     // than deferred to a relocation
 
     UserContext* uc = user_context;
-    bool was_freed = false;
+    // bool was_freed = false;
     size_t idx = var->is_static ? C(file_index) : uc->num_files;
     void* prev = hashmap_get(&user_context->global_data[idx], var->name);
     if (prev) {
       if (var->is_rodata) {
         aligned_free(prev);
-        was_freed = true;
+        // was_freed = true;
       } else {
         // data already created and initialized, don't reinit.
         continue;
@@ -2342,7 +2343,7 @@ static void store_gp(int r, int offset, int sz) {
 }
 
 #if X64WIN
-extern int __chkstk();
+extern int __chkstk(void);
 #endif
 
 static void emit_text(Obj* prog) {
@@ -2537,7 +2538,7 @@ static void fill_out_text_exports(Obj* prog, char* codeseg_base_address) {
   }
 }
 
-void free_link_fixups(FileLinkData* fld) {
+IMPLSTATIC void free_link_fixups(FileLinkData* fld) {
   for (int i = 0; i < fld->flen; ++i) {
     free(fld->fixups[i].name);
   }
@@ -2562,14 +2563,14 @@ static void fill_out_fixups(FileLinkData* fld) {
   }
 }
 
-void codegen_init(void) {
+IMPLSTATIC void codegen_init(void) {
   dasm_init(&C(dynasm), DASM_MAXSECTION);
   dasm_growpc(&C(dynasm), 1 << 16);  // Arbitrary number to avoid lots of reallocs of that array.
 
   C(numlabels) = 1;
 }
 
-void codegen(Obj* prog, size_t file_index) {
+IMPLSTATIC void codegen(Obj* prog, size_t file_index) {
   C(file_index) = file_index;
 
   void* globals[dynasm_globals_MAX + 1];
@@ -2613,7 +2614,7 @@ void codegen(Obj* prog, size_t file_index) {
 }
 
 // This can be called after a longjmp in update.
-void codegen_free(void) {
+IMPLSTATIC void codegen_free(void) {
   if (C(dynasm)) {
     dasm_free(&C(dynasm));
   }

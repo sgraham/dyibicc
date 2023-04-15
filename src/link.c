@@ -1,4 +1,4 @@
-﻿#include "dyibicc.h"
+#include "dyibicc.h"
 
 #if X64WIN
 #include <direct.h>
@@ -24,7 +24,7 @@ static void Unimplemented(void) {
   ABORT("unimplemented function");
 }
 
-extern void __chkstk();
+extern int __chkstk(void);
 
 static void Xstosb(PBYTE Destination, BYTE Value, SIZE_T Count) {
   (void)Destination;
@@ -337,7 +337,12 @@ static void* symbol_lookup(char* name) {
 #endif
 }
 
-bool link_all_files(void) {
+IMPLSTATIC bool link_all_files(void) {
+  // This is a hack to avoid disabling -Wunused-function, since these are in
+  // khash.h and aren't instantiated.
+  (void)__ac_X31_hash_string;
+  (void)__ac_Wang_hash;
+
   UserContext* uc = user_context;
 
   if (uc->num_files == 0)

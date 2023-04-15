@@ -680,7 +680,7 @@ static bool expand_macro(Token** rest, Token* tok) {
   return true;
 }
 
-char* search_include_paths(char* filename) {
+IMPLSTATIC char* search_include_paths(char* filename) {
   if (filename[0] == '/')
     return filename;
 
@@ -988,16 +988,16 @@ static Token* preprocess2(Token* tok) {
   return head.next;
 }
 
-void define_macro(char* name, char* buf) {
+IMPLSTATIC void define_macro(char* name, char* buf) {
   Token* tok = tokenize(new_file("<built-in>", buf));
   add_macro(name, true, tok);
 }
 
-void undef_macro(char* name) {
+IMPLSTATIC void undef_macro(char* name) {
   hashmap_delete(&C(macros), name);
 }
 
-void define_function_macro(char* buf) {
+IMPLSTATIC void define_function_macro(char* buf) {
   Token* tok = tokenize(new_file("<built-in>", buf));
   Token* rest = tok;
   read_macro_definition(&rest, tok);
@@ -1050,7 +1050,7 @@ static char* format_time(struct tm* tm) {
   return "\"01:23:45\"";
 }
 
-void init_macros(void) {
+IMPLSTATIC void init_macros(void) {
   // Define predefined macros
   define_macro("_LP64", "1");
   define_macro("__C99_MACRO_WITH_VA_ARGS", "1");
@@ -1124,6 +1124,7 @@ void init_macros(void) {
   define_macro("__linux", "1");
   define_macro("__linux__", "1");
   define_macro("__gnu_linux__", "1");
+  (void)define_function_macro;
 #endif
 
   add_builtin("__FILE__", file_macro);
@@ -1146,7 +1147,7 @@ typedef enum {
   STR_WIDE,
 } StringKind;
 
-static StringKind getStringKind(Token* tok) {
+static StringKind get_string_kind(Token* tok) {
   if (!strcmp(tok->loc, "u8"))
     return STR_UTF8;
 
@@ -1175,11 +1176,11 @@ static void join_adjacent_string_literals(Token* tok) {
       continue;
     }
 
-    StringKind kind = getStringKind(tok1);
+    StringKind kind = get_string_kind(tok1);
     Type* basety = tok1->ty->base;
 
     for (Token* t = tok1->next; t->kind == TK_STR; t = t->next) {
-      StringKind k = getStringKind(t);
+      StringKind k = get_string_kind(t);
       if (kind == STR_NONE) {
         kind = k;
         basety = t->ty->base;
@@ -1229,7 +1230,7 @@ static void join_adjacent_string_literals(Token* tok) {
 }
 
 // Entry point function of the preprocessor.
-Token* preprocess(Token* tok) {
+IMPLSTATIC Token* preprocess(Token* tok) {
   tok = preprocess2(tok);
   if (C(cond_incl))
     error_tok(C(cond_incl)->tok, "unterminated conditional directive");
