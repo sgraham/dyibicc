@@ -37,11 +37,40 @@ static void XReadWriteBarrier(void) {
   // I think this is probably a sufficient implementation in our compiler.
 }
 
+static int trace_indent_level;
+static void __dyibicc_qtrace_func_enter(char* name, char* fmt, ...) {
+  printf("__dyibicc_qtrace_func_enter\n");
+  (void)name;
+  (void)fmt;
+#if 0
+  printf("%*s=> [%s] {", trace_indent_level, "", name);
+  trace_indent_level += 2;
+  va_list ap;
+  va_start(ap, fmt);
+  vprintf(fmt, ap);
+  va_end(ap);
+  printf("}\n");
+#endif
+}
+
+static void __dyibicc_qtrace_func_leave(char* name, char* fmt, ...) {
+  trace_indent_level -= 2;
+  printf("%*s<= [%s] ", trace_indent_level, "", name);
+  va_list ap;
+  va_start(ap, fmt);
+  vprintf(fmt, ap);
+  va_end(ap);
+  printf("\n");
+}
+
 static void* get_standard_runtime_function(char* name) {
   if (L(runtime_function_map).capacity == 0) {
     L(runtime_function_map).alloc_lifetime = AL_Link;
 #define X(func) hashmap_put(&L(runtime_function_map), #func, (void*)&func)
 #define Y(name, func) hashmap_put(&L(runtime_function_map), name, (void*)&func)
+    X(__dyibicc_qtrace_func_enter);
+    X(__dyibicc_qtrace_func_leave);
+
     X(__acrt_iob_func);
     X(__chkstk);
     X(__pctype_func);

@@ -2395,7 +2395,7 @@ static void emit_text(Obj* prog) {
       ///| sub rsp, fn->stack_size
     }
     ///| mov [rbp+fn->alloca_bottom->offset], rsp
-
+    
 #if !X64WIN
     // Save arg registers if function is variadic
     if (fn->va_area) {
@@ -2518,6 +2518,11 @@ static void emit_text(Obj* prog) {
 
     // Epilogue
     ///|=>fn->dasm_return_label:
+
+    if (fn->is_traced) {
+      printf("%s traced\n", fn->name);
+    }
+
     ///| mov rsp, rbp
     ///| pop rbp
     ///| ret

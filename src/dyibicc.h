@@ -257,6 +257,7 @@ struct Obj {
   bool is_function;
   bool is_definition;
   bool is_static;
+  bool is_traced;
   int dasm_entry_label;
   int dasm_return_label;
 
@@ -684,6 +685,8 @@ typedef struct CompilerState {
   Node* parse__current_switch;  // Points to a node representing a switch if we are parsing a switch
                                 // statement. Otherwise, NULL.
   Obj* parse__builtin_alloca;
+  Obj* parse__builtin_trace_func_enter;
+  Obj* parse__builtin_trace_func_leave;
   int parse__unique_name_id;
   HashMap parse__typename_map;
 

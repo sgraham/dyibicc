@@ -36,6 +36,7 @@ typedef struct {
   bool is_extern;
   bool is_inline;
   bool is_tls;
+  bool is_traced;
   int align;
 } VarAttr;
 
@@ -323,6 +324,15 @@ static void push_tag_scope(Token* tok, Type* ty) {
   hashmap_put2(&C(scope)->tags, tok->loc, tok->len, ty);
 }
 
+static bool square_attribute_trace(Token** rest, Token* tok) {
+  if (equal(tok, "🔎")) {
+    *rest = tok->next;
+    return true;
+  }
+  *rest = tok;
+  return false;
+}
+
 // declspec = ("void" | "_Bool" | "char" | "short" | "int" | "long"
 //             | "typedef" | "static" | "extern" | "inline"
 //             | "_Thread_local" | "__thread"
@@ -368,6 +378,13 @@ static Type* declspec(Token** rest, Token* tok, VarAttr* attr) {
   Type* ty = ty_int;
   int counter = 0;
   bool is_atomic = false;
+
+  bool got_trace_attribute = square_attribute_trace(&tok, tok);
+  if (got_trace_attribute) {
+    if (!attr)
+      error_tok(tok, "trace attribute not allowed in this context");
+    attr->is_traced = got_trace_attribute;
+  }
 
   while (is_typename(tok)) {
     // Handle storage class specifiers.
@@ -3270,6 +3287,7 @@ static Token* function(Token* tok, Type* basety, VarAttr* attr) {
   Type* ty = declarator(&tok, tok, basety);
   if (!ty->name)
     error_tok(ty->name_pos, "function name omitted");
+  Token* func_start_tok = ty->name;
   char* name_str = get_ident(ty->name);
 
   Obj* fn = find_func(name_str);
@@ -3282,12 +3300,16 @@ static Token* function(Token* tok, Type* basety, VarAttr* attr) {
     if (!fn->is_static && attr->is_static)
       error_tok(tok, "static declaration follows a non-static declaration");
     fn->is_definition = fn->is_definition || equal(tok, "{");
+    // Allow additions here so they don't have to match. Possibly bad idea?
+    if (attr->is_traced)
+      fn->is_traced = true;
   } else {
     fn = new_gvar(name_str, ty);
     fn->is_function = true;
     fn->is_definition = equal(tok, "{");
     fn->is_static = attr->is_static || (attr->is_inline && !attr->is_extern);
     fn->is_inline = attr->is_inline;
+    fn->is_traced = attr->is_traced;
   }
 
   fn->is_root = !(fn->is_static && fn->is_inline);
@@ -3326,14 +3348,57 @@ static Token* function(Token* tok, Type* basety, VarAttr* attr) {
   // [https://www.sigbus.info/n1570#6.4.2.2p1] "__func__" is
   // automatically defined as a local variable containing the
   // current function name.
-  push_scope("__func__")->var =
+  Obj* func_name_literal =
       new_string_literal(fn->name, array_of(ty_char, (int)strlen(fn->name) + 1));
+  push_scope("__func__")->var = func_name_literal;
 
   // [GNU] __FUNCTION__ is yet another name of __func__.
-  push_scope("__FUNCTION__")->var =
-      new_string_literal(fn->name, array_of(ty_char, (int)strlen(fn->name) + 1));
+  push_scope("__FUNCTION__")->var = func_name_literal;
 
   fn->body = compound_stmt(&tok, tok);
+
+  if (fn->is_traced) {
+    Node* trace_enter = new_node(ND_BLOCK, func_start_tok);
+    trace_enter->body =
+        new_unary(ND_EXPR_STMT,
+                  new_unary(ND_FUNCALL, new_var_node(C(builtin_trace_func_enter), func_start_tok),
+                            func_start_tok),
+                  func_start_tok);
+    trace_enter->body->lhs->lhs->ty = C(builtin_trace_func_enter)->ty;
+    trace_enter->body->lhs->ty = C(builtin_trace_func_enter)->ty->return_ty;
+    add_type(trace_enter->body->lhs->lhs);
+    add_type(trace_enter->body->lhs);
+    char* fmt_str = "";
+    for (Obj* p = fn->params; p; p = p->next) {
+      fmt_str = format(AL_Compile, "%s%s=%%s%s", fmt_str, p->name, p->next ? " " : "");
+      printf("fmt str: '%s'\n", fmt_str);
+    }
+    trace_enter->body->next = fn->body;
+    fn->body = trace_enter;
+#if 0
+    // Insert call to enter proc before start of body.
+    Node* trace_leave =
+        new_unary(ND_EXPR_STMT,
+                  new_unary(ND_FUNCALL, new_var_node(C(builtin_trace_func_leave), func_start_tok),
+                            func_start_tok),
+                  func_start_tok);
+    trace_leave->lhs->func_ty = C(builtin_trace_func_leave)->ty;
+    trace_leave->ty = trace_leave->lhs->ty = C(builtin_trace_func_leave)->ty->return_ty;
+    Node* name = new_var_node(func_name_literal, func_start_tok);
+    trace_leave->args = name;
+    add_type(name);
+#if 0
+#endif
+    if (fn->params) {
+      // XXX only one
+      char* fmt_str = format(AL_Compile, "%s=%%s", fn->params->name);
+      Obj* trace_fmt = new_string_literal(fmt_str, array_of(ty_char, (int)strlen(fmt_str) + 1));
+      Node* fmt_node = name->next = new_var_node(trace_fmt, func_start_tok);
+      fmt_node->next = new_var_node(fn->params, func_start_tok);
+    }
+#endif
+  }
+
   fn->locals = C(locals);
   leave_scope();
   resolve_goto_labels();
@@ -3410,6 +3475,20 @@ static void declare_builtin_functions(void) {
   ty->params = copy_type(ty_int);
   C(builtin_alloca) = new_gvar("alloca", ty);
   C(builtin_alloca)->is_definition = false;
+
+  ty = func_type(ty_void);
+  ty->params = pointer_to(ty_char);
+  ty->params->next = pointer_to(ty_char);
+  ty->is_variadic = true;
+  C(builtin_trace_func_enter) = new_gvar("__dyibicc_qtrace_func_enter", ty);
+  C(builtin_trace_func_enter)->is_definition = false;
+
+  ty = func_type(ty_void);
+  ty->params = pointer_to(ty_char);
+  ty->params->next = pointer_to(ty_char);
+  ty->is_variadic = true;
+  C(builtin_trace_func_leave) = new_gvar("__dyibicc_qtrace_func_leave", ty);
+  C(builtin_trace_func_leave)->is_definition = false;
 }
 
 // program = (typedef | function-definition | global-variable)*
