@@ -2716,6 +2716,8 @@ static Type* struct_union_decl(Token** rest, Token* tok) {
     // Otherwise, register the struct type.
     Type* ty2 = hashmap_get2(&C(scope)->tags, tag->loc, tag->len);
     if (ty2) {
+      if (ty2->size >= 0)
+        error_tok(tag, "redefinition of type");
       *ty2 = *ty;
       return ty2;
     }
