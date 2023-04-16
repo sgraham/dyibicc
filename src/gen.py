@@ -48,18 +48,18 @@ CONFIGS = {
     },
     'l': {
         'd': {
-            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -O0 -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -I$root -c $in -o $out',
-            'LINK': 'clang -o $out $in -pthread -lm -ldl',
+            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -O0 -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -I$root -c $in -o $out',
+            'LINK': 'clang -o $out $in -pthread -lm -ldl -g',
             'ML': 'clang -o $out $in -lm',
         },
         'r': {
-            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -Oz -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -c -I$root $in -o $out',
-            'LINK': 'clang -o $out $in -pthread -lm -ldl',
+            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -Oz -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -c -I$root $in -o $out',
+            'LINK': 'clang -o $out $in -pthread -lm -ldl -g',
             'ML': 'clang -o $out $in -lm',
         },
         'a': {
-            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -O0 -fsanitize=address -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -c -I$root $in -o $out',
-            'LINK': 'clang -fsanitize=address -o $out $in -pthread -lm -ldl',
+            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -O0 -fsanitize=address -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -c -I$root $in -o $out',
+            'LINK': 'clang -fsanitize=address -o $out $in -pthread -lm -ldl -g',
             'ML': 'clang -o $out $in -lm',
         },
         '__': {

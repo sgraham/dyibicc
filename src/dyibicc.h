@@ -437,7 +437,7 @@ typedef enum {
 #else
   TY_LDOUBLE,
 #endif
-  TY_ENUM,
+  TY_ENUM = 9,
   TY_PTR,
   TY_FUNC,
   TY_ARRAY,

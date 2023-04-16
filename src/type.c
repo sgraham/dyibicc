@@ -222,6 +222,11 @@ IMPLSTATIC void add_type(Node* node) {
     case ND_ASSIGN:
       if (node->lhs->ty->kind == TY_ARRAY)
         error_tok(node->lhs->tok, "not an lvalue");
+      if (node->lhs->ty->kind == TY_PTR &&
+          (node->rhs->ty->kind == TY_STRUCT || node->rhs->ty->kind == TY_UNION)) {
+        error_tok(node->lhs->tok, "value of type %.*s can't be assigned to a pointer",
+                  node->rhs->ty->name->len, node->rhs->ty->name->loc);
+      }
       if (node->lhs->ty->kind != TY_STRUCT)
         node->rhs = new_cast(node->rhs, node->lhs->ty);
       node->ty = node->lhs->ty;
