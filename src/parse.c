@@ -3025,7 +3025,7 @@ static Node* generic_selection(Token** rest, Token* tok) {
 
 static Obj* build_reflect_type_obj(Type* ty, char* mangled, char* user_name) {
   // Build the actual _ReflectType global.
-  Obj* rt_var = new_gvar(bumpstrdup(mangled, AL_Compile), ty_typedesc);
+  Obj* rt_var = new_gvar(format(AL_Compile, "_$T%s", mangled), ty_typedesc);
   rt_var->is_rodata = true;
 
   // Build the name string object.
@@ -3056,59 +3056,97 @@ static Obj* build_reflect_type_obj(Type* ty, char* mangled, char* user_name) {
   return rt_var;
 }
 
-static Obj* get_builtin_reflect_type(Type* ty) {
-  char mangled[512] = {0};
-  char user_name[512] = {0};
-  strcpy(mangled, "_$T");
-
-#define X(kind, letter, un)   \
-  case kind:                  \
-    strcat(mangled, #letter); \
-    strcat(user_name, un);    \
-    break;
-
-#define XS(kind, signl, sun, unsl, uun)                \
-  case kind:                                           \
-    strcat(mangled, ty->is_unsigned ? #unsl : #signl); \
-    strcat(user_name, ty->is_unsigned ? uun : sun);    \
-    break;
-
+static char* get_reflect_builtin_mangled_name(Type* ty) {
   switch (ty->kind) {
-    X(TY_VOID, v, "void");
-    X(TY_BOOL, b, "bool");
-    X(TY_CHAR, c, "char");  // TODO: char, signed char, unsigned char
-    XS(TY_SHORT, s, "short", t, "unsigned short");
-    XS(TY_INT, i, "int", t, "unsigned int");
-#if X64WIN
-    XS(TY_LONG, l, "long long", m, "unsigned long long");
-#else
-    XS(TY_LONG, l, "long", m, "unsigned long");
-#endif
-    X(TY_FLOAT, f, "float");
-    X(TY_DOUBLE, d, "double");
+    case TY_VOID: return "v";
+    case TY_BOOL: return "b";
+    case TY_CHAR: return "c"; // TODO: char vs signed char vs unsigned char
+    case TY_SHORT: return ty->is_unsigned ? "t" : "s";
+    case TY_INT: return ty->is_unsigned ? "j" : "i";
+    case TY_LONG: return ty->is_unsigned ? "m" : "l";
+    case TY_FLOAT: return "f";
+    case TY_DOUBLE: return "d";
 #if !X64WIN
-    X(TY_LDOUBLE, e, "long double");
+    case TY_DOUBLE: return "e";
 #endif
     default:
       ABORT("not a builtin type");
   }
+}
 
-#undef X
-#undef XS
+static char* get_reflect_builtin_user_name(Type* ty) {
+  switch (ty->kind) {
+    case TY_VOID: return "void";
+    case TY_BOOL: return "bool";
+    case TY_CHAR: return "char"; // TODO: char vs signed char vs unsigned char
+    case TY_SHORT: return ty->is_unsigned ? "unsigned short" : "short";
+    case TY_INT: return ty->is_unsigned ? "unsigned int" : "int";
+#if X64WIN
+    case TY_LONG: return ty->is_unsigned ? "unsigned long long" : "long long";
+#else
+    case TY_LONG: return ty->is_unsigned ? "unsigned long" : "long";
+#endif
+    case TY_FLOAT: return "float";
+    case TY_DOUBLE: return "double";
+#if !X64WIN
+    case TY_DOUBLE: return "long double";
+#endif
+    default:
+      ABORT("not a builtin type");
+  }
+}
 
-  return build_reflect_type_obj(ty, mangled, user_name);
+static Obj* get_reflect_builtin_type(Type* ty) {
+  // XXX cache
+  return build_reflect_type_obj(ty, get_reflect_builtin_mangled_name(ty),
+                                get_reflect_builtin_user_name(ty));
+}
+
+static char* build_reflect_mangled_name(Type* ty) {
+  if (ty->kind <= TY_LDOUBLE) {
+    return get_reflect_builtin_mangled_name(ty);
+  }
+
+  if (ty->kind == TY_PTR) {
+    return format(AL_Compile, "P%s", build_reflect_mangled_name(ty->base));
+  }
+
+  if (ty->kind == TY_ARRAY) {
+    // TODO: format for flexible?
+    return format(AL_Compile, "A%d_%s", ty->array_len, build_reflect_mangled_name(ty->base));
+  }
+
+  ABORT("todo");
+}
+
+static char* build_reflect_user_name(Type* ty) {
+  if (ty->kind <= TY_LDOUBLE) {
+    return get_reflect_builtin_user_name(ty);
+  }
+
+  if (ty->kind == TY_PTR) {
+    return format(AL_Compile, "%s*", build_reflect_user_name(ty->base));
+  }
+
+  if (ty->kind == TY_ARRAY) {
+    return format(AL_Compile, "%s [%d]", build_reflect_user_name(ty->base), ty->array_len);
+  }
+
+  ABORT("todo");
 }
 
 static Obj* make_reflect_type(Type* ty) {
+  // XXX TODO this needs to cache by mangled name
+  // it should also COMDAT them at link time, but that's less important for now.
+
   if (ty->kind <= TY_LDOUBLE)
-    return get_builtin_reflect_type(ty);
+    return get_reflect_builtin_type(ty);
 
   if (ty->kind == TY_PTR) {
-    ABORT("need to build the mangled and inside out user type name");
-#if 0
     Obj* rt_base = make_reflect_type(ty->base);
 
-    Obj* rt_var = build_reflect_type_obj(ty, "_$TPc", "char*"); // XXX
+    Obj* rt_var =
+        build_reflect_type_obj(ty, build_reflect_mangled_name(ty), build_reflect_user_name(ty));
 
     Relocation* rel = bumpcalloc(1, sizeof(Relocation), AL_Compile);
     rel->offset = offsetof(_ReflectType, ptr.base);
@@ -3118,7 +3156,22 @@ static Obj* make_reflect_type(Type* ty) {
     rt_var->rel->next = rel;
 
     return rt_var;
-#endif
+  }
+
+  if (ty->kind == TY_ARRAY) {
+    Obj* rt_base = make_reflect_type(ty->base);
+
+    Obj* rt_var =
+        build_reflect_type_obj(ty, build_reflect_mangled_name(ty), build_reflect_user_name(ty));
+
+    Relocation* rel = bumpcalloc(1, sizeof(Relocation), AL_Compile);
+    rel->offset = offsetof(_ReflectType, arr.base);
+    rel->string_label = &rt_base->name;  // This matches what eval2() does for string const vars.
+
+    // Has to be appended, codegen expects them in order when filling initializers.
+    rt_var->rel->next = rel;
+
+    return rt_var;
   }
 
   ABORT("todo");

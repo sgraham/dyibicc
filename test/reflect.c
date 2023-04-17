@@ -77,6 +77,32 @@ int main(void) {
   ASSERT(8, t_charp->align);
   ASSERT(1, t_charp->ptr.base == t_char);
 
+  _ReflectType* t_charpp = _ReflectTypeOf(char**);
+  ASSERT(0, strcmp(t_charpp->name, "char**"));
+  ASSERT(_REFLECT_KIND_PTR, t_charpp->kind);
+  ASSERT(8, t_charpp->size);
+  ASSERT(8, t_charpp->align);
+  ASSERT(1, t_charpp->ptr.base == t_charp);
+
+  char* x = "zippy";
+  ASSERT(1, _ReflectTypeOf(x) == t_charp);
+
+  _ReflectType* t_intp = _ReflectTypeOf(int*);
+  ASSERT(0, strcmp(t_intp->name, "int*"));
+  ASSERT(_REFLECT_KIND_PTR, t_intp->kind);
+  ASSERT(8, t_intp->size);
+  ASSERT(8, t_intp->align);
+  ASSERT(1, t_intp->ptr.base == t_int);
+
+  int y[5];
+  _ReflectType* t_intarr5 = _ReflectTypeOf(y);
+  ASSERT(0, strcmp(t_intarr5->name, "int [5]"));
+  ASSERT(_REFLECT_KIND_ARRAY, t_intarr5->kind);
+  ASSERT(5*sizeof(int), t_intarr5->size);
+  ASSERT(4, t_intarr5->align);
+  ASSERT(1, t_intarr5->arr.base == t_int);
+  ASSERT(5, t_intarr5->arr.len);
+
   printf("OK\n");
   return 0;
 }
