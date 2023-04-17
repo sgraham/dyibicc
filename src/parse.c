@@ -3023,7 +3023,7 @@ static Node* generic_selection(Token** rest, Token* tok) {
   return ret;
 }
 
-static Obj* build_reflect_type_obj(Type* ty, char* mangled, char* user_name) {
+static Obj* build_reflect_type_obj(char* mangled, char* user_name, _ReflectType rtype) {
   // Build the actual _ReflectType global.
   Obj* rt_var = new_gvar(format(AL_Compile, "_$T%s", mangled), ty_typedesc);
   rt_var->is_rodata = true;
@@ -3038,10 +3038,17 @@ static Obj* build_reflect_type_obj(Type* ty, char* mangled, char* user_name) {
   // Attach the relocation to the _ReflectType global.
   rt_var->rel = rel;
 
+  char* buf = bumpcalloc(1, sizeof(rtype), AL_Compile);
+  memcpy(buf, &rtype, sizeof(rtype));
+  rt_var->init_data = buf;
+
+  return rt_var;
+}
+
+static _ReflectType build_reflect_base_fields(Type* ty) {
   // Create an init_data by combining the flat data in _ReflectType plus the
   // relocation that's saved the correct offset to have it point at the name.
   _ReflectType rtype = {0};
-  char* buf = bumpcalloc(1, sizeof(rtype), AL_Compile);
   rtype.size = ty->size;
   rtype.align = ty->align;
   rtype.kind = ty->kind;  // TODO: manual map, don't assume the same
@@ -3050,10 +3057,7 @@ static Obj* build_reflect_type_obj(Type* ty, char* mangled, char* user_name) {
   rtype.flags |= ty->is_flexible ? _REFLECT_TYPEFLAG_FLEXIBLE : 0;
   rtype.flags |= ty->is_packed ? _REFLECT_TYPEFLAG_PACKED : 0;
   rtype.flags |= ty->is_variadic ? _REFLECT_TYPEFLAG_VARIADIC : 0;
-  memcpy(buf, &rtype, sizeof(rtype));
-  rt_var->init_data = buf;
-
-  return rt_var;
+  return rtype;
 }
 
 static char* get_reflect_builtin_mangled_name(Type* ty) {
@@ -3098,8 +3102,9 @@ static char* get_reflect_builtin_user_name(Type* ty) {
 
 static Obj* get_reflect_builtin_type(Type* ty) {
   // XXX cache
-  return build_reflect_type_obj(ty, get_reflect_builtin_mangled_name(ty),
-                                get_reflect_builtin_user_name(ty));
+  _ReflectType rtype = build_reflect_base_fields(ty);
+  return build_reflect_type_obj(get_reflect_builtin_mangled_name(ty),
+                                get_reflect_builtin_user_name(ty), rtype);
 }
 
 static char* build_reflect_mangled_name(Type* ty) {
@@ -3145,8 +3150,9 @@ static Obj* make_reflect_type(Type* ty) {
   if (ty->kind == TY_PTR) {
     Obj* rt_base = make_reflect_type(ty->base);
 
+    _ReflectType rtype = build_reflect_base_fields(ty);
     Obj* rt_var =
-        build_reflect_type_obj(ty, build_reflect_mangled_name(ty), build_reflect_user_name(ty));
+        build_reflect_type_obj(build_reflect_mangled_name(ty), build_reflect_user_name(ty), rtype);
 
     Relocation* rel = bumpcalloc(1, sizeof(Relocation), AL_Compile);
     rel->offset = offsetof(_ReflectType, ptr.base);
@@ -3161,8 +3167,10 @@ static Obj* make_reflect_type(Type* ty) {
   if (ty->kind == TY_ARRAY) {
     Obj* rt_base = make_reflect_type(ty->base);
 
+    _ReflectType rtype = build_reflect_base_fields(ty);
+    rtype.arr.len = ty->array_len;
     Obj* rt_var =
-        build_reflect_type_obj(ty, build_reflect_mangled_name(ty), build_reflect_user_name(ty));
+        build_reflect_type_obj(build_reflect_mangled_name(ty), build_reflect_user_name(ty), rtype);
 
     Relocation* rel = bumpcalloc(1, sizeof(Relocation), AL_Compile);
     rel->offset = offsetof(_ReflectType, arr.base);
