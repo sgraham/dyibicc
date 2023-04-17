@@ -3023,61 +3023,23 @@ static Node* generic_selection(Token** rest, Token* tok) {
   return ret;
 }
 
-static Obj* make_reflect_type(Type* ty) {
-  char mangled[256];
-  strcpy(mangled, "_$T");
-  char* user_name = NULL;
+static Obj* build_reflect_type_obj(Type* ty, char* mangled, char* user_name) {
+  // Build the actual _ReflectType global.
+  Obj* rt_var = new_gvar(bumpstrdup(mangled, AL_Compile), ty_typedesc);
+  rt_var->is_rodata = true;
 
-#define X(kind, letter, un)   \
-  case kind:                  \
-    strcat(mangled, #letter); \
-    user_name = un;           \
-    break;
-
-#define XS(kind, signl, sun, unsl, uun)                \
-  case kind:                                           \
-    strcat(mangled, ty->is_unsigned ? #unsl : #signl); \
-    user_name = ty->is_unsigned ? uun : sun;           \
-    break;
-
-  switch (ty->kind) {
-    X(TY_VOID, v, "void");
-    X(TY_BOOL, b, "bool");
-    X(TY_CHAR, c, "char");  // TODO: char, signed char, unsigned char
-    XS(TY_SHORT, s, "short", t, "unsigned short");
-    XS(TY_INT, i, "int", t, "unsigned int");
-    XS(TY_LONG, l, "long", m, "unsignged long");
-    X(TY_FLOAT, f, "float");
-    X(TY_DOUBLE, d, "double");
-#if !X64WIN
-    X(TY_LDOUBLE, e, "long double");
-#endif
-
-    default:
-      ABORT("unhandled reflect type creation");
-      break;
-  }
-#undef X
-#undef XS
-
-  //printf("mangled typedesc: '%s'\n", mangled);
-  Obj* typedesc = new_gvar(bumpstrdup(mangled, AL_Compile), ty_typedesc);
-  typedesc->is_rodata = true;
-
-  Obj* name_var;
-  if (user_name) {
-    name_var = new_string_literal(user_name, array_of(ty_char, (int)strlen(user_name) + 1));
-  } else {
-    name_var = new_string_literal(ty->name->loc, array_of(ty_char, ty->name->len + 1));
-  }
-
+  // Build the name string object.
+  Obj* name_var = new_string_literal(bumpstrdup(user_name, AL_Compile),
+                                     array_of(ty_char, (int)strlen(user_name) + 1));
   Relocation* rel = bumpcalloc(1, sizeof(Relocation), AL_Compile);
   rel->offset = offsetof(_ReflectType, name);
   rel->string_label = &name_var->name;  // This matches what eval2() does for string const vars.
-  // Currently only need one for the name, will need more for nested junk.
 
-  typedesc->rel = rel;
+  // Attach the relocation to the _ReflectType global.
+  rt_var->rel = rel;
 
+  // Create an init_data by combining the flat data in _ReflectType plus the
+  // relocation that's saved the correct offset to have it point at the name.
   _ReflectType rtype = {0};
   char* buf = bumpcalloc(1, sizeof(rtype), AL_Compile);
   rtype.size = ty->size;
@@ -3089,9 +3051,77 @@ static Obj* make_reflect_type(Type* ty) {
   rtype.flags |= ty->is_packed ? _REFLECT_TYPEFLAG_PACKED : 0;
   rtype.flags |= ty->is_variadic ? _REFLECT_TYPEFLAG_VARIADIC : 0;
   memcpy(buf, &rtype, sizeof(rtype));
-  typedesc->init_data = buf;
+  rt_var->init_data = buf;
 
-  return typedesc;
+  return rt_var;
+}
+
+static Obj* get_builtin_reflect_type(Type* ty) {
+  char mangled[512] = {0};
+  char user_name[512] = {0};
+  strcpy(mangled, "_$T");
+
+#define X(kind, letter, un)   \
+  case kind:                  \
+    strcat(mangled, #letter); \
+    strcat(user_name, un);    \
+    break;
+
+#define XS(kind, signl, sun, unsl, uun)                \
+  case kind:                                           \
+    strcat(mangled, ty->is_unsigned ? #unsl : #signl); \
+    strcat(user_name, ty->is_unsigned ? uun : sun);    \
+    break;
+
+  switch (ty->kind) {
+    X(TY_VOID, v, "void");
+    X(TY_BOOL, b, "bool");
+    X(TY_CHAR, c, "char");  // TODO: char, signed char, unsigned char
+    XS(TY_SHORT, s, "short", t, "unsigned short");
+    XS(TY_INT, i, "int", t, "unsigned int");
+#if X64WIN
+    XS(TY_LONG, l, "long long", m, "unsigned long long");
+#else
+    XS(TY_LONG, l, "long", m, "unsigned long");
+#endif
+    X(TY_FLOAT, f, "float");
+    X(TY_DOUBLE, d, "double");
+#if !X64WIN
+    X(TY_LDOUBLE, e, "long double");
+#endif
+    default:
+      ABORT("not a builtin type");
+  }
+
+#undef X
+#undef XS
+
+  return build_reflect_type_obj(ty, mangled, user_name);
+}
+
+static Obj* make_reflect_type(Type* ty) {
+  if (ty->kind <= TY_LDOUBLE)
+    return get_builtin_reflect_type(ty);
+
+  if (ty->kind == TY_PTR) {
+    ABORT("need to build the mangled and inside out user type name");
+#if 0
+    Obj* rt_base = make_reflect_type(ty->base);
+
+    Obj* rt_var = build_reflect_type_obj(ty, "_$TPc", "char*"); // XXX
+
+    Relocation* rel = bumpcalloc(1, sizeof(Relocation), AL_Compile);
+    rel->offset = offsetof(_ReflectType, ptr.base);
+    rel->string_label = &rt_base->name;  // This matches what eval2() does for string const vars.
+
+    // Has to be appended, codegen expects them in order when filling initializers.
+    rt_var->rel->next = rel;
+
+    return rt_var;
+#endif
+  }
+
+  ABORT("todo");
 }
 
 // primary = "(" "{" stmt+ "}" ")"
@@ -3152,8 +3182,8 @@ static Node* primary(Token** rest, Token* tok) {
     }
     *rest = skip(tok, ")");
     // TODO: COMDAT these across translation units
-    Obj* typedesc = make_reflect_type(ty);
-    return new_unary(ND_ADDR, new_var_node(typedesc, tok), tok);
+    Obj* reflect_type = make_reflect_type(ty);
+    return new_unary(ND_ADDR, new_var_node(reflect_type, tok), tok);
   }
 
   if (equal(tok, "sizeof")) {
