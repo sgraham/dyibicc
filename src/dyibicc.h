@@ -444,6 +444,7 @@ typedef enum {
   TY_VLA,  // variable-length array
   TY_STRUCT,
   TY_UNION,
+  TY_TYPEDESC,
 } TypeKind;
 
 struct Type {
@@ -519,6 +520,8 @@ IMPLEXTERN Type* ty_ulong;
 IMPLEXTERN Type* ty_float;
 IMPLEXTERN Type* ty_double;
 IMPLEXTERN Type* ty_ldouble;
+
+IMPLEXTERN Type* ty_typedesc;
 
 IMPLSTATIC bool is_integer(Type* ty);
 IMPLSTATIC bool is_flonum(Type* ty);

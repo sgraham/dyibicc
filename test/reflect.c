@@ -5,17 +5,15 @@ typedef struct X {
   int x;
 } X;
 
-typedef struct X {
-  int x;
-} X;
-
 int printf();
 
+extern _ReflectType* _$Ti = {
+
 int main(void) {
-  int x = 42;
-  //_TypeDesc* td0 = _TypeDescFor(int);
-  //_ReflectTypeDesc* td1 = _ReflectTypeDescOf(x);
-  //_ReflectTypeDesc* td2 = _ReflectTypeDescOf(42);
-  //ASSERT(td0, td1);
-  //ASSERT(td0, td2);
+  _ReflectType* td = _ReflectTypeOf(int);
+  _ReflectType* td2 = &_$Ti;
+  ASSERT(1, td == td2);
+  ASSERT(4, td->size);
+  ASSERT(4, td->align);
+  ASSERT(0, strcmp(td->name, "int"));
 }

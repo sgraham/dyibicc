@@ -18,6 +18,8 @@
 
 #include "dyibicc.h"
 
+#include "../include/all/reflect.h"  // For definition of _ReflectType.
+
 #define C(x) compiler_state.parse__##x
 
 // Scope for local variables, global variables, typedefs
@@ -3021,6 +3023,59 @@ static Node* generic_selection(Token** rest, Token* tok) {
   return ret;
 }
 
+static Obj* make_reflect_type(Type* ty) {
+  char mangled[256];
+  strcpy(mangled, "_$T");
+  switch (ty->kind) {
+#define X(kind, letter) case kind: strcat(mangled, #letter); break;
+#define XS(kind, signl, unsl) case kind: strcat(mangled, ty->is_unsigned ? #unsl : #signl); break;
+    X(TY_VOID, v);
+    X(TY_BOOL, b);
+    X(TY_CHAR, c);  // TODO: char, signed char, unsigned char
+    XS(TY_SHORT, s, t);
+    XS(TY_INT, i, t);
+    XS(TY_LONG, l, m);
+    X(TY_FLOAT, f);
+    X(TY_DOUBLE, d);
+#if !X64WIN
+    X(TY_LDOUBLE, e);
+#endif
+#undef X
+#undef XS
+    default:
+      ABORT("unhandled reflect type creation");
+      break;
+  }
+
+  printf("mangled typedesc: '%s'\n", mangled);
+  Obj* typedesc = new_gvar(bumpstrdup(mangled, AL_Compile), ty_typedesc);
+  typedesc->is_rodata = true;
+
+  Relocation head = {0};
+
+  _ReflectType rtype = {0};
+  char* buf = bumpcalloc(1, sizeof(rtype), AL_Compile);
+  write_gvar_data(&head, init, var->ty, buf, 0);
+  var->init_data = buf;
+  var->rel = head.next;
+
+  char* buf = bumpcalloc(1, sizeof(rtype), AL_Compile);
+  Obj* name = new_string_literal(ty->name, array_of(ty_char, (int)strlen(ty->name) + 1));
+  rtype.name = fixuppush(name.name);
+  rtype.size = ty->size;
+  rtype.align = ty->align;
+  rtype.kind = ty->kind;  // TODO: manual map, don't assume the same
+  rtype.flags |= ty->is_unsigned ? _REFLECT_TYPEFLAG_UNSIGNED : 0;
+  rtype.flags |= ty->is_atomic ? _REFLECT_TYPEFLAG_ATOMIC : 0;
+  rtype.flags |= ty->is_flexible ? _REFLECT_TYPEFLAG_FLEXIBLE : 0;
+  rtype.flags |= ty->is_packed ? _REFLECT_TYPEFLAG_PACKED : 0;
+  rtype.flags |= ty->is_variadic ? _REFLECT_TYPEFLAG_VARIADIC : 0;
+  memcpy(buf, &rtype, sizeof(rtype));
+  typedesc->init_data = buf;
+
+  return typedesc;
+}
+
 // primary = "(" "{" stmt+ "}" ")"
 //         | "(" expr ")"
 //         | "sizeof" "(" type-name ")"
@@ -3064,6 +3119,23 @@ static Node* primary(Token** rest, Token* tok) {
     }
 
     return new_ulong(ty->size, start);
+  }
+
+  if (equal(tok, "_ReflectTypeOf") && equal(tok->next, "(")) {
+    tok = skip(tok->next, "(");
+
+    Type* ty;
+    if (is_typename(tok)) {
+      ty = typename(&tok, tok);
+    } else {
+      Node* node = expr(&tok, tok);
+      add_type(node);
+      ty = node->ty;
+    }
+    *rest = skip(tok, ")");
+    // TODO: COMDAT these across translation units
+    Obj* typedesc = make_reflect_type(ty);
+    return new_unary(ND_ADDR, new_var_node(typedesc, tok), tok);
   }
 
   if (equal(tok, "sizeof")) {

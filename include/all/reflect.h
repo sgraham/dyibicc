@@ -2,9 +2,9 @@
 
 #include <stdint.h>
 
-typedef struct _ReflectTypeDesc _ReflectTypeDesc;
-typedef struct _ReflectTypeDescMember _ReflectTypeDescMember;
-typedef struct _ReflectTypeDescEnumerant _ReflectTypeDescEnumerant;
+typedef struct _ReflectType _ReflectType;
+typedef struct _ReflectTypeMember _ReflectTypeMember;
+typedef struct _ReflectTypeEnumerant _ReflectTypeEnumerant;
 
 #define _REFLECT_KIND_VOID 0
 #define _REFLECT_KIND_BOOL 1
@@ -29,7 +29,11 @@ typedef struct _ReflectTypeDescEnumerant _ReflectTypeDescEnumerant;
 #define _REFLECT_TYPEFLAG_PACKED 0x0008    // Structs and unions only
 #define _REFLECT_TYPEFLAG_VARIADIC 0x0010  // Functions only
 
-struct _ReflectTypeDesc {
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4201)  // Unnamed union.
+#endif
+struct _ReflectType {
   char* name; // Either the built-in typename, or the user declared one.
   int32_t size;
   int32_t align;
@@ -38,44 +42,48 @@ struct _ReflectTypeDesc {
 
   union {
     struct {
-      _ReflectTypeDesc* base;
+      _ReflectType* base;
       int32_t len;
     } arr;
     struct {
-      _ReflectTypeDesc* base;
+      _ReflectType* base;
     } ptr;
     struct {
-      _ReflectTypeDescMember* members;
+      _ReflectTypeMember* members;
     } structunion;
     struct {
-      _ReflectTypeDesc* return_ty;
-      _ReflectTypeDesc* params;  // Linked by func.next.
-      _ReflectTypeDesc* next;
+      _ReflectType* return_ty;
+      _ReflectType* params;  // Linked by func.next.
+      _ReflectType* next;
     } func;
     struct {
-      _ReflectTypeDescEnumerant* enums;
+      _ReflectTypeEnumerant* enums;
     } enumer;
     struct {
-      _ReflectTypeDesc* vla_size;
+      _ReflectType* vla_size;
       // len?
     } vla;
   };
 };
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
-struct _ReflectTypeDescMember {
-  _ReflectTypeDescMember* next;
-  _ReflectTypeDesc* td;
+struct _ReflectTypeMember {
+  _ReflectTypeMember* next;
+  _ReflectType* td;
   char* name;
   int32_t idx;
   int32_t align;
   int32_t offset;
 };
 
-struct _ReflectTypeDescEnumerant {
-  _ReflectTypeDescEnumerant* next;
+struct _ReflectTypeEnumerant {
+  _ReflectTypeEnumerant* next;
   char* name;
   int32_t value;
 };
 
-//extern void _ReflectGetAllTypeDesc(_ReflectTypeDesc** typedescs, size_t* count);
-//extern _ReflectTypeDesc* _ReflectTypeDescOf(...);
+#if __dyibicc__
+extern _ReflectType* _ReflectTypeOf(...);
+#endif
