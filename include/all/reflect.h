@@ -53,8 +53,8 @@ struct _ReflectType {
     } structunion;
     struct {
       _ReflectType* return_ty;
-      _ReflectType* params;  // Linked by func.next.
-      _ReflectType* next;
+      size_t num_params;
+      _ReflectType* params[];
     } func;
     struct {
       _ReflectTypeEnumerant* enums;

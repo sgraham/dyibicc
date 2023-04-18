@@ -3078,7 +3078,7 @@ static char* get_reflect_builtin_mangled_name(Type* ty) {
   }
 }
 
-static char* get_reflect_builtin_user_name(Type* ty) {
+static char* get_reflect_builtin_user_name_impl(Type* ty) {
   switch (ty->kind) {
     case TY_VOID: return "void";
     case TY_BOOL: return "bool";
@@ -3100,11 +3100,20 @@ static char* get_reflect_builtin_user_name(Type* ty) {
   }
 }
 
+static char* get_reflect_builtin_user_name(Type* ty, int num_ptrs) {
+  char* cur = get_reflect_builtin_user_name_impl(ty);
+  while (num_ptrs > 0) {
+    cur = format(AL_Compile, "%s*", cur);
+    --num_ptrs;
+  }
+  return cur;
+}
+
 static Obj* get_reflect_builtin_type(Type* ty) {
   // XXX cache
   _ReflectType rtype = build_reflect_base_fields(ty);
   return build_reflect_type_obj(get_reflect_builtin_mangled_name(ty),
-                                get_reflect_builtin_user_name(ty), rtype);
+                                get_reflect_builtin_user_name(ty, 0), rtype);
 }
 
 static char* build_reflect_mangled_name(Type* ty) {
@@ -3121,23 +3130,55 @@ static char* build_reflect_mangled_name(Type* ty) {
     return format(AL_Compile, "A%d_%s", ty->array_len, build_reflect_mangled_name(ty->base));
   }
 
+  if (ty->kind == TY_FUNC) {
+    char* cur = format(AL_Compile, "F%s", build_reflect_mangled_name(ty->return_ty));
+    if (!ty->params) {
+      return format(AL_Compile, "%svE", cur);
+    }
+
+    Type* param = ty->params;
+    while (param) {
+      cur = format(AL_Compile, "%s%s", cur, build_reflect_mangled_name(param));
+      param = param->next;
+    }
+    return format(AL_Compile, "%sE", cur);
+  }
+
   ABORT("todo");
 }
 
-static char* build_reflect_user_name(Type* ty) {
+static char* build_reflect_user_name(Type* ty, int num_ptrs) {
   if (ty->kind <= TY_LDOUBLE) {
-    return get_reflect_builtin_user_name(ty);
+    return get_reflect_builtin_user_name(ty, num_ptrs);
   }
 
   if (ty->kind == TY_PTR) {
-    return format(AL_Compile, "%s*", build_reflect_user_name(ty->base));
+    return build_reflect_user_name(ty->base, num_ptrs + 1);
   }
 
   if (ty->kind == TY_ARRAY) {
-    return format(AL_Compile, "%s [%d]", build_reflect_user_name(ty->base), ty->array_len);
+    if (num_ptrs == 0) {
+      return format(AL_Compile, "%s [%d]", build_reflect_user_name(ty->base, num_ptrs),
+                    ty->array_len);
+    } else {
+      char* ptrs = "";
+      while (num_ptrs--) ptrs = format(AL_Compile, "%s*", ptrs);
+      return format(AL_Compile, "%s (%s) [%d]", build_reflect_user_name(ty->base, 0), ptrs,
+                    ty->array_len);
+    }
   }
 
-  ABORT("todo");
+  if (ty->kind == TY_FUNC) {
+    if (num_ptrs == 0) {
+      return format(AL_Compile, "%s (void)", build_reflect_user_name(ty->return_ty, num_ptrs));
+    } else {
+      char* ptrs = "";
+      while (num_ptrs--) ptrs = format(AL_Compile, "%s*", ptrs);
+      return format(AL_Compile, "%s (%s)(void)", build_reflect_user_name(ty->return_ty, 0), ptrs);
+    }
+  }
+
+  ABORT("TypeKind not handled");
 }
 
 static Obj* make_reflect_type(Type* ty) {
@@ -3151,14 +3192,12 @@ static Obj* make_reflect_type(Type* ty) {
     Obj* rt_base = make_reflect_type(ty->base);
 
     _ReflectType rtype = build_reflect_base_fields(ty);
-    Obj* rt_var =
-        build_reflect_type_obj(build_reflect_mangled_name(ty), build_reflect_user_name(ty), rtype);
+    Obj* rt_var = build_reflect_type_obj(build_reflect_mangled_name(ty),
+                                         build_reflect_user_name(ty, 0), rtype);
 
     Relocation* rel = bumpcalloc(1, sizeof(Relocation), AL_Compile);
     rel->offset = offsetof(_ReflectType, ptr.base);
-    rel->string_label = &rt_base->name;  // This matches what eval2() does for string const vars.
-
-    // Has to be appended, codegen expects them in order when filling initializers.
+    rel->string_label = &rt_base->name;
     rt_var->rel->next = rel;
 
     return rt_var;
@@ -3169,20 +3208,50 @@ static Obj* make_reflect_type(Type* ty) {
 
     _ReflectType rtype = build_reflect_base_fields(ty);
     rtype.arr.len = ty->array_len;
-    Obj* rt_var =
-        build_reflect_type_obj(build_reflect_mangled_name(ty), build_reflect_user_name(ty), rtype);
+    Obj* rt_var = build_reflect_type_obj(build_reflect_mangled_name(ty),
+                                         build_reflect_user_name(ty, 0), rtype);
 
     Relocation* rel = bumpcalloc(1, sizeof(Relocation), AL_Compile);
     rel->offset = offsetof(_ReflectType, arr.base);
-    rel->string_label = &rt_base->name;  // This matches what eval2() does for string const vars.
-
-    // Has to be appended, codegen expects them in order when filling initializers.
+    rel->string_label = &rt_base->name;
     rt_var->rel->next = rel;
 
     return rt_var;
   }
 
-  ABORT("todo");
+  if (ty->kind == TY_FUNC) {
+    _ReflectType rtype = build_reflect_base_fields(ty);
+
+    Obj* rt_var = build_reflect_type_obj(build_reflect_mangled_name(ty),
+                                         build_reflect_user_name(ty, 0), rtype);
+
+    Obj* rt_return_ty = make_reflect_type(ty->return_ty);
+    Obj* rt_params;
+    if (!ty->params) {
+      rt_params = get_reflect_builtin_type(ty_void);
+    } else {
+      rt_params = make_reflect_type(ty->params);
+      if (ty->params->next) {
+        ABORT("only one implemented");
+      }
+    }
+
+    Relocation* rel = bumpcalloc(1, sizeof(Relocation), AL_Compile);
+    rel->offset = offsetof(_ReflectType, func.return_ty);
+    rel->string_label = &rt_return_ty->name;
+    rel->next = bumpcalloc(1, sizeof(Relocation), AL_Compile);
+    rel->next->offset = offsetof(_ReflectType, func.params);
+    rel->next->string_label = &rt_params->name;
+    rt_var->rel->next = rel;
+
+    if (ty->is_variadic) {
+      ABORT("variadic not implemented");
+    }
+
+    return rt_var;
+  }
+
+  ABORT("TypeKind not handled");
 }
 
 // primary = "(" "{" stmt+ "}" ")"

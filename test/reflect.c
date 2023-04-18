@@ -4,9 +4,8 @@
 
 #include "test.h"
 
-typedef struct X {
-  int x;
-} X;
+bool SomeFunc(void) {}
+int SomeFunc2(char a, float b, short c, double d) {}
 
 int main(void) {
   _ReflectType* t_int = _ReflectTypeOf(int);
@@ -102,6 +101,29 @@ int main(void) {
   ASSERT(4, t_intarr5->align);
   ASSERT(1, t_intarr5->arr.base == t_int);
   ASSERT(5, t_intarr5->arr.len);
+
+  float(**ppz)[5];
+  _ReflectType* t_pparr5 = _ReflectTypeOf(ppz);
+  ASSERT(0, strcmp(t_pparr5->name, "float (**) [5]"));
+  ASSERT(_REFLECT_KIND_PTR, t_pparr5->kind);
+  ASSERT(8, t_pparr5->size);
+  ASSERT(8, t_pparr5->align);
+
+  _ReflectType* t_func = _ReflectTypeOf(SomeFunc);
+  ASSERT(0, strcmp(t_func->name, "bool (void)"));
+
+  _ReflectType* t_func2 = _ReflectTypeOf(SomeFunc);
+  ASSERT(0, strcmp(t_func2->name, "int (char, float, short, double)"));
+
+  int (*Funcy)(void);
+  _ReflectType* t_funcptrvoid = _ReflectTypeOf(Funcy);
+  ASSERT(0, strcmp(t_funcptrvoid->name, "int (*)(void)"));
+
+#if 0
+  float(**(*yay)(int (*)(double)))[5][6];
+  _ReflectType* t_ptr_to_func_taking_fptr_returning_pp_5_6_float = _ReflectTypeOf(yay);
+  printf("%s\n", t_ptr_to_func_taking_fptr_returning_pp_5_6_float->name);
+#endif
 
   printf("OK\n");
   return 0;
