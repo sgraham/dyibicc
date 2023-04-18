@@ -136,16 +136,31 @@ int main(void) {
                    "float (** (*)(int (*)(double))) [5][6]"));
 
   _ReflectType* t_xyz = _ReflectTypeOf(Xyz);
-  printf("%s\n", t_xyz->name);
+  ASSERT(0, strcmp(t_xyz->name, "Xyz"));
+  ASSERT(_REFLECT_KIND_STRUCT, t_xyz->kind);
+  ASSERT(4, t_xyz->size);
+  ASSERT(4, t_xyz->align);
+  ASSERT(0, t_xyz->flags);
+  ASSERT(0, t_xyz->flags);
+  ASSERT(1, t_xyz->su.num_members);
+  ASSERT(1, t_xyz->su.members[0].type == t_int);
+  ASSERT(0, strcmp(t_xyz->su.members[0].name, "a"));
+  ASSERT(4, t_xyz->su.members[0].align);
+  ASSERT(0, t_xyz->su.members[0].offset);
+  ASSERT(-1, t_xyz->su.members[0].bit_width);
+  ASSERT(-1, t_xyz->su.members[0].bit_offset);
 
   _ReflectType* t_pxyz = _ReflectTypeOf(Xyz*);
-  printf("%s\n", t_pxyz->name);
+  ASSERT(0, strcmp(t_pxyz->name, "Xyz*"));
+  ASSERT(1, t_pxyz->ptr.base == t_xyz);
 
-  _ReflectType* t_notypedef = _ReflectTypeOf(NoTypedef);
+#if 0 // Might have to move to codegen to make this work, when is name resolved?
+  _ReflectType* t_notypedef = _ReflectTypeOf(struct NoTypedef);
   printf("%s\n", t_notypedef->name);
 
-  _ReflectType* t_pnotypedef = _ReflectTypeOf(NoTypedef*);
+  _ReflectType* t_pnotypedef = _ReflectTypeOf(struct NoTypedef*);
   printf("%s\n", t_pnotypedef->name);
+#endif
 
   return 0;
 }

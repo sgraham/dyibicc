@@ -34,6 +34,22 @@ typedef struct _ReflectTypeEnumerant _ReflectTypeEnumerant;
 #pragma warning(disable: 4200)  // Zero-sized array.
 #pragma warning(disable: 4201)  // Unnamed union.
 #endif
+
+struct _ReflectTypeMember {
+  _ReflectType* type;
+  char* name;
+  int32_t align;
+  int32_t offset;
+  int32_t bit_width;   // -1 if not bitfield
+  int32_t bit_offset;  // -1 if not bitfield
+};
+
+struct _ReflectTypeEnumerant {
+  _ReflectTypeEnumerant* next;
+  char* name;
+  int32_t value;
+};
+
 struct _ReflectType {
   char* name; // Either the built-in typename, or the user declared one.
   int32_t size;
@@ -50,8 +66,9 @@ struct _ReflectType {
       _ReflectType* base;
     } ptr;
     struct {
-      _ReflectTypeMember* members;
-    } structunion;
+      size_t num_members;
+      _ReflectTypeMember members[];
+    } su;
     struct {
       _ReflectType* return_ty;
       size_t num_params;
@@ -69,21 +86,6 @@ struct _ReflectType {
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
-
-struct _ReflectTypeMember {
-  _ReflectTypeMember* next;
-  _ReflectType* td;
-  char* name;
-  int32_t idx;
-  int32_t align;
-  int32_t offset;
-};
-
-struct _ReflectTypeEnumerant {
-  _ReflectTypeEnumerant* next;
-  char* name;
-  int32_t value;
-};
 
 #if __dyibicc__
 extern _ReflectType* _ReflectTypeOf(...);

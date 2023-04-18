@@ -3175,6 +3175,10 @@ static char* build_reflect_user_name_left(Type* ty) {
     return format(AL_Compile, "%s ", ret);
   }
 
+  if (ty->kind == TY_STRUCT) {
+    return format(AL_Compile, "%.*s", ty->name->len, ty->name->loc);
+  }
+
   ABORT("todo");
 }
 
@@ -3333,6 +3337,29 @@ static _ReflectType* get_reflect_type(Type* ty) {
     int i = 0;
     for (Type* param = ty->params; param; param = param->next) {
       rtp->func.params[i++] = get_reflect_type(param);
+    }
+    hashmap_put(&user_context->reflect_types, mangled, rtp);
+    return rtp;
+  } else if (ty->kind == TY_STRUCT) {
+    rtype.name = bumpstrdup(build_reflect_user_name(ty), AL_Manual);
+    rtype.su.num_members = 0;
+    for (Member* mem = ty->members; mem; mem = mem->next) {
+      rtype.su.num_members++;
+    }
+    // This one has to be done specially because of the flexible members array.
+    _ReflectType* rtp =
+        bumpcalloc(1, sizeof(rtype) + rtype.su.num_members * sizeof(_ReflectTypeMember), AL_Manual);
+    memcpy(rtp, &rtype, sizeof(rtype));
+    int i = 0;
+    for (Member* mem = ty->members; mem; mem = mem->next) {
+      _ReflectTypeMember* rtm = &rtp->su.members[i++];
+      rtm->type = get_reflect_type(mem->ty);
+      rtm->name = bumpstrndup(mem->name->loc, mem->name->len, AL_Manual);
+      rtm->align = mem->align;
+      rtm->offset = mem->offset;
+      if (mem->idx != i - 1) ABORT("idx doesn't match expected index");
+      rtm->bit_width = mem->is_bitfield ? mem->bit_width : -1;
+      rtm->bit_offset = mem->is_bitfield ? mem->bit_offset : -1;
     }
     hashmap_put(&user_context->reflect_types, mangled, rtp);
     return rtp;
