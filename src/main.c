@@ -286,6 +286,7 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
     data->global_data[j].alloc_lifetime = AL_Manual;
     data->exports[j].alloc_lifetime = AL_Manual;
   }
+  data->reflect_types.alloc_lifetime = AL_Manual;
 
   if ((size_t)(d - (char*)data) != total_size) {
     ABORT("incorrect size calculation");
@@ -297,28 +298,14 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
   return (DyibiccContext*)data;
 }
 
-#define TOMBSTONE ((void*)-1)
-// These maps have keys strdup'd with AL_Manual, and values that are the data
-// segment allocations allocated by aligned_allocate.
-static void hashmap_custom_free_dataseg(HashMap* map) {
-  assert(map->alloc_lifetime == AL_Manual);
-  for (int i = 0; i < map->capacity; i++) {
-    HashEntry* ent = &map->buckets[i];
-    if (ent->key && ent->key != TOMBSTONE) {
-      alloc_free(ent->key, map->alloc_lifetime);
-      aligned_free(ent->val);
-    }
-  }
-  alloc_free(map->buckets, map->alloc_lifetime);
-}
-
 void dyibicc_free(DyibiccContext* context) {
   UserContext* ctx = (UserContext*)context;
   assert(ctx == user_context && "only one context currently supported");
   for (size_t i = 0; i < ctx->num_files + 1; ++i) {
-    hashmap_custom_free_dataseg(&ctx->global_data[i]);
+    hashmap_clear_manual_key_owned_value_owned_aligned(&ctx->global_data[i]);
     hashmap_clear_manual_key_owned_value_unowned(&ctx->exports[i]);
   }
+  hashmap_clear_manual_key_owned_value_owned(&ctx->reflect_types);
   for (size_t i = 0; i < ctx->num_files; ++i) {
     free_link_fixups(&ctx->files[i]);
   }
@@ -334,7 +321,6 @@ bool dyibicc_update(DyibiccContext* context, char* filename, char* contents) {
     alloc_reset(AL_Link);
     memset(&compiler_state, 0, sizeof(compiler_state));
     memset(&linker_state, 0, sizeof(linker_state));
-    // TODO: files are being left open
     // TODO: AL_Manual memory or other mallocs may be leaked
     return false;
   }

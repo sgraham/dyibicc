@@ -34,6 +34,7 @@
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -588,7 +589,9 @@ IMPLSTATIC void hashmap_put(HashMap* map, char* key, void* val);
 IMPLSTATIC void hashmap_put2(HashMap* map, char* key, int keylen, void* val);
 IMPLSTATIC void hashmap_delete(HashMap* map, char* key);
 IMPLSTATIC void hashmap_delete2(HashMap* map, char* key, int keylen);
+IMPLSTATIC void hashmap_clear_manual_key_owned_value_owned_aligned(HashMap* map);
 IMPLSTATIC void hashmap_clear_manual_key_owned_value_unowned(HashMap* map);
+IMPLSTATIC void hashmap_clear_manual_key_owned_value_owned(HashMap* map);
 
 //
 // link.c

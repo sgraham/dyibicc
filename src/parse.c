@@ -2719,6 +2719,8 @@ static Type* struct_union_decl(Token** rest, Token* tok) {
   struct_members(&tok, tok, ty);
   *rest = attribute_list(tok, ty);
 
+  ty->name = tag;
+
   if (tag) {
     // If this is a redefinition, overwrite a previous type.
     // Otherwise, register the struct type.
@@ -3029,28 +3031,6 @@ static Node* generic_selection(Token** rest, Token* tok) {
   return ret;
 }
 
-static Obj* build_reflect_type_obj(char* mangled, char* user_name, _ReflectType rtype) {
-  // Build the actual _ReflectType global.
-  Obj* rt_var = new_gvar(format(AL_Compile, "_$T%s", mangled), ty_typedesc);
-  rt_var->is_rodata = true;
-
-  // Build the name string object.
-  Obj* name_var = new_string_literal(bumpstrdup(user_name, AL_Compile),
-                                     array_of(ty_char, (int)strlen(user_name) + 1));
-  Relocation* rel = bumpcalloc(1, sizeof(Relocation), AL_Compile);
-  rel->offset = offsetof(_ReflectType, name);
-  rel->string_label = &name_var->name;  // This matches what eval2() does for string const vars.
-
-  // Attach the relocation to the _ReflectType global.
-  rt_var->rel = rel;
-
-  char* buf = bumpcalloc(1, sizeof(rtype), AL_Compile);
-  memcpy(buf, &rtype, sizeof(rtype));
-  rt_var->init_data = buf;
-
-  return rt_var;
-}
-
 static _ReflectType build_reflect_base_fields(Type* ty) {
   // Create an init_data by combining the flat data in _ReflectType plus the
   // relocation that's saved the correct offset to have it point at the name.
@@ -3077,7 +3057,7 @@ static char* get_reflect_builtin_mangled_name(Type* ty) {
     case TY_FLOAT: return "f";
     case TY_DOUBLE: return "d";
 #if !X64WIN
-    case TY_DOUBLE: return "e";
+    case TY_LDOUBLE: return "e";
 #endif
     default:
       ABORT("not a builtin type");
@@ -3099,20 +3079,11 @@ static char* get_reflect_builtin_user_name_impl(Type* ty) {
     case TY_FLOAT: return "float";
     case TY_DOUBLE: return "double";
 #if !X64WIN
-    case TY_DOUBLE: return "long double";
+    case TY_LDOUBLE: return "long double";
 #endif
     default:
       ABORT("not a builtin type");
   }
-}
-
-static char* get_reflect_builtin_user_name(Type* ty, int num_ptrs) {
-  char* cur = get_reflect_builtin_user_name_impl(ty);
-  while (num_ptrs > 0) {
-    cur = format(AL_Compile, "%s*", cur);
-    --num_ptrs;
-  }
-  return cur;
 }
 
 static char* build_reflect_mangled_name(Type* ty) {
@@ -3224,82 +3195,6 @@ static char* build_reflect_user_name(Type* ty) {
   return format(AL_Compile, "%s%s", left, right);
 }
 
-#if 0
-
-static Obj* make_reflect_type(Type* ty) {
-  // XXX TODO this needs to cache by mangled name
-  // it should also COMDAT them at link time, but that's less important for now.
-
-  if (ty->kind <= TY_LDOUBLE)
-    return get_reflect_builtin_type(ty);
-
-  if (ty->kind == TY_PTR) {
-    Obj* rt_base = make_reflect_type(ty->base);
-
-    _ReflectType rtype = build_reflect_base_fields(ty);
-    Obj* rt_var = build_reflect_type_obj(build_reflect_mangled_name(ty),
-                                         build_reflect_user_name(ty, 0), rtype);
-
-    Relocation* rel = bumpcalloc(1, sizeof(Relocation), AL_Compile);
-    rel->offset = offsetof(_ReflectType, ptr.base);
-    rel->string_label = &rt_base->name;
-    rt_var->rel->next = rel;
-
-    return rt_var;
-  }
-
-  if (ty->kind == TY_ARRAY) {
-    Obj* rt_base = make_reflect_type(ty->base);
-
-    _ReflectType rtype = build_reflect_base_fields(ty);
-    rtype.arr.len = ty->array_len;
-    Obj* rt_var = build_reflect_type_obj(build_reflect_mangled_name(ty),
-                                         build_reflect_user_name(ty, 0), rtype);
-
-    Relocation* rel = bumpcalloc(1, sizeof(Relocation), AL_Compile);
-    rel->offset = offsetof(_ReflectType, arr.base);
-    rel->string_label = &rt_base->name;
-    rt_var->rel->next = rel;
-
-    return rt_var;
-  }
-
-  if (ty->kind == TY_FUNC) {
-    _ReflectType rtype = build_reflect_base_fields(ty);
-
-    Obj* rt_var = build_reflect_type_obj(build_reflect_mangled_name(ty),
-                                         build_reflect_user_name(ty, 0), rtype);
-
-    Obj* rt_return_ty = make_reflect_type(ty->return_ty);
-    Obj* rt_params;
-    if (!ty->params) {
-      rt_params = get_reflect_builtin_type(ty_void);
-    } else {
-      rt_params = make_reflect_type(ty->params);
-      if (ty->params->next) {
-        ABORT("only one implemented");
-      }
-    }
-
-    Relocation* rel = bumpcalloc(1, sizeof(Relocation), AL_Compile);
-    rel->offset = offsetof(_ReflectType, func.return_ty);
-    rel->string_label = &rt_return_ty->name;
-    rel->next = bumpcalloc(1, sizeof(Relocation), AL_Compile);
-    rel->next->offset = offsetof(_ReflectType, func.params);
-    rel->next->string_label = &rt_params->name;
-    rt_var->rel->next = rel;
-
-    if (ty->is_variadic) {
-      ABORT("variadic not implemented");
-    }
-
-    return rt_var;
-  }
-
-  ABORT("TypeKind not handled");
-}
-#endif
-
 static _ReflectType* get_reflect_type(Type* ty) {
   char* mangled = build_reflect_mangled_name(ty);
   void* prev = hashmap_get(&user_context->reflect_types, mangled);
@@ -3315,7 +3210,7 @@ static _ReflectType* get_reflect_type(Type* ty) {
 
   _ReflectType rtype = build_reflect_base_fields(ty);
   if (ty->kind <= TY_LDOUBLE) {
-    rtype.name = get_reflect_builtin_user_name(ty, 0);
+    rtype.name = get_reflect_builtin_user_name_impl(ty);
   } else if (ty->kind == TY_PTR) {
     rtype.name = bumpstrdup(build_reflect_user_name(ty), AL_Manual);
     rtype.ptr.base = get_reflect_type(ty->base);
@@ -3350,6 +3245,7 @@ static _ReflectType* get_reflect_type(Type* ty) {
     _ReflectType* rtp =
         bumpcalloc(1, sizeof(rtype) + rtype.su.num_members * sizeof(_ReflectTypeMember), AL_Manual);
     memcpy(rtp, &rtype, sizeof(rtype));
+    hashmap_put(&user_context->reflect_types, mangled, rtp);
     int i = 0;
     for (Member* mem = ty->members; mem; mem = mem->next) {
       _ReflectTypeMember* rtm = &rtp->su.members[i++];

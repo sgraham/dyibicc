@@ -138,6 +138,25 @@ IMPLSTATIC void hashmap_delete2(HashMap* map, char* key, int keylen) {
     ent->key = TOMBSTONE;
 }
 
+// keys strdup'd with AL_Manual, and values that are the data segment
+// allocations allocated by aligned_allocate.
+IMPLSTATIC void hashmap_clear_manual_key_owned_value_owned_aligned(HashMap* map) {
+  assert(map->alloc_lifetime == AL_Manual);
+  for (int i = 0; i < map->capacity; i++) {
+    HashEntry* ent = &map->buckets[i];
+    if (ent->key && ent->key != TOMBSTONE) {
+      alloc_free(ent->key, map->alloc_lifetime);
+      aligned_free(ent->val);
+    }
+  }
+  alloc_free(map->buckets, map->alloc_lifetime);
+  map->buckets = NULL;
+  map->used = 0;
+  map->capacity = 0;
+}
+
+// keys strdup'd with AL_Manual, and values that point into the codeseg, so
+// aren't freed.
 IMPLSTATIC void hashmap_clear_manual_key_owned_value_unowned(HashMap* map) {
   assert(map->alloc_lifetime == AL_Manual);
   for (int i = 0; i < map->capacity; i++) {
@@ -145,6 +164,23 @@ IMPLSTATIC void hashmap_clear_manual_key_owned_value_unowned(HashMap* map) {
     if (ent->key && ent->key != TOMBSTONE) {
       alloc_free(ent->key, map->alloc_lifetime);
       // ent->val points into codeseg, not to be freed here.
+    }
+  }
+  alloc_free(map->buckets, map->alloc_lifetime);
+  map->buckets = NULL;
+  map->used = 0;
+  map->capacity = 0;
+}
+
+// keys strdup'd with AL_Manual, and values that are AL_Manual alloc'd and need
+// to be freed.
+IMPLSTATIC void hashmap_clear_manual_key_owned_value_owned(HashMap* map) {
+  assert(map->alloc_lifetime == AL_Manual);
+  for (int i = 0; i < map->capacity; i++) {
+    HashEntry* ent = &map->buckets[i];
+    if (ent->key && ent->key != TOMBSTONE) {
+      alloc_free(ent->key, map->alloc_lifetime);
+      alloc_free(ent->val, map->alloc_lifetime);
     }
   }
   alloc_free(map->buckets, map->alloc_lifetime);

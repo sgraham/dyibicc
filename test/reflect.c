@@ -12,7 +12,15 @@ typedef struct Xyz {
 } Xyz;
 
 struct NoTypedef {
+  int x;
 };
+
+typedef struct SelfRef {
+  int zippy;
+  float zappy;
+  double blorp;
+  struct SelfRef* next;
+} SelfRef;
 
 int main(void) {
   _ReflectType* t_int = _ReflectTypeOf(int);
@@ -141,7 +149,6 @@ int main(void) {
   ASSERT(4, t_xyz->size);
   ASSERT(4, t_xyz->align);
   ASSERT(0, t_xyz->flags);
-  ASSERT(0, t_xyz->flags);
   ASSERT(1, t_xyz->su.num_members);
   ASSERT(1, t_xyz->su.members[0].type == t_int);
   ASSERT(0, strcmp(t_xyz->su.members[0].name, "a"));
@@ -154,13 +161,48 @@ int main(void) {
   ASSERT(0, strcmp(t_pxyz->name, "Xyz*"));
   ASSERT(1, t_pxyz->ptr.base == t_xyz);
 
-#if 0 // Might have to move to codegen to make this work, when is name resolved?
+  _ReflectType* t_selfref = _ReflectTypeOf(SelfRef);
+  _ReflectType* t_pselfref = _ReflectTypeOf(SelfRef*);
+  ASSERT(0, strcmp(t_selfref->name, "SelfRef"));
+  ASSERT(_REFLECT_KIND_STRUCT, t_selfref->kind);
+  ASSERT(24, t_selfref->size);
+  ASSERT(8, t_selfref->align);
+  ASSERT(0, t_selfref->flags);
+  ASSERT(4, t_selfref->su.num_members);
+
+  ASSERT(1, t_selfref->su.members[0].type == t_int);
+  ASSERT(0, strcmp(t_selfref->su.members[0].name, "zippy"));
+  ASSERT(4, t_selfref->su.members[0].align);
+  ASSERT(0, t_selfref->su.members[0].offset);
+  ASSERT(-1, t_selfref->su.members[0].bit_width);
+  ASSERT(-1, t_selfref->su.members[0].bit_offset);
+
+  ASSERT(1, t_selfref->su.members[1].type == t_float);
+  ASSERT(0, strcmp(t_selfref->su.members[1].name, "zappy"));
+  ASSERT(4, t_selfref->su.members[1].align);
+  ASSERT(4, t_selfref->su.members[1].offset);
+  ASSERT(-1, t_selfref->su.members[1].bit_width);
+  ASSERT(-1, t_selfref->su.members[1].bit_offset);
+
+  ASSERT(1, t_selfref->su.members[2].type == t_double);
+  ASSERT(0, strcmp(t_selfref->su.members[2].name, "blorp"));
+  ASSERT(8, t_selfref->su.members[2].align);
+  ASSERT(8, t_selfref->su.members[2].offset);
+  ASSERT(-1, t_selfref->su.members[2].bit_width);
+  ASSERT(-1, t_selfref->su.members[2].bit_offset);
+
+  ASSERT(1, t_selfref->su.members[3].type == t_pselfref);
+  ASSERT(0, strcmp(t_selfref->su.members[3].name, "next"));
+  ASSERT(8, t_selfref->su.members[3].align);
+  ASSERT(16, t_selfref->su.members[3].offset);
+  ASSERT(-1, t_selfref->su.members[3].bit_width);
+  ASSERT(-1, t_selfref->su.members[3].bit_offset);
+
   _ReflectType* t_notypedef = _ReflectTypeOf(struct NoTypedef);
-  printf("%s\n", t_notypedef->name);
+  ASSERT(0, strcmp(t_notypedef->name, "NoTypedef"));  // "struct NoTypedef"?
 
   _ReflectType* t_pnotypedef = _ReflectTypeOf(struct NoTypedef*);
-  printf("%s\n", t_pnotypedef->name);
-#endif
+  ASSERT(0, strcmp(t_pnotypedef->name, "NoTypedef*"));
 
   return 0;
 }
