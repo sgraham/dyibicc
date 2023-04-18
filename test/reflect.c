@@ -7,8 +7,11 @@
 bool SomeFunc(void) {}
 int SomeFunc2(char a, float b, short c, double d) {}
 
-struct X {
+typedef struct Xyz {
   int a;
+} Xyz;
+
+struct NoTypedef {
 };
 
 int main(void) {
@@ -132,8 +135,17 @@ int main(void) {
   ASSERT(0, strcmp(t_ptr_to_func_taking_fptr_returning_pp_5_6_float->name,
                    "float (** (*)(int (*)(double))) [5][6]"));
 
-  _ReflectType* t_x = _ReflectTypeOf(struct X);
-  printf("%s\n", t_x->name);
+  _ReflectType* t_xyz = _ReflectTypeOf(Xyz);
+  printf("%s\n", t_xyz->name);
+
+  _ReflectType* t_pxyz = _ReflectTypeOf(Xyz*);
+  printf("%s\n", t_pxyz->name);
+
+  _ReflectType* t_notypedef = _ReflectTypeOf(NoTypedef);
+  printf("%s\n", t_notypedef->name);
+
+  _ReflectType* t_pnotypedef = _ReflectTypeOf(NoTypedef*);
+  printf("%s\n", t_pnotypedef->name);
 
   return 0;
 }

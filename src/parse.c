@@ -3143,6 +3143,10 @@ static char* build_reflect_mangled_name(Type* ty) {
     return format(AL_Compile, "%sE", cur);
   }
 
+  if (ty->kind == TY_STRUCT) {
+    return format(AL_Compile, "%d%.*s", ty->name->len, ty->name->len, ty->name->loc);
+  }
+
   ABORT("todo");
 }
 
