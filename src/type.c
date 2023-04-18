@@ -21,8 +21,6 @@ IMPLSTATIC Type* ty_ldouble = &(Type){TY_LDOUBLE, 8, 8};
 IMPLSTATIC Type* ty_ldouble = &(Type){TY_LDOUBLE, 16, 16};
 #endif
 
-IMPLSTATIC Type* ty_typedesc = &(Type){TY_TYPEDESC, 48, 8};
-
 static Type* new_type(TypeKind kind, int size, int align) {
   Type* ty = bumpcalloc(1, sizeof(Type), AL_Compile);
   ty->kind = kind;

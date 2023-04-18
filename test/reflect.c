@@ -7,6 +7,10 @@
 bool SomeFunc(void) {}
 int SomeFunc2(char a, float b, short c, double d) {}
 
+struct X {
+  int a;
+};
+
 int main(void) {
   _ReflectType* t_int = _ReflectTypeOf(int);
   ASSERT(0, strcmp(t_int->name, "int"));
@@ -112,19 +116,24 @@ int main(void) {
   _ReflectType* t_func = _ReflectTypeOf(SomeFunc);
   ASSERT(0, strcmp(t_func->name, "bool (void)"));
 
-  _ReflectType* t_func2 = _ReflectTypeOf(SomeFunc);
+  _ReflectType* t_func2 = _ReflectTypeOf(SomeFunc2);
   ASSERT(0, strcmp(t_func2->name, "int (char, float, short, double)"));
 
   int (*Funcy)(void);
   _ReflectType* t_funcptrvoid = _ReflectTypeOf(Funcy);
   ASSERT(0, strcmp(t_funcptrvoid->name, "int (*)(void)"));
 
-#if 0
-  float(**(*yay)(int (*)(double)))[5][6];
-  _ReflectType* t_ptr_to_func_taking_fptr_returning_pp_5_6_float = _ReflectTypeOf(yay);
-  printf("%s\n", t_ptr_to_func_taking_fptr_returning_pp_5_6_float->name);
-#endif
+  int (*(*Funcy2)(void))[3];
+  _ReflectType* t_fpretparr = _ReflectTypeOf(Funcy2);
+  ASSERT(0, strcmp(t_fpretparr->name, "int (* (*)(void)) [3]"));
 
-  printf("OK\n");
+  float(**(*lsd)(int (*)(double)))[5][6];
+  _ReflectType* t_ptr_to_func_taking_fptr_returning_pp_5_6_float = _ReflectTypeOf(lsd);
+  ASSERT(0, strcmp(t_ptr_to_func_taking_fptr_returning_pp_5_6_float->name,
+                   "float (** (*)(int (*)(double))) [5][6]"));
+
+  _ReflectType* t_x = _ReflectTypeOf(struct X);
+  printf("%s\n", t_x->name);
+
   return 0;
 }

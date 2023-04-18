@@ -31,6 +31,7 @@ typedef struct _ReflectTypeEnumerant _ReflectTypeEnumerant;
 
 #ifdef _MSC_VER
 #pragma warning(push)
+#pragma warning(disable: 4200)  // Zero-sized array.
 #pragma warning(disable: 4201)  // Unnamed union.
 #endif
 struct _ReflectType {

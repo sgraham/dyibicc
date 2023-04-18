@@ -1506,6 +1506,9 @@ static void gen_expr(Node* node) {
     case ND_LABEL_VAL:
       ///| lea rax, [=>node->pc_label]
       return;
+    case ND_REFLECT_TYPE_PTR:
+      ///| mov64 rax, node->rty;
+      return;
     case ND_CAS:
     case ND_LOCKCE: {
       bool is_locked_ce = node->kind == ND_LOCKCE;

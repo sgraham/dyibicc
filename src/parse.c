@@ -208,6 +208,12 @@ static Node* new_vla_ptr(Obj* var, Token* tok) {
   return node;
 }
 
+static Node* new_reflect_type_ptr(_ReflectType* rty, Token* tok) {
+  Node* node = new_node(ND_REFLECT_TYPE_PTR, tok);
+  node->rty = (uintptr_t)rty;
+  return node;
+}
+
 IMPLSTATIC Node* new_cast(Node* expr, Type* ty) {
   add_type(expr);
 
@@ -3109,13 +3115,6 @@ static char* get_reflect_builtin_user_name(Type* ty, int num_ptrs) {
   return cur;
 }
 
-static Obj* get_reflect_builtin_type(Type* ty) {
-  // XXX cache
-  _ReflectType rtype = build_reflect_base_fields(ty);
-  return build_reflect_type_obj(get_reflect_builtin_mangled_name(ty),
-                                get_reflect_builtin_user_name(ty, 0), rtype);
-}
-
 static char* build_reflect_mangled_name(Type* ty) {
   if (ty->kind <= TY_LDOUBLE) {
     return get_reflect_builtin_mangled_name(ty);
@@ -3147,39 +3146,77 @@ static char* build_reflect_mangled_name(Type* ty) {
   ABORT("todo");
 }
 
-static char* build_reflect_user_name(Type* ty, int num_ptrs) {
+static char* build_reflect_user_name_left(Type* ty) {
   if (ty->kind <= TY_LDOUBLE) {
-    return get_reflect_builtin_user_name(ty, num_ptrs);
+    return get_reflect_builtin_user_name_impl(ty);
   }
 
   if (ty->kind == TY_PTR) {
-    return build_reflect_user_name(ty->base, num_ptrs + 1);
+    char* ret = build_reflect_user_name_left(ty->base);
+    if (ty->base->kind == TY_ARRAY) {
+      return format(AL_Compile, "%s (*", ret);
+    } else if (ty->base->kind == TY_FUNC) {
+      return format(AL_Compile, "%s(*", ret);
+    } else {
+      return format(AL_Compile, "%s*", ret);
+    }
   }
 
   if (ty->kind == TY_ARRAY) {
-    if (num_ptrs == 0) {
-      return format(AL_Compile, "%s [%d]", build_reflect_user_name(ty->base, num_ptrs),
-                    ty->array_len);
-    } else {
-      char* ptrs = "";
-      while (num_ptrs--) ptrs = format(AL_Compile, "%s*", ptrs);
-      return format(AL_Compile, "%s (%s) [%d]", build_reflect_user_name(ty->base, 0), ptrs,
-                    ty->array_len);
-    }
+    return build_reflect_user_name_left(ty->base);
   }
 
   if (ty->kind == TY_FUNC) {
-    if (num_ptrs == 0) {
-      return format(AL_Compile, "%s (void)", build_reflect_user_name(ty->return_ty, num_ptrs));
-    } else {
-      char* ptrs = "";
-      while (num_ptrs--) ptrs = format(AL_Compile, "%s*", ptrs);
-      return format(AL_Compile, "%s (%s)(void)", build_reflect_user_name(ty->return_ty, 0), ptrs);
-    }
+    char* ret = build_reflect_user_name_left(ty->return_ty);
+    return format(AL_Compile, "%s ", ret);
   }
 
-  ABORT("TypeKind not handled");
+  ABORT("todo");
 }
+
+static char* build_reflect_user_name_right(Type* ty, bool multi_array) {
+  if (ty->kind == TY_PTR) {
+    char *ret = "";
+    if (ty->base->kind == TY_ARRAY || ty->base->kind == TY_FUNC) {
+      ret = ")";
+    }
+    ret = format(AL_Compile, "%s%s", ret, build_reflect_user_name_right(ty->base, false));
+    return ret;
+  }
+
+  if (ty->kind == TY_ARRAY) {
+    // TODO: not sure about this multi_array hack.
+    // TODO: zero sized array
+    return format(AL_Compile, "%s[%d]%s", multi_array ? "" : " ", ty->array_len,
+                  build_reflect_user_name_right(ty->base, true));
+  }
+
+  if (ty->kind == TY_FUNC) {
+    char* ret = "(";
+    if (!ty->params) {
+      ret = format(AL_Compile, "%svoid", ret);
+    } else {
+      bool first = true;
+      for (Type* param = ty->params; param; param = param->next) {
+        char* p_left = build_reflect_user_name_left(param);
+        char* p_right = build_reflect_user_name_right(param, false);
+        ret = format(AL_Compile, "%s%s%s%s", ret, first ? "" : ", ", p_left, p_right);
+        first = false;
+      }
+    }
+    return format(AL_Compile, "%s)%s", ret, build_reflect_user_name_right(ty->return_ty, false));
+  }
+
+  return "";
+}
+
+static char* build_reflect_user_name(Type* ty) {
+  char* left = build_reflect_user_name_left(ty);
+  char* right = build_reflect_user_name_right(ty, false);
+  return format(AL_Compile, "%s%s", left, right);
+}
+
+#if 0
 
 static Obj* make_reflect_type(Type* ty) {
   // XXX TODO this needs to cache by mangled name
@@ -3253,6 +3290,57 @@ static Obj* make_reflect_type(Type* ty) {
 
   ABORT("TypeKind not handled");
 }
+#endif
+
+static _ReflectType* get_reflect_type(Type* ty) {
+  char* mangled = build_reflect_mangled_name(ty);
+  void* prev = hashmap_get(&user_context->reflect_types, mangled);
+  if (prev) {
+    return prev;
+  }
+
+  // Otherwise, it actually needs to be created.
+  // XXX figure out invalidation on update().
+  // Possibly need to write real Obj* with Relocation list, rather than
+  // smuggling it through to runtime in UserContext. See old commits on
+  // 'typedesc' branch.
+
+  _ReflectType rtype = build_reflect_base_fields(ty);
+  if (ty->kind <= TY_LDOUBLE) {
+    rtype.name = get_reflect_builtin_user_name(ty, 0);
+  } else if (ty->kind == TY_PTR) {
+    rtype.name = bumpstrdup(build_reflect_user_name(ty), AL_Manual);
+    rtype.ptr.base = get_reflect_type(ty->base);
+  } else if (ty->kind == TY_ARRAY) {
+    rtype.name = bumpstrdup(build_reflect_user_name(ty), AL_Manual);
+    rtype.arr.base = get_reflect_type(ty->base);
+    rtype.arr.len = ty->array_len;
+  } else if (ty->kind == TY_FUNC) {
+    rtype.name = bumpstrdup(build_reflect_user_name(ty), AL_Manual);
+    rtype.func.return_ty = get_reflect_type(ty->return_ty);
+    rtype.func.num_params = 0;
+    for (Type* param = ty->params; param; param = param->next) {
+      rtype.func.num_params++;
+    }
+    // This one has to be done specially because of the flexible params array.
+    _ReflectType* rtp =
+        bumpcalloc(1, sizeof(rtype) + rtype.func.num_params * sizeof(_ReflectType*), AL_Manual);
+    memcpy(rtp, &rtype, sizeof(rtype));
+    int i = 0;
+    for (Type* param = ty->params; param; param = param->next) {
+      rtp->func.params[i++] = get_reflect_type(param);
+    }
+    hashmap_put(&user_context->reflect_types, mangled, rtp);
+    return rtp;
+  } else {
+    ABORT("todo");
+  }
+
+  void* p = bumpcalloc(1, sizeof(rtype), AL_Manual);
+  memcpy(p, &rtype, sizeof(rtype));
+  hashmap_put(&user_context->reflect_types, mangled, p);
+  return p;
+}
 
 // primary = "(" "{" stmt+ "}" ")"
 //         | "(" expr ")"
@@ -3311,9 +3399,9 @@ static Node* primary(Token** rest, Token* tok) {
       ty = node->ty;
     }
     *rest = skip(tok, ")");
-    // TODO: COMDAT these across translation units
-    Obj* reflect_type = make_reflect_type(ty);
-    return new_unary(ND_ADDR, new_var_node(reflect_type, tok), tok);
+    Node* ret = new_reflect_type_ptr(get_reflect_type(ty), tok);
+    ret->ty = pointer_to(ty_void);
+    return ret;
   }
 
   if (equal(tok, "sizeof")) {
