@@ -286,15 +286,15 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
     data->global_data[j].alloc_lifetime = AL_Manual;
     data->exports[j].alloc_lifetime = AL_Manual;
   }
-  data->reflect_types.alloc_lifetime = AL_Manual;
+  data->reflect_types.alloc_lifetime = AL_UserContext;
 
   if ((size_t)(d - (char*)data) != total_size) {
     ABORT("incorrect size calculation");
   }
 
-  alloc_reset(AL_Temp);
-
   user_context = data;
+  alloc_reset(AL_Temp);
+  alloc_init(AL_UserContext);
   return (DyibiccContext*)data;
 }
 
@@ -305,7 +305,8 @@ void dyibicc_free(DyibiccContext* context) {
     hashmap_clear_manual_key_owned_value_owned_aligned(&ctx->global_data[i]);
     hashmap_clear_manual_key_owned_value_unowned(&ctx->exports[i]);
   }
-  hashmap_clear_manual_key_owned_value_owned(&ctx->reflect_types);
+  alloc_reset(AL_UserContext);
+
   for (size_t i = 0; i < ctx->num_files; ++i) {
     free_link_fixups(&ctx->files[i]);
   }
@@ -321,7 +322,6 @@ bool dyibicc_update(DyibiccContext* context, char* filename, char* contents) {
     alloc_reset(AL_Link);
     memset(&compiler_state, 0, sizeof(compiler_state));
     memset(&linker_state, 0, sizeof(linker_state));
-    // TODO: AL_Manual memory or other mallocs may be leaked
     return false;
   }
 

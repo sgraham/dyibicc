@@ -89,7 +89,9 @@ typedef enum AllocLifetime {
   AL_Compile = 0,  // Must be 0 so that 0-initialized structs default to this storage.
   AL_Temp,
   AL_Link,
-  AL_Manual,
+  AL_UserContext,
+  NUM_BUMP_HEAPS,
+  AL_Manual = NUM_BUMP_HEAPS,
 } AllocLifetime;
 
 IMPLSTATIC void alloc_init(AllocLifetime lifetime);

@@ -3086,6 +3086,8 @@ static char* get_reflect_builtin_user_name_impl(Type* ty) {
   }
 }
 
+// Returns mangled name for the given type, string is either rodata or
+// AL_Compile.
 static char* build_reflect_mangled_name(Type* ty) {
   if (ty->kind <= TY_LDOUBLE) {
     return get_reflect_builtin_mangled_name(ty);
@@ -3212,60 +3214,60 @@ static _ReflectType* get_reflect_type(Type* ty) {
   if (ty->kind <= TY_LDOUBLE) {
     rtype.name = get_reflect_builtin_user_name_impl(ty);
   } else if (ty->kind == TY_PTR) {
-    rtype.name = bumpstrdup(build_reflect_user_name(ty), AL_Manual);
+    rtype.name = bumpstrdup(build_reflect_user_name(ty), AL_UserContext);
     rtype.ptr.base = get_reflect_type(ty->base);
   } else if (ty->kind == TY_ARRAY) {
-    rtype.name = bumpstrdup(build_reflect_user_name(ty), AL_Manual);
+    rtype.name = bumpstrdup(build_reflect_user_name(ty), AL_UserContext);
     rtype.arr.base = get_reflect_type(ty->base);
     rtype.arr.len = ty->array_len;
   } else if (ty->kind == TY_FUNC) {
-    rtype.name = bumpstrdup(build_reflect_user_name(ty), AL_Manual);
+    rtype.name = bumpstrdup(build_reflect_user_name(ty), AL_UserContext);
     rtype.func.return_ty = get_reflect_type(ty->return_ty);
     rtype.func.num_params = 0;
     for (Type* param = ty->params; param; param = param->next) {
       rtype.func.num_params++;
     }
     // This one has to be done specially because of the flexible params array.
-    _ReflectType* rtp =
-        bumpcalloc(1, sizeof(rtype) + rtype.func.num_params * sizeof(_ReflectType*), AL_Manual);
+    _ReflectType* rtp = bumpcalloc(1, sizeof(rtype) + rtype.func.num_params * sizeof(_ReflectType*),
+                                   AL_UserContext);
     memcpy(rtp, &rtype, sizeof(rtype));
     int i = 0;
     for (Type* param = ty->params; param; param = param->next) {
       rtp->func.params[i++] = get_reflect_type(param);
     }
-    hashmap_put(&user_context->reflect_types, mangled, rtp);
+    hashmap_put(&user_context->reflect_types, bumpstrdup(mangled, AL_UserContext), rtp);
     return rtp;
   } else if (ty->kind == TY_STRUCT) {
-    rtype.name = bumpstrdup(build_reflect_user_name(ty), AL_Manual);
+    rtype.name = bumpstrdup(build_reflect_user_name(ty), AL_UserContext);
     rtype.su.num_members = 0;
     for (Member* mem = ty->members; mem; mem = mem->next) {
       rtype.su.num_members++;
     }
     // This one has to be done specially because of the flexible members array.
-    _ReflectType* rtp =
-        bumpcalloc(1, sizeof(rtype) + rtype.su.num_members * sizeof(_ReflectTypeMember), AL_Manual);
+    _ReflectType* rtp = bumpcalloc(
+        1, sizeof(rtype) + rtype.su.num_members * sizeof(_ReflectTypeMember), AL_UserContext);
     memcpy(rtp, &rtype, sizeof(rtype));
-    hashmap_put(&user_context->reflect_types, mangled, rtp);
+    hashmap_put(&user_context->reflect_types, bumpstrdup(mangled, AL_UserContext), rtp);
     int i = 0;
     for (Member* mem = ty->members; mem; mem = mem->next) {
       _ReflectTypeMember* rtm = &rtp->su.members[i++];
       rtm->type = get_reflect_type(mem->ty);
-      rtm->name = bumpstrndup(mem->name->loc, mem->name->len, AL_Manual);
+      rtm->name = bumpstrndup(mem->name->loc, mem->name->len, AL_UserContext);
       rtm->align = mem->align;
       rtm->offset = mem->offset;
       if (mem->idx != i - 1) ABORT("idx doesn't match expected index");
       rtm->bit_width = mem->is_bitfield ? mem->bit_width : -1;
       rtm->bit_offset = mem->is_bitfield ? mem->bit_offset : -1;
     }
-    hashmap_put(&user_context->reflect_types, mangled, rtp);
+    hashmap_put(&user_context->reflect_types, bumpstrdup(mangled, AL_UserContext), rtp);
     return rtp;
   } else {
     ABORT("todo");
   }
 
-  void* p = bumpcalloc(1, sizeof(rtype), AL_Manual);
+  void* p = bumpcalloc(1, sizeof(rtype), AL_UserContext);
   memcpy(p, &rtype, sizeof(rtype));
-  hashmap_put(&user_context->reflect_types, mangled, p);
+  hashmap_put(&user_context->reflect_types, bumpstrdup(mangled, AL_UserContext), p);
   return p;
 }
 
