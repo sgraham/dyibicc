@@ -12,6 +12,7 @@ import sys
 # declared.
 FILELIST = [
     'src/dyibicc.h',
+    'include/all/reflect.h',
     'src/khash.h',
     'src/dynasm/dasm_proto.h',
     'src/dynasm/dasm_x86.h',
@@ -26,6 +27,19 @@ FILELIST = [
     'src/tokenize.c',
     'src/unicode.c',
 ]
+
+
+HEADER = '''\
+//
+// Amalgamated (single file) build of https://github.com/sgraham/dyibicc.
+// Revision: %s
+//
+// This file should not be edited or modified, patches should be to the
+// non-amalgamated files in src/. The user-facing API is in libdyibicc.h
+// which should be located in the same directory as this .c file.
+//
+
+'''
 
 
 def push_disable_dynasm_warnings(f):
@@ -60,6 +74,10 @@ def include_file(f, src):
                 continue
             if line.startswith('#include "dynasm/dasm_x86.h"'):
                 continue
+            if line.startswith('#include "../include/all/reflect.h"'):
+                continue
+            if line.startswith('#pragma once'):
+                continue
             if line.startswith('IMPLEXTERN '):
                 continue
             f.write(line.replace('IMPLSTATIC ', 'static ').replace('DASM_FDEF ', 'static '))
@@ -76,6 +94,9 @@ def main():
     if not os.path.isdir('embed'):
         os.makedirs('embed')
     with open('embed/libdyibicc.c', 'w', newline='\n') as f:
+        rev_parse = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True)
+        cur_rev = rev_parse.stdout.decode('utf-8').strip()
+        f.write(HEADER % cur_rev)
         for src in FILELIST:
             include_file(f, src)
 
