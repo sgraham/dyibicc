@@ -34,6 +34,7 @@
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -88,7 +89,9 @@ typedef enum AllocLifetime {
   AL_Compile = 0,  // Must be 0 so that 0-initialized structs default to this storage.
   AL_Temp,
   AL_Link,
-  AL_Manual,
+  AL_UserContext,
+  NUM_BUMP_HEAPS,
+  AL_Manual = NUM_BUMP_HEAPS,
 } AllocLifetime;
 
 IMPLSTATIC void alloc_init(AllocLifetime lifetime);
@@ -295,55 +298,56 @@ struct Relocation {
 
 // AST node
 typedef enum {
-  ND_NULL_EXPR,  // Do nothing
-  ND_ADD,        // +
-  ND_SUB,        // -
-  ND_MUL,        // *
-  ND_DIV,        // /
-  ND_NEG,        // unary -
-  ND_MOD,        // %
-  ND_BITAND,     // &
-  ND_BITOR,      // |
-  ND_BITXOR,     // ^
-  ND_SHL,        // <<
-  ND_SHR,        // >>
-  ND_EQ,         // ==
-  ND_NE,         // !=
-  ND_LT,         // <
-  ND_LE,         // <=
-  ND_ASSIGN,     // =
-  ND_COND,       // ?:
-  ND_COMMA,      // ,
-  ND_MEMBER,     // . (struct member access)
-  ND_ADDR,       // unary &
-  ND_DEREF,      // unary *
-  ND_NOT,        // !
-  ND_BITNOT,     // ~
-  ND_LOGAND,     // &&
-  ND_LOGOR,      // ||
-  ND_RETURN,     // "return"
-  ND_IF,         // "if"
-  ND_FOR,        // "for" or "while"
-  ND_DO,         // "do"
-  ND_SWITCH,     // "switch"
-  ND_CASE,       // "case"
-  ND_BLOCK,      // { ... }
-  ND_GOTO,       // "goto"
-  ND_GOTO_EXPR,  // "goto" labels-as-values
-  ND_LABEL,      // Labeled statement
-  ND_LABEL_VAL,  // [GNU] Labels-as-values
-  ND_FUNCALL,    // Function call
-  ND_EXPR_STMT,  // Expression statement
-  ND_STMT_EXPR,  // Statement expression
-  ND_VAR,        // Variable
-  ND_VLA_PTR,    // VLA designator
-  ND_NUM,        // Integer
-  ND_CAST,       // Type cast
-  ND_MEMZERO,    // Zero-clear a stack variable
-  ND_ASM,        // "asm"
-  ND_CAS,        // Atomic compare-and-swap
-  ND_LOCKCE,     // _InterlockedCompareExchange
-  ND_EXCH,       // Atomic exchange
+  ND_NULL_EXPR,         // Do nothing
+  ND_ADD,               // +
+  ND_SUB,               // -
+  ND_MUL,               // *
+  ND_DIV,               // /
+  ND_NEG,               // unary -
+  ND_MOD,               // %
+  ND_BITAND,            // &
+  ND_BITOR,             // |
+  ND_BITXOR,            // ^
+  ND_SHL,               // <<
+  ND_SHR,               // >>
+  ND_EQ,                // ==
+  ND_NE,                // !=
+  ND_LT,                // <
+  ND_LE,                // <=
+  ND_ASSIGN,            // =
+  ND_COND,              // ?:
+  ND_COMMA,             // ,
+  ND_MEMBER,            // . (struct member access)
+  ND_ADDR,              // unary &
+  ND_DEREF,             // unary *
+  ND_NOT,               // !
+  ND_BITNOT,            // ~
+  ND_LOGAND,            // &&
+  ND_LOGOR,             // ||
+  ND_RETURN,            // "return"
+  ND_IF,                // "if"
+  ND_FOR,               // "for" or "while"
+  ND_DO,                // "do"
+  ND_SWITCH,            // "switch"
+  ND_CASE,              // "case"
+  ND_BLOCK,             // { ... }
+  ND_GOTO,              // "goto"
+  ND_GOTO_EXPR,         // "goto" labels-as-values
+  ND_LABEL,             // Labeled statement
+  ND_LABEL_VAL,         // [GNU] Labels-as-values
+  ND_FUNCALL,           // Function call
+  ND_EXPR_STMT,         // Expression statement
+  ND_STMT_EXPR,         // Statement expression
+  ND_VAR,               // Variable
+  ND_VLA_PTR,           // VLA designator
+  ND_REFLECT_TYPE_PTR,  // _ReflectType*
+  ND_NUM,               // Integer
+  ND_CAST,              // Type cast
+  ND_MEMZERO,           // Zero-clear a stack variable
+  ND_ASM,               // "asm"
+  ND_CAS,               // Atomic compare-and-swap
+  ND_LOCKCE,            // _InterlockedCompareExchange
+  ND_EXCH,              // Atomic exchange
 } NodeKind;
 
 // AST node type
@@ -413,6 +417,8 @@ struct Node {
   // Numeric literal
   int64_t val;
   long double fval;
+
+  uintptr_t rty;
 };
 
 IMPLSTATIC Node* new_cast(Node* expr, Type* ty);
@@ -520,6 +526,8 @@ IMPLEXTERN Type* ty_float;
 IMPLEXTERN Type* ty_double;
 IMPLEXTERN Type* ty_ldouble;
 
+IMPLEXTERN Type* ty_typedesc;
+
 IMPLSTATIC bool is_integer(Type* ty);
 IMPLSTATIC bool is_flonum(Type* ty);
 IMPLSTATIC bool is_numeric(Type* ty);
@@ -583,6 +591,7 @@ IMPLSTATIC void hashmap_put(HashMap* map, char* key, void* val);
 IMPLSTATIC void hashmap_put2(HashMap* map, char* key, int keylen, void* val);
 IMPLSTATIC void hashmap_delete(HashMap* map, char* key);
 IMPLSTATIC void hashmap_delete2(HashMap* map, char* key, int keylen);
+IMPLSTATIC void hashmap_clear_manual_key_owned_value_owned_aligned(HashMap* map);
 IMPLSTATIC void hashmap_clear_manual_key_owned_value_unowned(HashMap* map);
 
 //
@@ -650,6 +659,8 @@ typedef struct UserContext {
   HashMap* global_data;
 
   HashMap* exports;
+
+  HashMap reflect_types;
 } UserContext;
 
 typedef struct dasm_State dasm_State;

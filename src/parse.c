@@ -18,6 +18,8 @@
 
 #include "dyibicc.h"
 
+#include "../include/all/reflect.h"  // For definition of _ReflectType.
+
 #define C(x) compiler_state.parse__##x
 
 // Scope for local variables, global variables, typedefs
@@ -203,6 +205,12 @@ static Node* new_var_node(Obj* var, Token* tok) {
 static Node* new_vla_ptr(Obj* var, Token* tok) {
   Node* node = new_node(ND_VLA_PTR, tok);
   node->var = var;
+  return node;
+}
+
+static Node* new_reflect_type_ptr(_ReflectType* rty, Token* tok) {
+  Node* node = new_node(ND_REFLECT_TYPE_PTR, tok);
+  node->rty = (uintptr_t)rty;
   return node;
 }
 
@@ -2711,6 +2719,8 @@ static Type* struct_union_decl(Token** rest, Token* tok) {
   struct_members(&tok, tok, ty);
   *rest = attribute_list(tok, ty);
 
+  ty->name = tag;
+
   if (tag) {
     // If this is a redefinition, overwrite a previous type.
     // Otherwise, register the struct type.
@@ -3021,6 +3031,266 @@ static Node* generic_selection(Token** rest, Token* tok) {
   return ret;
 }
 
+static _ReflectType build_reflect_base_fields(Type* ty) {
+  // Create an init_data by combining the flat data in _ReflectType plus the
+  // relocation that's saved the correct offset to have it point at the name.
+  _ReflectType rtype = {0};
+  rtype.size = ty->size;
+  rtype.align = ty->align;
+  rtype.kind = ty->kind;  // TODO: manual map, don't assume the same
+  rtype.flags |= ty->is_unsigned ? _REFLECT_TYPEFLAG_UNSIGNED : 0;
+  rtype.flags |= ty->is_atomic ? _REFLECT_TYPEFLAG_ATOMIC : 0;
+  rtype.flags |= ty->is_flexible ? _REFLECT_TYPEFLAG_FLEXIBLE : 0;
+  rtype.flags |= ty->is_packed ? _REFLECT_TYPEFLAG_PACKED : 0;
+  rtype.flags |= ty->is_variadic ? _REFLECT_TYPEFLAG_VARIADIC : 0;
+  return rtype;
+}
+
+static char* get_reflect_builtin_mangled_name(Type* ty) {
+  switch (ty->kind) {
+    case TY_VOID:
+      return "v";
+    case TY_BOOL:
+      return "b";
+    case TY_CHAR:
+      return "c";  // TODO: char vs signed char vs unsigned char
+    case TY_SHORT:
+      return ty->is_unsigned ? "t" : "s";
+    case TY_INT:
+      return ty->is_unsigned ? "j" : "i";
+    case TY_LONG:
+      return ty->is_unsigned ? "m" : "l";
+    case TY_FLOAT:
+      return "f";
+    case TY_DOUBLE:
+      return "d";
+#if !X64WIN
+    case TY_LDOUBLE:
+      return "e";
+#endif
+    default:
+      ABORT("not a builtin type");
+  }
+}
+
+static char* get_reflect_builtin_user_name_impl(Type* ty) {
+  switch (ty->kind) {
+    case TY_VOID:
+      return "void";
+    case TY_BOOL:
+      return "bool";
+    case TY_CHAR:
+      return "char";  // TODO: char vs signed char vs unsigned char
+    case TY_SHORT:
+      return ty->is_unsigned ? "unsigned short" : "short";
+    case TY_INT:
+      return ty->is_unsigned ? "unsigned int" : "int";
+#if X64WIN
+    case TY_LONG:
+      return ty->is_unsigned ? "unsigned long long" : "long long";
+#else
+    case TY_LONG:
+      return ty->is_unsigned ? "unsigned long" : "long";
+#endif
+    case TY_FLOAT:
+      return "float";
+    case TY_DOUBLE:
+      return "double";
+#if !X64WIN
+    case TY_LDOUBLE:
+      return "long double";
+#endif
+    default:
+      ABORT("not a builtin type");
+  }
+}
+
+// Returns mangled name for the given type, string is either rodata or
+// AL_Compile.
+static char* build_reflect_mangled_name(Type* ty) {
+  if (ty->kind <= TY_LDOUBLE) {
+    return get_reflect_builtin_mangled_name(ty);
+  }
+
+  if (ty->kind == TY_PTR) {
+    return format(AL_Compile, "P%s", build_reflect_mangled_name(ty->base));
+  }
+
+  if (ty->kind == TY_ARRAY) {
+    // TODO: format for flexible?
+    return format(AL_Compile, "A%d_%s", ty->array_len, build_reflect_mangled_name(ty->base));
+  }
+
+  if (ty->kind == TY_FUNC) {
+    char* cur = format(AL_Compile, "F%s", build_reflect_mangled_name(ty->return_ty));
+    if (!ty->params) {
+      return format(AL_Compile, "%svE", cur);
+    }
+
+    Type* param = ty->params;
+    while (param) {
+      cur = format(AL_Compile, "%s%s", cur, build_reflect_mangled_name(param));
+      param = param->next;
+    }
+    return format(AL_Compile, "%sE", cur);
+  }
+
+  if (ty->kind == TY_STRUCT) {
+    return format(AL_Compile, "%d%.*s", ty->name->len, ty->name->len, ty->name->loc);
+  }
+
+  ABORT("todo");
+}
+
+static char* build_reflect_user_name_left(Type* ty) {
+  if (ty->kind <= TY_LDOUBLE) {
+    return get_reflect_builtin_user_name_impl(ty);
+  }
+
+  if (ty->kind == TY_PTR) {
+    char* ret = build_reflect_user_name_left(ty->base);
+    if (ty->base->kind == TY_ARRAY) {
+      return format(AL_Compile, "%s (*", ret);
+    } else if (ty->base->kind == TY_FUNC) {
+      return format(AL_Compile, "%s(*", ret);
+    } else {
+      return format(AL_Compile, "%s*", ret);
+    }
+  }
+
+  if (ty->kind == TY_ARRAY) {
+    return build_reflect_user_name_left(ty->base);
+  }
+
+  if (ty->kind == TY_FUNC) {
+    char* ret = build_reflect_user_name_left(ty->return_ty);
+    return format(AL_Compile, "%s ", ret);
+  }
+
+  if (ty->kind == TY_STRUCT) {
+    return format(AL_Compile, "%.*s", ty->name->len, ty->name->loc);
+  }
+
+  ABORT("todo");
+}
+
+static char* build_reflect_user_name_right(Type* ty, bool multi_array) {
+  if (ty->kind == TY_PTR) {
+    char* ret = "";
+    if (ty->base->kind == TY_ARRAY || ty->base->kind == TY_FUNC) {
+      ret = ")";
+    }
+    ret = format(AL_Compile, "%s%s", ret, build_reflect_user_name_right(ty->base, false));
+    return ret;
+  }
+
+  if (ty->kind == TY_ARRAY) {
+    // TODO: not sure about this multi_array hack.
+    // TODO: zero sized array
+    return format(AL_Compile, "%s[%d]%s", multi_array ? "" : " ", ty->array_len,
+                  build_reflect_user_name_right(ty->base, true));
+  }
+
+  if (ty->kind == TY_FUNC) {
+    char* ret = "(";
+    if (!ty->params) {
+      ret = format(AL_Compile, "%svoid", ret);
+    } else {
+      bool first = true;
+      for (Type* param = ty->params; param; param = param->next) {
+        char* p_left = build_reflect_user_name_left(param);
+        char* p_right = build_reflect_user_name_right(param, false);
+        ret = format(AL_Compile, "%s%s%s%s", ret, first ? "" : ", ", p_left, p_right);
+        first = false;
+      }
+    }
+    return format(AL_Compile, "%s)%s", ret, build_reflect_user_name_right(ty->return_ty, false));
+  }
+
+  return "";
+}
+
+static char* build_reflect_user_name(Type* ty) {
+  char* left = build_reflect_user_name_left(ty);
+  char* right = build_reflect_user_name_right(ty, false);
+  return format(AL_Compile, "%s%s", left, right);
+}
+
+static _ReflectType* get_reflect_type(Type* ty) {
+  char* mangled = build_reflect_mangled_name(ty);
+  void* prev = hashmap_get(&user_context->reflect_types, mangled);
+  if (prev) {
+    return prev;
+  }
+
+  // Otherwise, it actually needs to be created.
+  // XXX figure out invalidation on update().
+  // Possibly need to write real Obj* with Relocation list, rather than
+  // smuggling it through to runtime in UserContext. See old commits on
+  // 'typedesc' branch.
+
+  _ReflectType rtype = build_reflect_base_fields(ty);
+  if (ty->kind <= TY_LDOUBLE) {
+    rtype.name = get_reflect_builtin_user_name_impl(ty);
+  } else if (ty->kind == TY_PTR) {
+    rtype.name = bumpstrdup(build_reflect_user_name(ty), AL_UserContext);
+    rtype.ptr.base = get_reflect_type(ty->base);
+  } else if (ty->kind == TY_ARRAY) {
+    rtype.name = bumpstrdup(build_reflect_user_name(ty), AL_UserContext);
+    rtype.arr.base = get_reflect_type(ty->base);
+    rtype.arr.len = ty->array_len;
+  } else if (ty->kind == TY_FUNC) {
+    rtype.name = bumpstrdup(build_reflect_user_name(ty), AL_UserContext);
+    rtype.func.return_ty = get_reflect_type(ty->return_ty);
+    rtype.func.num_params = 0;
+    for (Type* param = ty->params; param; param = param->next) {
+      rtype.func.num_params++;
+    }
+    // This one has to be done specially because of the flexible params array.
+    _ReflectType* rtp = bumpcalloc(1, sizeof(rtype) + rtype.func.num_params * sizeof(_ReflectType*),
+                                   AL_UserContext);
+    memcpy(rtp, &rtype, sizeof(rtype));
+    int i = 0;
+    for (Type* param = ty->params; param; param = param->next) {
+      rtp->func.params[i++] = get_reflect_type(param);
+    }
+    hashmap_put(&user_context->reflect_types, bumpstrdup(mangled, AL_UserContext), rtp);
+    return rtp;
+  } else if (ty->kind == TY_STRUCT) {
+    rtype.name = bumpstrdup(build_reflect_user_name(ty), AL_UserContext);
+    rtype.su.num_members = 0;
+    for (Member* mem = ty->members; mem; mem = mem->next) {
+      rtype.su.num_members++;
+    }
+    // This one has to be done specially because of the flexible members array.
+    _ReflectType* rtp = bumpcalloc(
+        1, sizeof(rtype) + rtype.su.num_members * sizeof(_ReflectTypeMember), AL_UserContext);
+    memcpy(rtp, &rtype, sizeof(rtype));
+    hashmap_put(&user_context->reflect_types, bumpstrdup(mangled, AL_UserContext), rtp);
+    int i = 0;
+    for (Member* mem = ty->members; mem; mem = mem->next) {
+      _ReflectTypeMember* rtm = &rtp->su.members[i++];
+      rtm->type = get_reflect_type(mem->ty);
+      rtm->name = bumpstrndup(mem->name->loc, mem->name->len, AL_UserContext);
+      rtm->align = mem->align;
+      rtm->offset = mem->offset;
+      if (mem->idx != i - 1)
+        ABORT("idx doesn't match expected index");
+      rtm->bit_width = mem->is_bitfield ? mem->bit_width : -1;
+      rtm->bit_offset = mem->is_bitfield ? mem->bit_offset : -1;
+    }
+    hashmap_put(&user_context->reflect_types, bumpstrdup(mangled, AL_UserContext), rtp);
+    return rtp;
+  } else {
+    ABORT("todo");
+  }
+
+  void* p = bumpcalloc(1, sizeof(rtype), AL_UserContext);
+  memcpy(p, &rtype, sizeof(rtype));
+  hashmap_put(&user_context->reflect_types, bumpstrdup(mangled, AL_UserContext), p);
+  return p;
+}
+
 // primary = "(" "{" stmt+ "}" ")"
 //         | "(" expr ")"
 //         | "sizeof" "(" type-name ")"
@@ -3064,6 +3334,23 @@ static Node* primary(Token** rest, Token* tok) {
     }
 
     return new_ulong(ty->size, start);
+  }
+
+  if (equal(tok, "_ReflectTypeOf") && equal(tok->next, "(")) {
+    tok = skip(tok->next, "(");
+
+    Type* ty;
+    if (is_typename(tok)) {
+      ty = typename(&tok, tok);
+    } else {
+      Node* node = expr(&tok, tok);
+      add_type(node);
+      ty = node->ty;
+    }
+    *rest = skip(tok, ")");
+    Node* ret = new_reflect_type_ptr(get_reflect_type(ty), tok);
+    ret->ty = pointer_to(ty_void);
+    return ret;
   }
 
   if (equal(tok, "sizeof")) {

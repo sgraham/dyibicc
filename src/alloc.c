@@ -23,8 +23,6 @@ void __asan_unpoison_memory_region(void const volatile* addr, size_t size);
 #define ASAN_UNPOISON_MEMORY_REGION(addr, size) ((void)(addr), (void)(size))
 #endif
 
-#define NUM_BUMP_HEAPS (AL_Link + 1)
-
 IMPLSTATIC UserContext* user_context;
 IMPLSTATIC jmp_buf toplevel_update_jmpbuf;
 IMPLSTATIC CompilerState compiler_state;
@@ -40,6 +38,7 @@ static HeapData heap[NUM_BUMP_HEAPS] = {
     {NULL, NULL, 1024 << 20},  // AL_Compile
     {NULL, NULL, 128 << 20},   // AL_Temp
     {NULL, NULL, 128 << 20},   // AL_Link
+    {NULL, NULL, 64 << 20},    // AL_UserContext
 };
 
 IMPLSTATIC void alloc_init(AllocLifetime lifetime) {
