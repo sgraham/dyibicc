@@ -17,6 +17,7 @@ typedef struct DyibiccEnviromentData {
   DyibiccFunctionLookupFn get_function_address;
   DyibiccOutputFn output_function;
   bool use_ansi_codes;
+  bool padding[7];  // Avoid C4820 padding warning on MSVC /Wall.
 } DyibiccEnviromentData;
 
 typedef struct DyibiccContext DyibiccContext;

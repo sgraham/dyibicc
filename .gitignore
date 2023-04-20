@@ -3,3 +3,4 @@ out/
 embed/
 tags
 test/x.c
+test/__pycache__

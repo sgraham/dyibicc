@@ -29,16 +29,19 @@ CONFIGS = {
             'COMPILE': 'cl /showIncludes /nologo /FS /Ox /GL /Zi /DNDEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo$out /Fddyibicc.pdb',
             'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /LTCG /DEBUG /OPT:REF /OPT:ICF $in /out:$out',
             'ML': 'cl /nologo /wd4132 /wd4324 $in /link /out:$out',
+            'TESTCEXE': 'cl /nologo /I$root/../embed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
         },
         'd': {
             'COMPILE': 'cl /showIncludes /nologo /FS /Od /Zi /D_DEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo:$out /Fddyibicc.pdb',
             'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /DEBUG $in /out:$out',
             'ML': 'cl /nologo /wd4132 /wd4324 $in /link /out:$out',
+            'TESTCEXE': 'cl /nologo /I$root/../embed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
         },
         'a': {
             'COMPILE': 'cl /showIncludes /nologo /FS /Od /fsanitize=address /Zi /D_DEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo:$out /Fddyibicc.pdb',
             'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /DEBUG $in /out:$out',
             'ML': 'cl /nologo /wd4132 /wd4324 $in /link /out:$out',
+            'TESTCEXE': 'cl /nologo /I$root/../embed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
         },
         '__': {
             'exe_ext': '.exe',
@@ -51,16 +54,19 @@ CONFIGS = {
             'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -O0 -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -DNDEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -I$root -c $in -o $out',
             'LINK': 'clang -o $out $in -pthread -lm -ldl -g',
             'ML': 'clang -o $out $in -lm',
+            'TESTCEXE': 'clang -I$root/../embed -Wall -Wextra -Werror -ldl -o $out $in',
         },
         'r': {
             'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -Oz -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -D_DEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -c -I$root $in -o $out',
             'LINK': 'clang -o $out $in -pthread -lm -ldl -g',
             'ML': 'clang -o $out $in -lm',
+            'TESTCEXE': 'clang -I$root/../embed -Wall -Wextra -Werror -ldl -o $out $in',
         },
         'a': {
             'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -O0 -fsanitize=address -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -D_DEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -c -I$root $in -o $out',
             'LINK': 'clang -fsanitize=address -o $out $in -pthread -lm -ldl -g',
             'ML': 'clang -o $out $in -lm',
+            'TESTCEXE': 'clang -I$root/../embed -Wall -Wextra -Werror -ldl -o $out $in',
         },
         '__': {
             'exe_ext': '',
@@ -96,7 +102,15 @@ def get_tests():
     return tests
 
 
-def generate(platform, config, settings, cmdlines, tests):
+def get_upd_tests():
+    tests = []
+    for test in glob.glob(os.path.join('test', 'update_*.py')):
+        test = test.replace('\\', '/')
+        tests.append(test)
+    return tests
+
+
+def generate(platform, config, settings, cmdlines, tests, upd_tests):
     root_dir = os.path.join('out', platform + config)
     if not os.path.isdir(root_dir):
         os.makedirs(root_dir)
@@ -106,7 +120,6 @@ def generate(platform, config, settings, cmdlines, tests):
     dynasm_def = settings['dynasm_def']
 
     with open(os.path.join(root_dir, 'build.ninja'), 'w', newline='\n') as f:
-        f.write('builddir = .\n')
         f.write('root = ../../src\n')
         f.write('\n')
         f.write('rule cc\n')
@@ -155,7 +168,20 @@ def generate(platform, config, settings, cmdlines, tests):
         f.write('rule testrun\n')
         f.write('  command = %s $root/testrun.py $root/.. %s/%s $data\n' % (
             sys.executable, root_dir, dyibiccexe))
-        f.write('  description = TEST $in\n')
+        f.write('  description = TEST $in\n\n')
+
+        f.write('rule genupdaterunner\n')
+        f.write('  command = %s $in $out\n' % sys.executable)
+        f.write('  description = GEN_UPDATE_TEST_RUNNER $in\n\n')
+
+        f.write('rule testcexe\n')
+        f.write('  command = ' + cmdlines['TESTCEXE'] + '\n')
+        f.write('  description = UPDATE_RUNNER_CC $out\n')
+        f.write('\n')
+
+        f.write('rule runbin\n')
+        f.write('  command = ./$in\n')
+        f.write('  description = RUN_UPDATE_TEST_BINARY $in\n\n')
 
         alltests = []
         for testf, cmds in tests.items():
@@ -166,13 +192,22 @@ def generate(platform, config, settings, cmdlines, tests):
             cmds_to_pass = base64.b64encode(bytes(json.dumps(cmds), encoding='utf-8'))
             f.write('  data = %s\n' % str(cmds_to_pass, encoding='utf-8'))
             alltests.append(testf)
-        f.write('build test: phony ' + ' '.join(alltests))
 
-        f.write('\n')
-        f.write('default dyibicc%s\n' % exe_ext)
+        for testpy in upd_tests:
+            tmpc = os.path.basename(testpy) + '.runner.c'
+            tmpexe = os.path.basename(testpy) + '.runner' + exe_ext
+            f.write('build %s: genupdaterunner $root/../%s | $root/../test/test_helpers_for_update.py\n' % (
+                tmpc, testpy))
+            f.write('build %s: testcexe %s $root/../embed/libdyibicc.c | $root/../embed/libdyibicc.h\n' % (
+                tmpexe, tmpc))
+            f.write('build %s: runbin %s\n' % (testpy, tmpexe))
+            alltests.append(testpy)
 
-        f.write('\n')
-        f.write('rule gen\n')
+        f.write('\nbuild test: phony ' + ' '.join(alltests) + '\n')
+
+        f.write('\ndefault dyibicc%s\n' % exe_ext)
+
+        f.write('\nrule gen\n')
         f.write('  command = %s $root/gen.py $in\n' % sys.executable)
         f.write('  description = GEN build.ninja\n')
         f.write('  generator = 1\n')
@@ -186,13 +221,14 @@ def main():
 
     os.chdir(ROOT_DIR)  # Necessary when regenerating manifest from ninja
     tests = get_tests()
+    upd_tests = get_upd_tests()
     for platform, pdata in CONFIGS.items():
         if (sys.platform == 'win32' and platform == 'w') or \
                 (sys.platform == 'linux' and platform == 'l'):
             for config, cmdlines in pdata.items():
                 if config == '__':
                     continue
-                generate(platform, config, pdata['__'], cmdlines, tests)
+                generate(platform, config, pdata['__'], cmdlines, tests, upd_tests)
 
 
 if __name__ == '__main__':
