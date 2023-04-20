@@ -141,6 +141,24 @@ IMPLSTATIC void* allocate_writable_memory(size_t size) {
 
 // Sets a RX permission on the given memory, which must be page-aligned. Returns
 // 0 on success. On failure, prints out the error and returns -1.
+IMPLSTATIC bool make_memory_readwrite(void* m, size_t size) {
+#if X64WIN
+  DWORD old_protect;
+  if (!VirtualProtect(m, size, PAGE_READWRITE, &old_protect)) {
+    error("VirtualProtect %p %zu failed: 0x%x\n", m, size, GetLastError());
+  }
+  return true;
+#else
+  if (mprotect(m, size, PROT_READ | PROT_WRITE) == -1) {
+    perror("mprotect");
+    return false;
+  }
+  return true;
+#endif
+}
+
+// Sets a RX permission on the given memory, which must be page-aligned. Returns
+// 0 on success. On failure, prints out the error and returns -1.
 IMPLSTATIC bool make_memory_executable(void* m, size_t size) {
 #if X64WIN
   DWORD old_protect;

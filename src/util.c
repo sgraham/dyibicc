@@ -101,19 +101,16 @@ IMPLSTATIC void strintarray_push(StringIntArray* arr, StringInt item, AllocLifet
 
 // Returns the contents of a given file. Doesn't support '-' for reading from
 // stdin.
-IMPLSTATIC char* read_file(char* path, AllocLifetime lifetime) {
-  FILE* fp = fopen(path, "rb");
-  if (!fp) {
+IMPLSTATIC char* read_file_wrap_user(char* path, AllocLifetime lifetime) {
+  char* contents;
+  size_t size;
+  if (!user_context->load_file_contents(path, &contents, &size))
     return NULL;
-  }
 
-  fseek(fp, 0, SEEK_END);
-  long long size = ftell(fp);
-  rewind(fp);
   char* buf = bumpcalloc(1, size + 1, lifetime);  // TODO: doesn't really need a calloc
-  long long n = fread(buf, 1, size, fp);
-  fclose(fp);
-  buf[n] = 0;
+  memcpy(buf, contents, size);
+  free(contents);
+  buf[size] = 0;
   return buf;
 }
 

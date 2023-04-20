@@ -727,7 +727,7 @@ Token* tokenize_filecontents(char* path, char* p) {
 }
 
 Token* tokenize_file(char* path) {
-  char* p = read_file(path, AL_Compile);
+  char* p = read_file_wrap_user(path, AL_Compile);
   if (!p)
     return NULL;
   return tokenize_filecontents(path, p);

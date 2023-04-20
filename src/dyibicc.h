@@ -107,6 +107,7 @@ IMPLSTATIC void alloc_free(void* p, AllocLifetime lifetime);  // AL_Manual only.
 IMPLSTATIC void* aligned_allocate(size_t size, size_t alignment);
 IMPLSTATIC void aligned_free(void* p);
 IMPLSTATIC void* allocate_writable_memory(size_t size);
+IMPLSTATIC bool make_memory_readwrite(void* m, size_t size);
 IMPLSTATIC bool make_memory_executable(void* m, size_t size);
 IMPLSTATIC void free_executable_memory(void* p, size_t size);
 
@@ -158,7 +159,7 @@ IMPLSTATIC void strarray_push(StringArray* arr, char* s, AllocLifetime lifetime)
 IMPLSTATIC void strintarray_push(StringIntArray* arr, StringInt item, AllocLifetime lifetime);
 IMPLSTATIC char* format(AllocLifetime lifetime, char* fmt, ...)
     __attribute__((format(printf, 2, 3)));
-IMPLSTATIC char* read_file(char* path, AllocLifetime lifetime);
+IMPLSTATIC char* read_file_wrap_user(char* path, AllocLifetime lifetime);
 IMPLSTATIC NORETURN void error(char* fmt, ...) __attribute__((format(printf, 1, 2)));
 IMPLSTATIC NORETURN void error_at(char* loc, char* fmt, ...) __attribute__((format(printf, 2, 3)));
 IMPLSTATIC NORETURN void error_tok(Token* tok, char* fmt, ...)
@@ -642,6 +643,7 @@ typedef struct FileLinkData {
 IMPLSTATIC void free_link_fixups(FileLinkData* fld);
 
 typedef struct UserContext {
+  DyibiccLoadFileContents load_file_contents;
   DyibiccFunctionLookupFn get_function_address;
   DyibiccOutputFn output_function;
   bool use_ansi_codes;

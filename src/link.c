@@ -355,6 +355,12 @@ IMPLSTATIC bool link_all_files(void) {
   // Process fixups.
   for (size_t i = 0; i < uc->num_files; ++i) {
     FileLinkData* fld = &uc->files[i];
+
+    if (!make_memory_readwrite(fld->codeseg_base_address, fld->codeseg_size)) {
+      outaf("failed to make %p size %zu readwrite\n", fld->codeseg_base_address, fld->codeseg_size);
+      return false;
+    }
+
     for (int j = 0; j < fld->flen; ++j) {
       void* fixup_address = fld->fixups[j].at;
       char* name = fld->fixups[j].name;
@@ -380,10 +386,7 @@ IMPLSTATIC bool link_all_files(void) {
 
       *((uintptr_t*)fixup_address) = (uintptr_t)target_address + addend;
     }
-  }
 
-  for (size_t i = 0; i < uc->num_files; ++i) {
-    FileLinkData* fld = &uc->files[i];
     if (!make_memory_executable(fld->codeseg_base_address, fld->codeseg_size)) {
       outaf("failed to make %p size %zu executable\n", fld->codeseg_base_address,
             fld->codeseg_size);

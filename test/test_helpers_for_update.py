@@ -4,6 +4,26 @@ import sys
 _MAIN_TEMPLATE = r'''
 #include "libdyibicc.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static bool get_file_by_name(const char* filename, char** contents, size_t* size) {
+%(initial_file_contents)s
+
+  // Otherwise, fallback to normal file loading (for includes, etc.)
+  FILE* fp = fopen(filename, "rb");
+  if (!fp) {
+    return false;
+  }
+
+  fseek(fp, 0, SEEK_END);
+  *size = ftell(fp);
+  rewind(fp);
+  *contents = malloc(*size);
+  fread(*contents, 1, *size, fp);
+  fclose(fp);
+  return true;
+}
 
 int main(void) {
   char* include_paths[] = {
@@ -17,6 +37,7 @@ int main(void) {
       .include_paths = (const char**)include_paths,
       .files = (const char**)input_paths,
       .dyibicc_include_dir = "./include",
+      .load_file_contents = get_file_by_name,
       .get_function_address = NULL,
       .output_function = NULL,
       .use_ansi_codes = false,
@@ -25,6 +46,12 @@ int main(void) {
   DyibiccContext* ctx = dyibicc_set_environment(&env_data);
 
   int final_result = 0;
+
+  if (!dyibicc_update(ctx, NULL, NULL)) {
+    printf("initial update failed\n");
+    final_result = 255;
+    goto fail;
+  }
 
 %(steps)s
 
@@ -70,6 +97,7 @@ _steps = []
 _current = {}
 _is_dirty = {}
 _include_paths = []
+_initial_file_contents = {}
 
 
 def _string_as_c_array(s):
@@ -85,6 +113,7 @@ def initial(file_to_contents):
     for f, c in file_to_contents.items():
         _current[f] = c
         _is_dirty[f] = True
+        _initial_file_contents[f] = c
     update_ok()
 
 
@@ -124,10 +153,24 @@ def done():
     global _steps
     global _current
     global _include_paths
+    global _initial_file_contents
     files = ['"%s"' % x for x in _current.keys()] + ['NULL']
     _include_paths.append('NULL')
+    initials = ''
+    counter = 0
+    for f, c in _initial_file_contents.items():
+        initials += '  if (strcmp("%s", filename) == 0) {\n' % f
+        initials += ('    static char initial_%d[] = {' % counter) + _string_as_c_array(c) + '};\n'
+        # Has to be malloc+copied because the compiler assumes it should free.
+        initials += '    *contents = malloc(%d);\n' % len(c)
+        initials += '    memcpy(*contents, initial_%d, %d);\n' % (counter, len(c))
+        initials += '    *size = %d;\n' % len(c)
+        initials += '    return true;\n'
+        initials += '  }\n\n'
+        counter += 1
     with open(sys.argv[1], 'w', newline='\n') as f:
         f.write(_MAIN_TEMPLATE % {
+                'initial_file_contents': initials,
                 'include_paths': ', '.join(_include_paths),
                 'input_paths': ', '.join(files),
                 'steps': '\n'.join(_steps)})

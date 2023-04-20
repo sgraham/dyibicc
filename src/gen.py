@@ -29,19 +29,19 @@ CONFIGS = {
             'COMPILE': 'cl /showIncludes /nologo /FS /Ox /GL /Zi /DNDEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo$out /Fddyibicc.pdb',
             'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /LTCG /DEBUG /OPT:REF /OPT:ICF $in /out:$out',
             'ML': 'cl /nologo /wd4132 /wd4324 $in /link /out:$out',
-            'TESTCEXE': 'cl /nologo /I$root/../embed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
+            'TESTCEXE': 'cl /nologo /D_CRT_SECURE_NO_WARNINGS /I$root/../embed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
         },
         'd': {
             'COMPILE': 'cl /showIncludes /nologo /FS /Od /Zi /D_DEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo:$out /Fddyibicc.pdb',
             'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /DEBUG $in /out:$out',
             'ML': 'cl /nologo /wd4132 /wd4324 $in /link /out:$out',
-            'TESTCEXE': 'cl /nologo /I$root/../embed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
+            'TESTCEXE': 'cl /nologo /D_CRT_SECURE_NO_WARNINGS /I$root/../embed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
         },
         'a': {
             'COMPILE': 'cl /showIncludes /nologo /FS /Od /fsanitize=address /Zi /D_DEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo:$out /Fddyibicc.pdb',
             'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /DEBUG $in /out:$out',
             'ML': 'cl /nologo /wd4132 /wd4324 $in /link /out:$out',
-            'TESTCEXE': 'cl /nologo /I$root/../embed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
+            'TESTCEXE': 'cl /nologo /D_CRT_SECURE_NO_WARNINGS /I$root/../embed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
         },
         '__': {
             'exe_ext': '.exe',

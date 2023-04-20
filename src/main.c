@@ -172,6 +172,21 @@ static int default_output_fn(const char* fmt, va_list ap) {
   return ret;
 }
 
+static bool default_load_file_fn(const char* path, char** contents, size_t* size) {
+  FILE* fp = fopen(path, "rb");
+  if (!fp) {
+    return false;
+  }
+
+  fseek(fp, 0, SEEK_END);
+  *size = ftell(fp);
+  rewind(fp);
+  *contents = malloc(*size);
+  fread(*contents, 1, *size, fp);
+  fclose(fp);
+  return true;
+}
+
 DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
   alloc_init(AL_Temp);
 
@@ -236,6 +251,10 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
 
   UserContext* data = calloc(1, total_size);
 
+  data->load_file_contents = env_data->load_file_contents;
+  if (!data->load_file_contents) {
+    data->load_file_contents = default_load_file_fn;
+  }
   data->get_function_address = env_data->get_function_address;
   data->output_function = env_data->output_function;
   if (!data->output_function) {

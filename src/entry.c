@@ -17,6 +17,23 @@ static bool take_arg(char* arg) {
   return false;
 }
 
+// Returns the contents of a given file. Doesn't support '-' for reading from
+// stdin.
+static bool read_file(const char* path, char** contents, size_t* size) {
+  FILE* fp = fopen(path, "rb");
+  if (!fp) {
+    return false;
+  }
+
+  fseek(fp, 0, SEEK_END);
+  *size = ftell(fp);
+  rewind(fp);
+  *contents = malloc(*size);
+  fread(*contents, 1, *size, fp);
+  fclose(fp);
+  return true;
+}
+
 static void parse_args(int argc,
                        char** argv,
                        char** entry_point_override,
@@ -35,22 +52,6 @@ static void parse_args(int argc,
 
     if (!strncmp(argv[i], "-e", 2)) {
       *entry_point_override = argv[i] + 2;
-      continue;
-    }
-
-    if (argv[i][0] == '@') {
-      char* rsp_contents = read_file(&argv[i][1], AL_Link);
-      if (!rsp_contents) {
-        error("couldn't open '%s'", &argv[i][1]);
-      }
-      char* cur = rsp_contents;
-      for (char* p = rsp_contents; *p; ++p) {
-        if (*p == '\n') {
-          *p = 0;
-          strarray_push(input_paths, cur, AL_Link);
-          cur = p + 1;
-        }
-      }
       continue;
     }
 
@@ -88,6 +89,7 @@ int main(int argc, char** argv) {
       .include_paths = (const char**)include_paths.data,
       .files = (const char**)input_paths.data,
       .dyibicc_include_dir = "./include",
+      .load_file_contents = read_file,
       .get_function_address = NULL,
       .output_function = NULL,
       .use_ansi_codes = isatty(fileno(stdout)),
