@@ -6,29 +6,6 @@ import subprocess
 import sys
 
 
-# Update gen.py too, except entry.c.
-#
-# Order is important because of static initialized data that can't be forward
-# declared.
-FILELIST = [
-    'src/dyibicc.h',
-    'include/all/reflect.h',
-    'src/khash.h',
-    'src/dynasm/dasm_proto.h',
-    'src/dynasm/dasm_x86.h',
-    'src/type.c',
-    'src/alloc.c',
-    'src/util.c',
-    'src/hashmap.c',
-    'src/link.c',
-    'src/main.c',
-    'src/parse.c',
-    'src/preprocess.c',
-    'src/tokenize.c',
-    'src/unicode.c',
-]
-
-
 HEADER = '''\
 //
 // Amalgamated (single file) build of https://github.com/sgraham/dyibicc.
@@ -87,35 +64,37 @@ def include_file(f, src):
 
 
 def main():
-    if not os.path.isfile('out/wr/codegen.w.c') or not os.path.isfile('out/lr/codegen.l.c'):
-        print('Must first do both a `m.bat r test` and `./m r test`.')
-        return 1
-
-    if not os.path.isdir('embed'):
-        os.makedirs('embed')
-    with open('embed/libdyibicc.c', 'w', newline='\n') as f:
+    out_dir = sys.argv[1]
+    root_src = sys.argv[2]
+    if not os.path.isdir(out_dir):
+        os.makedirs(out_dir)
+    with open(os.path.join(out_dir, 'libdyibicc.c'), 'w', newline='\n') as f:
         rev_parse = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True)
         cur_rev = rev_parse.stdout.decode('utf-8').strip()
         f.write(HEADER % cur_rev)
-        for src in FILELIST:
+        for src in sys.argv[3:]:
             include_file(f, src)
 
         f.write('#if X64WIN\n')
-        include_file(f, 'out/wr/codegen.w.c')
+        include_file(f, 'codegen.w.c')
         f.write('#else // ^^^ X64WIN / !X64WIN vvv\n')
-        include_file(f, 'out/lr/codegen.l.c')
+        include_file(f, 'codegen.l.c')
         f.write('#endif // !X64WIN\n')
-    shutil.copyfile('src/libdyibicc.h', 'embed/libdyibicc.h')
-    shutil.copyfile('LICENSE', 'embed/LICENSE')
+    shutil.copyfile(os.path.join(root_src, 'libdyibicc.h'), os.path.join(out_dir, 'libdyibicc.h'))
+    shutil.copyfile(os.path.join(root_src, '..', 'LICENSE'), os.path.join(out_dir, 'LICENSE'))
+    shutil.copytree(os.path.join(root_src, '..', 'include'), os.path.join(out_dir, 'include'),
+                    dirs_exist_ok=True)
 
     # Smoke test that there's no warnings, etc. Currently only on host platform.
-    os.chdir('embed')
+    os.chdir(out_dir)
     if sys.platform == 'win32':
         subprocess.check_call(['cl', '/nologo', '/W4', '/Wall', '/WX', '/c', 'libdyibicc.c'])
+        os.remove('libdyibicc.obj')
     elif sys.platform == 'linux':
         subprocess.check_call(['gcc', '-Wall', '-Wextra', '-Werror', '-c', 'libdyibicc.c'])
         subprocess.check_call(['clang', '-Wall', '-Wextra', '-Werror', '-c', 'libdyibicc.c'])
         symsp = subprocess.run(['readelf', '-s', 'libdyibicc.o'], capture_output=True)
+        os.remove('libdyibicc.o')
         syms = str(symsp.stdout, encoding='utf-8').splitlines()
         syms = [l for l in syms if 'GLOBAL ' in l]
         syms = [l for l in syms if 'UND ' not in l]

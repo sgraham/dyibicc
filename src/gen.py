@@ -8,8 +8,10 @@ import sys
 ROOT_DIR = os.path.normpath(
     os.path.join(os.path.abspath(os.path.dirname(__file__)), '..'))
 
-# Update build_amalg.py too.
+# This order is important for the amalgamated build because of static
+# initialized data that can't be forward declared.
 FILELIST = [
+    'type.c',
     'alloc.c',
     'entry.c',
     'hashmap.c',
@@ -18,7 +20,6 @@ FILELIST = [
     'parse.c',
     'preprocess.c',
     'tokenize.c',
-    'type.c',
     'unicode.c',
     'util.c',
 ]
@@ -29,24 +30,23 @@ CONFIGS = {
             'COMPILE': 'cl /showIncludes /nologo /FS /Ox /GL /Zi /DNDEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo$out /Fddyibicc.pdb',
             'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /LTCG /DEBUG /OPT:REF /OPT:ICF $in /out:$out',
             'ML': 'cl /nologo /wd4132 /wd4324 $in /link /out:$out',
-            'TESTCEXE': 'cl /nologo /D_CRT_SECURE_NO_WARNINGS /I$root/../embed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
+            'TESTCEXE': 'cl /nologo /D_CRT_SECURE_NO_WARNINGS /Iembed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
         },
         'd': {
             'COMPILE': 'cl /showIncludes /nologo /FS /Od /Zi /D_DEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo:$out /Fddyibicc.pdb',
             'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /DEBUG $in /out:$out',
             'ML': 'cl /nologo /wd4132 /wd4324 $in /link /out:$out',
-            'TESTCEXE': 'cl /nologo /D_CRT_SECURE_NO_WARNINGS /I$root/../embed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
+            'TESTCEXE': 'cl /nologo /D_CRT_SECURE_NO_WARNINGS /Iembed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
         },
         'a': {
             'COMPILE': 'cl /showIncludes /nologo /FS /Od /fsanitize=address /Zi /D_DEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo:$out /Fddyibicc.pdb',
             'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /DEBUG $in /out:$out',
             'ML': 'cl /nologo /wd4132 /wd4324 $in /link /out:$out',
-            'TESTCEXE': 'cl /nologo /D_CRT_SECURE_NO_WARNINGS /I$root/../embed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
+            'TESTCEXE': 'cl /nologo /D_CRT_SECURE_NO_WARNINGS /Iembed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
         },
         '__': {
             'exe_ext': '.exe',
             'obj_ext': '.obj',
-            'dynasm_def': '-D WIN',
         },
     },
     'l': {
@@ -54,24 +54,23 @@ CONFIGS = {
             'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -O0 -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -DNDEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -I$root -c $in -o $out',
             'LINK': 'clang -o $out $in -pthread -lm -ldl -g',
             'ML': 'clang -o $out $in -lm',
-            'TESTCEXE': 'clang -I$root/../embed -Wall -Wextra -Werror -ldl -o $out $in',
+            'TESTCEXE': 'clang -Iembed -Wall -Wextra -Werror -ldl -o $out $in',
         },
         'r': {
             'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -Oz -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -D_DEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -c -I$root $in -o $out',
             'LINK': 'clang -o $out $in -pthread -lm -ldl -g',
             'ML': 'clang -o $out $in -lm',
-            'TESTCEXE': 'clang -I$root/../embed -Wall -Wextra -Werror -ldl -o $out $in',
+            'TESTCEXE': 'clang -Iembed -Wall -Wextra -Werror -ldl -o $out $in',
         },
         'a': {
             'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -O0 -fsanitize=address -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -D_DEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -c -I$root $in -o $out',
             'LINK': 'clang -fsanitize=address -o $out $in -pthread -lm -ldl -g',
             'ML': 'clang -o $out $in -lm',
-            'TESTCEXE': 'clang -I$root/../embed -Wall -Wextra -Werror -ldl -o $out $in',
+            'TESTCEXE': 'clang -Iembed -Wall -Wextra -Werror -ldl -fsanitize=address -o $out $in',
         },
         '__': {
             'exe_ext': '',
             'obj_ext': '.o',
-            'dynasm_def': '-D SYSV',
         },
     },
 }
@@ -88,7 +87,7 @@ def get_tests():
         run_prefix = '// RUN: '
         ret_prefix = '// RET: '
         txt_prefix = '// TXT: '
-        disabled_prefix = '// DISABLED' 
+        disabled_prefix = '// DISABLED'
         with open(test, 'r', encoding='utf-8') as f:
             for l in f.readlines():
                 if l.startswith(run_prefix): run = l[len(run_prefix):].rstrip()
@@ -117,7 +116,6 @@ def generate(platform, config, settings, cmdlines, tests, upd_tests):
 
     exe_ext = settings['exe_ext']
     obj_ext = settings['obj_ext']
-    dynasm_def = settings['dynasm_def']
 
     with open(os.path.join(root_dir, 'build.ninja'), 'w', newline='\n') as f:
         f.write('root = ../../src\n')
@@ -137,18 +135,28 @@ def generate(platform, config, settings, cmdlines, tests, upd_tests):
         f.write('  command = ' + cmdlines['ML'] + '\n')
         f.write('  description = CC $out\n')
         f.write('\n')
-        f.write('rule dynasm\n')
-        f.write('  command = ./minilua' + exe_ext +
-                ' $root/dynasm/dynasm.lua %s -o $out $in\n' % dynasm_def)
+        f.write('rule dynasm_w\n')
+        f.write('  command = ./minilua' + exe_ext + ' $root/dynasm/dynasm.lua -D WIN -o $out $in\n')
         f.write('  description = DYNASM $out\n')
         f.write('\n')
+        f.write('rule dynasm_l\n')
+        f.write('  command = ./minilua' + exe_ext + ' $root/dynasm/dynasm.lua -D SYSV -o $out $in\n')
+        f.write('  description = DYNASM $out\n')
+        f.write('\n')
+        f.write('rule amalg\n')
+        f.write('  command = %s $root/build_amalg.py embed $root $in\n' % sys.executable)
         f.write('\n')
 
         objs = []
 
-        dynasmed = 'codegen.%s.c' % platform
-        f.write('build %s: dynasm $root/codegen.in.c | minilua%s\n' %
-                (dynasmed, exe_ext))
+        # codegen required for both platforms (not just |platform|) to bundle
+        # into amalgamated build.
+        dynasmed_l = 'codegen.l.c'
+        dynasmed_w = 'codegen.w.c'
+        f.write('build %s: dynasm_l $root/codegen.in.c | minilua%s\n' % (dynasmed_l, exe_ext))
+        f.write('build %s: dynasm_w $root/codegen.in.c | minilua%s\n' % (dynasmed_w, exe_ext))
+        # But only the current one linked into the compiler binary.
+        dynasmed = dynasmed_w if platform == 'w' else dynasmed_l
         obj = os.path.splitext(dynasmed)[0] + obj_ext
         f.write('build %s: cc %s\n' % (obj, dynasmed))
         objs.append(obj)
@@ -157,6 +165,21 @@ def generate(platform, config, settings, cmdlines, tests, upd_tests):
             obj = os.path.splitext(src)[0] + obj_ext
             objs.append(obj)
             f.write('build %s: cc $root/%s\n' % (obj, src))
+
+        EXTRAS_FOR_AMALG = [
+                '$root/dyibicc.h',
+                '$root/../include/all/reflect.h',
+                '$root/khash.h',
+                '$root/dynasm/dasm_proto.h',
+                '$root/dynasm/dasm_x86.h',
+        ]
+        f.write('build embed/libdyibicc.c embed/libdyibicc.h embed/LICENSE: amalg %s %s | %s %s $root/build_amalg.py\n' %
+                (' '.join(EXTRAS_FOR_AMALG),
+                 ' '.join('$root/' + x for x in FILELIST if 'entry.c' not in x),
+                 dynasmed_w,
+                 dynasmed_l))
+
+        f.write('build libdyibicc%s: cc embed/libdyibicc.c\n' % obj_ext)
 
         dyibiccexe = 'dyibicc' + exe_ext
         f.write('build %s: link %s\n' % (dyibiccexe, ' '.join(objs)))
@@ -198,8 +221,8 @@ def generate(platform, config, settings, cmdlines, tests, upd_tests):
             tmpexe = os.path.basename(testpy) + '.runner' + exe_ext
             f.write('build %s: genupdaterunner $root/../%s | $root/../test/test_helpers_for_update.py\n' % (
                 tmpc, testpy))
-            f.write('build %s: testcexe %s $root/../embed/libdyibicc.c | $root/../embed/libdyibicc.h\n' % (
-                tmpexe, tmpc))
+            f.write('build %s: testcexe %s libdyibicc%s | embed/libdyibicc.h\n' % (
+                tmpexe, tmpc, obj_ext))
             f.write('build %s: runbin %s\n' % (testpy, tmpexe))
             alltests.append(testpy)
 

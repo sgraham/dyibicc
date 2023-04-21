@@ -1,6 +1,6 @@
-out/
 .vs/
-embed/
+out/
+scratch/
 tags
-test/x.c
 test/__pycache__
+test/x.c

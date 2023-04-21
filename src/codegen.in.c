@@ -2230,15 +2230,6 @@ static void emit_data(Obj* prog) {
     //
     // for now, just continue with individual regular aligned_allocate
     // for all data objects and maintain their addresses here.
-    //
-    // LinkFixup won't work as is
-    // - offset is codeseg relative. it can be made a pointer for the
-    // codeseg imports instead because it's recreated for each compile
-    // anyway
-    // - need to remap initializer_code_relocation to name, but...
-    // actually we have the real address at this point now, so if the
-    // data was allocated it can just be written directly i think rather
-    // than deferred to a relocation
 
     UserContext* uc = user_context;
     // bool was_freed = false;
