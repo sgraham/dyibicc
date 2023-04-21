@@ -91,8 +91,13 @@ static HashEntry* get_or_insert_entry(HashMap* map, char* key, int keylen) {
   for (int i = 0; i < map->capacity; i++) {
     HashEntry* ent = &map->buckets[(hash + i) % map->capacity];
 
-    if (match(ent, key, keylen))
+    if (match(ent, key, keylen)) {
+      if (map->alloc_lifetime == AL_Manual) {
+        free(ent->key);
+      }
+      ent->key = key;
       return ent;
+    }
 
     if (ent->key == TOMBSTONE) {
       ent->key = key;
@@ -134,8 +139,12 @@ IMPLSTATIC void hashmap_delete(HashMap* map, char* key) {
 
 IMPLSTATIC void hashmap_delete2(HashMap* map, char* key, int keylen) {
   HashEntry* ent = get_entry(map, key, keylen);
-  if (ent)
+  if (ent) {
+    if (map->alloc_lifetime == AL_Manual) {
+      free(ent->key);
+    }
     ent->key = TOMBSTONE;
+  }
 }
 
 // keys strdup'd with AL_Manual, and values that are the data segment
