@@ -26,23 +26,23 @@ FILELIST = [
 
 CONFIGS = {
     'w': {
-        'r': {
-            'COMPILE': 'cl /showIncludes /nologo /FS /Ox /GL /Zi /DNDEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo$out /Fddyibicc.pdb',
-            'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /LTCG /DEBUG /OPT:REF /OPT:ICF $in /out:$out',
-            'ML': 'cl /nologo /wd4132 /wd4324 $in /link /out:$out',
-            'TESTCEXE': 'cl /nologo /D_CRT_SECURE_NO_WARNINGS /Iembed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
-        },
         'd': {
-            'COMPILE': 'cl /showIncludes /nologo /FS /Od /Zi /D_DEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo:$out /Fddyibicc.pdb',
-            'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /DEBUG $in /out:$out',
+            'COMPILE': 'cl /showIncludes /nologo /FS /Od /Zi /D_DEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo:$out /Fd:dyibicc.pdb',
+            'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /DEBUG $in /out:$out /pdb:$out.pdb',
             'ML': 'cl /nologo /wd4132 /wd4324 $in /link /out:$out',
-            'TESTCEXE': 'cl /nologo /D_CRT_SECURE_NO_WARNINGS /Iembed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
+            'TESTCEXE': 'cl /nologo /FS /D_CRT_SECURE_NO_WARNINGS /Iembed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
+        },
+        'r': {
+            'COMPILE': 'cl /showIncludes /nologo /FS /Ox /GL /Zi /DNDEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo$out /Fd:dyibicc.pdb',
+            'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /LTCG /DEBUG /OPT:REF /OPT:ICF $in /out:$out /pdb:$out.pdb',
+            'ML': 'cl /nologo /wd4132 /wd4324 $in /link /out:$out',
+            'TESTCEXE': 'cl /nologo /FS /D_CRT_SECURE_NO_WARNINGS /Iembed /W4 /Zi /Ox /GL /Wall /WX /wd4710 /wd4711 $in /link onecore.lib user32.lib /LTCG /DEBUG /out:$out',
         },
         'a': {
-            'COMPILE': 'cl /showIncludes /nologo /FS /Od /fsanitize=address /Zi /D_DEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo:$out /Fddyibicc.pdb',
-            'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /DEBUG $in /out:$out',
+            'COMPILE': 'cl /showIncludes /nologo /FS /Od /fsanitize=address /Zi /D_DEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo:$out /Fd:dyibicc.pdb',
+            'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /DEBUG $in /out:$out /pdb:$out.pdb',
             'ML': 'cl /nologo /wd4132 /wd4324 $in /link /out:$out',
-            'TESTCEXE': 'cl /nologo /D_CRT_SECURE_NO_WARNINGS /Iembed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
+            'TESTCEXE': 'cl /nologo /FS /D_CRT_SECURE_NO_WARNINGS /Iembed /W4 /Wall /WX $in /link onecore.lib user32.lib /out:$out',
         },
         '__': {
             'exe_ext': '.exe',
@@ -54,19 +54,19 @@ CONFIGS = {
             'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -O0 -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -DNDEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -I$root -c $in -o $out',
             'LINK': 'clang -o $out $in -pthread -lm -ldl -g',
             'ML': 'clang -o $out $in -lm',
-            'TESTCEXE': 'clang -Iembed -Wall -Wextra -Werror -ldl -o $out $in',
+            'TESTCEXE': 'clang -Iembed -Wall -Wextra -Werror -ldl -lm -o $out $in',
         },
         'r': {
             'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -Oz -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -D_DEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -c -I$root $in -o $out',
             'LINK': 'clang -o $out $in -pthread -lm -ldl -g',
             'ML': 'clang -o $out $in -lm',
-            'TESTCEXE': 'clang -Iembed -Wall -Wextra -Werror -ldl -o $out $in',
+            'TESTCEXE': 'clang -Iembed -Wall -Wextra -Werror -ldl -lm -Oz -o $out $in',
         },
         'a': {
             'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -O0 -fsanitize=address -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -D_DEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -c -I$root $in -o $out',
             'LINK': 'clang -fsanitize=address -o $out $in -pthread -lm -ldl -g',
             'ML': 'clang -o $out $in -lm',
-            'TESTCEXE': 'clang -Iembed -Wall -Wextra -Werror -ldl -fsanitize=address -o $out $in',
+            'TESTCEXE': 'clang -Iembed -Wall -Wextra -Werror -ldl -lm -fsanitize=address -o $out $in',
         },
         '__': {
             'exe_ext': '',

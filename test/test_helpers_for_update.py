@@ -1,11 +1,15 @@
 import sys
 
-
 _MAIN_TEMPLATE = r'''
 #include "libdyibicc.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+void* get_host_helper_func(const char* name) {
+  (void)name;
+%(helper_lookups)s
+}
 
 static bool get_file_by_name(const char* filename, char** contents, size_t* size) {
 %(initial_file_contents)s
@@ -36,9 +40,9 @@ int main(void) {
   DyibiccEnviromentData env_data = {
       .include_paths = (const char**)include_paths,
       .files = (const char**)input_paths,
-      .dyibicc_include_dir = "./include",
+      .dyibicc_include_dir = "embed/include",
       .load_file_contents = get_file_by_name,
-      .get_function_address = NULL,
+      .get_function_address = get_host_helper_func,
       .output_function = NULL,
       .use_ansi_codes = false,
   };
@@ -98,6 +102,8 @@ _current = {}
 _is_dirty = {}
 _include_paths = []
 _initial_file_contents = {}
+_extra_host = []
+_host_helper_funcs = []
 
 
 def _string_as_c_array(s):
@@ -105,6 +111,15 @@ def _string_as_c_array(s):
     for ch in s:
         result.append(hex(ord(ch)))
     return ','.join(result) + ",'\\0'"
+
+
+def add_to_host(code):
+    global _extra_host
+    _extra_host.append(code)
+
+
+def add_host_helper_func(*funcnames):
+    _host_helper_funcs.extend(funcnames)
 
 
 def initial(file_to_contents):
@@ -115,6 +130,11 @@ def initial(file_to_contents):
         _is_dirty[f] = True
         _initial_file_contents[f] = c
     update_ok()
+
+
+def include_path(path):
+    global _include_paths
+    _include_paths.append(path)
 
 
 def update_ok():
@@ -155,6 +175,7 @@ def done():
     global _include_paths
     global _initial_file_contents
     files = ['"%s"' % x for x in _current.keys()] + ['NULL']
+    incs = ['"%s"' % x for x in _include_paths] + ['NULL']
     _include_paths.append('NULL')
     initials = ''
     counter = 0
@@ -168,9 +189,15 @@ def done():
         initials += '    return true;\n'
         initials += '  }\n\n'
         counter += 1
+    helper_lookups = ''
+    for x in _host_helper_funcs:
+        helper_lookups += '  if (strcmp("%s", name) == 0) return (void*)%s;\n' % (x, x)
+    helper_lookups += '  return NULL;\n'
     with open(sys.argv[1], 'w', newline='\n') as f:
+        f.write('\n'.join(_extra_host))
         f.write(_MAIN_TEMPLATE % {
                 'initial_file_contents': initials,
-                'include_paths': ', '.join(_include_paths),
+                'helper_lookups': helper_lookups,
+                'include_paths': ', '.join(incs),
                 'input_paths': ', '.join(files),
                 'steps': '\n'.join(_steps)})

@@ -815,7 +815,7 @@ static int push_args_win(Node* node, int* by_ref_copies_size) {
   assert((*by_ref_copies_size == 0 && !has_by_ref_args) ||
          (*by_ref_copies_size && has_by_ref_args));
 
-  if ((C(depth) + stack) % 2 == 1) {
+  if ((C(depth) + stack + (*by_ref_copies_size / 8)) % 2 == 1) {
     ///| sub rsp, 8
     C(depth)++;
     stack++;
@@ -2451,7 +2451,11 @@ static void emit_text(Obj* prog) {
           case TY_UNION:
             // It's either small and so passed in a register, or isn't and then
             // we're instead storing the pointer to the larger struct.
-            store_gp(reg++, var->offset, MIN(8, ty->size));
+            if (type_passed_in_register(ty)) {
+              store_gp(reg++, var->offset, ty->size);
+            } else {
+              store_gp(reg++, var->offset, 8);
+            }
             break;
           case TY_FLOAT:
           case TY_DOUBLE:
