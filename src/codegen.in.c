@@ -2031,7 +2031,7 @@ static void assign_lvar_offsets(Obj* prog) {
     // So, "top" means the highest numbered address corresponding the to root
     // function and bottom moves to the frames for the leaf-ward functions.
     int top = 16;
-    int bottom = 0;
+    int bottom = 8;
 
     int reg = 0;
 
