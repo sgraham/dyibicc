@@ -329,6 +329,9 @@ void dyibicc_free(DyibiccContext* context) {
   for (size_t i = 0; i < ctx->num_files; ++i) {
     free_link_fixups(&ctx->files[i]);
   }
+#if X64WIN
+  unregister_and_free_function_table_data(ctx);
+#endif
   free(ctx);
   user_context = NULL;
 }

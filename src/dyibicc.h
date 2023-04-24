@@ -81,6 +81,7 @@ typedef struct Relocation Relocation;
 typedef struct Hideset Hideset;
 typedef struct Token Token;
 typedef struct HashMap HashMap;
+typedef struct UserContext UserContext;
 
 //
 // alloc.c
@@ -167,6 +168,10 @@ IMPLSTATIC NORETURN void error_tok(Token* tok, char* fmt, ...)
 IMPLSTATIC NORETURN void error_internal(char* file, int line, char* msg);
 IMPLSTATIC int outaf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 IMPLSTATIC void warn_tok(Token* tok, char* fmt, ...) __attribute__((format(printf, 2, 3)));
+#if X64WIN
+IMPLSTATIC void register_function_table_data(UserContext* ctx, int func_count, char* base_addr);
+IMPLSTATIC void unregister_and_free_function_table_data(UserContext* ctx);
+#endif
 
 //
 // tokenize.c
@@ -263,6 +268,8 @@ struct Obj {
   bool is_static;
   int dasm_entry_label;
   int dasm_return_label;
+  int dasm_end_of_function_label;
+  int dasm_unwind_info_label;
 
   // Global variable
   bool is_tentative;
@@ -642,7 +649,7 @@ typedef struct FileLinkData {
 
 IMPLSTATIC void free_link_fixups(FileLinkData* fld);
 
-typedef struct UserContext {
+struct UserContext {
   DyibiccLoadFileContents load_file_contents;
   DyibiccFunctionLookupFn get_function_address;
   DyibiccOutputFn output_function;
@@ -663,7 +670,11 @@ typedef struct UserContext {
   HashMap* exports;
 
   HashMap reflect_types;
-} UserContext;
+
+#if X64WIN
+  char* function_table_data;
+#endif
+};
 
 typedef struct dasm_State dasm_State;
 

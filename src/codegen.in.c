@@ -16,7 +16,7 @@
 #endif
 
 ///| .arch x64
-///| .section main
+///| .section code, pdata
 ///| .actionlist dynasm_actions
 ///| .globals dynasm_globals
 ///| .if WIN
@@ -2338,7 +2338,7 @@ static void store_gp(int r, int offset, int sz) {
 
 #if X64WIN
 extern int __chkstk(void);
-#endif
+#endif  // X64WIN
 
 static void emit_text(Obj* prog) {
   // Preallocate the dasm labels so they can be used in functions out of order.
@@ -2348,7 +2348,11 @@ static void emit_text(Obj* prog) {
 
     fn->dasm_return_label = codegen_pclabel();
     fn->dasm_entry_label = codegen_pclabel();
+    fn->dasm_end_of_function_label = codegen_pclabel();
+    fn->dasm_unwind_info_label = codegen_pclabel();
   }
+
+  ///| .code
 
   for (Obj* fn = prog; fn; fn = fn->next) {
     if (!fn->is_function || !fn->is_definition || !fn->is_live)
@@ -2382,12 +2386,84 @@ static void emit_text(Obj* prog) {
 #endif
       ///| call r10
       ///| sub rsp, rax
+
+      // TODO: pdata emission
     } else
 #endif
 
     {
       ///| sub rsp, fn->stack_size
+
+      // TODO: add a label here to assert that the prolog size is as expected
+
+#if X64WIN
+      // RtlAddFunctionTable() requires these to be at an offset with the same
+      // base as the function offsets, so we need to emit these into the main
+      // codeseg allocation, rather than just allocating them separately, since
+      // we can't easily guarantee a <4G offset to them otherwise.
+
+      // Unfortunately, we can't build another section with this as dynasm
+      // doesn't seem to allow resolving these offsets, so this is done later
+      //| .dword =>fn->dasm_entry_label
+      //| .dword =>fn->dasm_end_of_function_label
+      //| .dword =>fn->dasm_unwind_info_label
+
+      // TODO: probably need to relocate and add info about r11 used as a base
+      // for the value stack copies, and also rdi pushed for memsets.
+
+      // https://learn.microsoft.com/en-us/cpp/build/exception-handling-x64?view=msvc-170
+      enum {
+        UWOP_PUSH_NONVOL = 0,
+        UWOP_ALLOC_LARGE = 1,
+        UWOP_ALLOC_SMALL = 2,
+        UWOP_SET_FPREG = 3,
+      };
+
+      // These are the UNWIND_INFO structure that is referenced by the third
+      // element of RUNTIME_FUNCTION.
+      ///| .pdata
+      // This takes care of cases where CountOfCodes is odd.
+      ///| .align 4
+      ///|=>fn->dasm_unwind_info_label:
+      ///| .byte 1  /* Version:3 (1) and Flags:5 (0) */
+      bool small_stack = fn->stack_size / 8 - 1 <= 15;
+      if (small_stack) {
+        // We just happen to "know" this is the form used for small stack sizes.
+        // xxxxxxxxxxxx0000 55                   push        rbp
+        // xxxxxxxxxxxx0001 48 89 E5             mov         rbp,rsp
+        // xxxxxxxxxxxx0004 48 83 EC 10          sub         rsp,10h
+        // xxxxxxxxxxxx0009 ...
+        ///| .byte 8  /* SizeOfProlog */
+        ///| .byte 3  /* CountOfCodes */
+      } else {
+        // And this one for larger reservations.
+        // xxxxxxxxxxxx0000 55                   push        rbp
+        // xxxxxxxxxxxx0001 48 89 E5             mov         rbp,rsp
+        // xxxxxxxxxxxx0004 48 81 EC B0 01 00 00 sub         rsp,1B0h
+        // xxxxxxxxxxxx000b ...
+        ///| .byte 11  /* SizeOfProlog */
+        ///| .byte 4  /* CountOfCodes */
+      }
+      ///| .byte 5  /* FrameRegister:4 (RBP) | FrameOffset:4: 0 offset */
+
+      if (small_stack) {
+        ///| .byte 8  /* CodeOffset */
+        ///| .byte UWOP_ALLOC_SMALL | (((unsigned char)((fn->stack_size / 8) - 1)) << 4)
+      } else {
+        ///| .byte 11  /* CodeOffset */
+        assert(fn->stack_size / 8 <= 65535 && "todo; not UWOP_ALLOC_LARGE 0-style");
+        ///| .byte UWOP_ALLOC_LARGE
+        ///| .word fn->stack_size / 8
+      }
+      ///| .byte 4  /* CodeOffset */
+      ///| .byte UWOP_SET_FPREG
+      ///| .byte 1  /* CodeOffset */
+      ///| .byte UWOP_PUSH_NONVOL | (5 /* RBP */ << 4)
+
+      ///| .code
+#endif
     }
+
     ///| mov [rbp+fn->alloca_bottom->offset], rsp
 
 #if !X64WIN
@@ -2516,9 +2592,17 @@ static void emit_text(Obj* prog) {
 
     // Epilogue
     ///|=>fn->dasm_return_label:
+#if X64WIN
+    // https://learn.microsoft.com/en-us/cpp/build/prolog-and-epilog?view=msvc-170#epilog-code
+    // says this the required form to recognize an epilog.
+    ///| lea rsp, [rbp]
+#else
     ///| mov rsp, rbp
+#endif
     ///| pop rbp
     ///| ret
+
+    ///|=>fn->dasm_end_of_function_label:
   }
 }
 
@@ -2561,6 +2645,55 @@ static void fill_out_fixups(FileLinkData* fld) {
   }
 }
 
+#if X64WIN
+
+typedef struct RuntimeFunction {
+  unsigned long BeginAddress;
+  unsigned long EndAddress;
+  unsigned long UnwindData;
+} RuntimeFunction;
+
+static void create_and_register_exception_function_table(Obj* prog, char* base_addr) {
+  int func_count = 0;
+  for (Obj* fn = prog; fn; fn = fn->next) {
+    if (!fn->is_function || !fn->is_definition || !fn->is_live)
+      continue;
+
+    ++func_count;
+  }
+
+  size_t alloc_size = (sizeof(RuntimeFunction) * func_count);
+
+  unregister_and_free_function_table_data(user_context);
+  char* function_table_data = malloc(alloc_size);
+  user_context->function_table_data = function_table_data;
+
+  char* pfuncs = function_table_data;
+
+  for (Obj* fn = prog; fn; fn = fn->next) {
+    if (!fn->is_function || !fn->is_definition || !fn->is_live)
+      continue;
+
+    RuntimeFunction* rf = (RuntimeFunction*)pfuncs;
+    int func_start_offset = dasm_getpclabel(&C(dynasm), fn->dasm_entry_label);
+    rf->BeginAddress = func_start_offset;
+    rf->EndAddress = dasm_getpclabel(&C(dynasm), fn->dasm_end_of_function_label);
+    rf->UnwindData = dasm_getpclabel(&C(dynasm), fn->dasm_unwind_info_label);
+    pfuncs += sizeof(RuntimeFunction);
+  }
+
+  register_function_table_data(user_context, func_count, base_addr);
+}
+
+#else  // !X64WIN
+
+static void create_and_register_exception_function_table(Obj* prog, char* base_addr) {
+  (void)prog;
+  (void)base_addr;
+}
+
+#endif
+
 IMPLSTATIC void codegen_init(void) {
   dasm_init(&C(dynasm), DASM_MAXSECTION);
   dasm_growpc(&C(dynasm), 1 << 16);  // Arbitrary number to avoid lots of reallocs of that array.
@@ -2590,6 +2723,7 @@ IMPLSTATIC void codegen(Obj* prog, size_t file_index) {
   if (code_size == 0)
     code_size = 1;
   unsigned int page_sized = (unsigned int)align_to_u(code_size, get_page_size());
+
   fld->codeseg_size = page_sized;
   fld->codeseg_base_address = allocate_writable_memory(page_sized);
   // outaf("code_size: %zu, page_sized: %zu\n", code_size, page_sized);
@@ -2602,11 +2736,13 @@ IMPLSTATIC void codegen(Obj* prog, size_t file_index) {
 
   dasm_encode(&C(dynasm), fld->codeseg_base_address);
 
-  int check_result = dasm_checkstep(&C(dynasm), DASM_SECTION_MAIN);
+  int check_result = dasm_checkstep(&C(dynasm), 0);
   if (check_result != DASM_S_OK) {
     outaf("check_result: 0x%08x\n", check_result);
     ABORT("dasm_checkstep failed");
   }
+
+  create_and_register_exception_function_table(prog, fld->codeseg_base_address);
 
   codegen_free();
 }

@@ -225,3 +225,22 @@ IMPLSTATIC void error_internal(char* file, int line, char* msg) {
   outaf("%sinternal error at %s:%d: %s%s\n%s", ANSI_RED, file, line, ANSI_WHITE, msg, ANSI_RESET);
   longjmp(toplevel_update_jmpbuf, 1);
 }
+
+#if X64WIN
+IMPLSTATIC void register_function_table_data(UserContext* ctx, int func_count, char* base_addr) {
+  if (!RtlAddFunctionTable((RUNTIME_FUNCTION*)ctx->function_table_data, func_count,
+                           (DWORD64)base_addr)) {
+    error("failed to RtlAddFunctionTable");
+  }
+}
+
+IMPLSTATIC void unregister_and_free_function_table_data(UserContext* ctx) {
+  if (ctx->function_table_data) {
+    if (!RtlDeleteFunctionTable((RUNTIME_FUNCTION*)ctx->function_table_data)) {
+      error("failed to RtlDeleteFunctionTable");
+    }
+    free(ctx->function_table_data);
+    ctx->function_table_data = NULL;
+  }
+}
+#endif
