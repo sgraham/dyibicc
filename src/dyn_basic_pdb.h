@@ -31,7 +31,7 @@ int dbp_finish(DbpContext* ctx);
 
 #ifdef DYN_BASIC_PDB_IMPLEMENTATION
 
-#define _CRT_SECURE_NO_WARNINGS 
+#define _CRT_SECURE_NO_WARNINGS
 #pragma warning(disable: 4668) // 'X' is not defined as a preprocessor macro, replacing with '0' for '#if/#elif'
 #pragma warning(disable: 5045) // Compiler will insert Spectre mitigation for memory load if /Qspectre switch specified
 #pragma comment(lib, "rpcrt4")
@@ -43,8 +43,32 @@ int dbp_finish(DbpContext* ctx);
 #include <time.h>
 #include <windows.h>
 
+#include "str3.h"
+#include "str4.h"
+#include "str6.h"
+#include "str7.h"
+#include "str8.h"
+#include "str9.h"
+#include "str10.h"
+#include "str11.h"
+#include "str12.h"
+#include "str13.h"
+#include "str14.h"
+
 typedef unsigned int u32;
+typedef signed int i32;
+typedef unsigned short u16;
 typedef unsigned __int64 u64;
+
+typedef struct SuperBlock SuperBlock;
+
+typedef struct StreamData {
+  u32 data_length;
+
+  u32* blocks;
+  size_t blocks_len;
+  size_t blocks_cap;
+} StreamData;
 
 struct DbpContext {
   void* image_addr;
@@ -54,10 +78,16 @@ struct DbpContext {
   size_t source_files_len;
   size_t source_files_cap;
 
-  // During write.
   HANDLE file;
   char* data;
   size_t file_size;
+
+  SuperBlock* superblock;
+
+  StreamData** stream_data;
+  size_t stream_data_len;
+  size_t stream_data_cap;
+
   u32 next_potential_block;
   u32 padding;
 };
@@ -130,7 +160,7 @@ static const char BigHdrMagic[0x1e] = "Microsoft C/C++ MSF 7.00\r\n\x1a\x44\x53"
     return 0;                                                                    \
   }
 
-typedef struct SuperBlock {
+struct SuperBlock {
   char FileMagic[0x1e];
   char padding[2];
   u32 BlockSize;
@@ -139,7 +169,7 @@ typedef struct SuperBlock {
   u32 NumDirectoryBytes;
   u32 Unknown;
   u32 BlockMapAddr;
-} SuperBlock;
+};
 
 #define BLOCK_SIZE 4096
 #define CTX DbpContext* ctx
@@ -172,26 +202,28 @@ static u32 alloc_block(CTX) {
 
 static void write_superblock(CTX) {
   SuperBlock* sb = (SuperBlock*)ctx->data;
+  ctx->superblock = sb;
   memcpy(sb->FileMagic, BigHdrMagic, sizeof(BigHdrMagic));
   sb->padding[0] = '\0';
   sb->padding[1] = '\0';
   sb->BlockSize = BLOCK_SIZE;
   sb->FreeBlockMapBlock = 2;  // We never use map 1.
   sb->NumBlocks = 128;
-  sb->NumDirectoryBytes = 4;
+  // NumDirectoryBytes filled in later once we've written everything else.
   sb->Unknown = 0;
   sb->BlockMapAddr = 3;
 
   // Mark all pages as free, then mark the first four in use:
-  // 0 is super block, 1 is FPM1, 2 is FPM2, 3 is the block map (which points to
-  // 4), 4 is the stream directory. We assume we don't have more than a single
-  // one for now.
+  // 0 is super block, 1 is FPM1, 2 is FPM2, 3 is the block map.
   memset(&ctx->data[BLOCK_SIZE], 0xff, BLOCK_SIZE * 2);
-  for (u32 i = 0; i <= 4; ++i)
+  for (u32 i = 0; i <= 3; ++i)
     mark_block_used(ctx, i);
+}
 
-  u32* block_map = get_block_ptr(ctx, 3);
-  *block_map = 4;
+static StreamData* add_stream(CTX) {
+  StreamData* stream = calloc(1, sizeof(StreamData));
+  PUSH_BACK(ctx->stream_data, stream);
+  return stream;
 }
 
 typedef struct PdbStreamHeader {
@@ -201,24 +233,155 @@ typedef struct PdbStreamHeader {
   UUID UniqueId;
 } PdbStreamHeader;
 
-static int write_pdb_info_stream(CTX, u32 page, u32* size) {
-  char* block_ptr = get_block_ptr(ctx, page);
+static int write_pdb_info_stream(CTX, StreamData* stream, u32 names_stream) {
+  u32 block_id = alloc_block(ctx);
+  PUSH_BACK(stream->blocks, block_id);
+  char* start = get_block_ptr(ctx, block_id);
+  char* block_ptr = start;
   PdbStreamHeader* psh = (PdbStreamHeader*)block_ptr;
   psh->Version = 20000404; /* VC70 */
   psh->Signature = (u32)time(NULL);
   psh->Age = 1;
   ENSURE(UuidCreate(&psh->UniqueId), RPC_S_OK);
-  //printf("sizeof PdbStreamHeader: %zu\n", sizeof(PdbStreamHeader));
 
   block_ptr += sizeof(PdbStreamHeader);
 
-  // Named Stream Map, currently empty.
-  u32* hash = (u32*)block_ptr;
-  *hash++ = 0;  // No string data.
-  *hash++ = 0;  // Map size 
-  *hash++ = 0;  // Map cap.
+  // Named Stream Map.
 
-  *size = sizeof(PdbStreamHeader) + sizeof(u32) * 3;
+  // The LLVM docs are something that would be nice to refer to here:
+  //
+  //   https://llvm.org/docs/PDB/HashTable.html
+  //
+  // But unfortunately, they're quite misleading. The microsoft-pdb repo is,
+  // uh, "dense", but (obviously) correct:
+  //
+  // https://github.com/microsoft/microsoft-pdb/blob/082c5290e5aff028ae84e43affa8be717aa7af73/PDB/include/nmtni.h#L77-L95
+  // https://github.com/microsoft/microsoft-pdb/blob/082c5290e5aff028ae84e43affa8be717aa7af73/PDB/include/map.h#L474-L508
+  //
+  // Someone naturally already figured this out, as LLVM writes the correct
+  // data, just the docs are wrong. (I didn't see a way to fix the docs without
+  // cloning the repo and figuring out their patch system, which is why I'm
+  // whining here instead of just fixing it...)
+
+  // Starts with the string buffer (which we pad to % 4, even though that's not
+  // actually required). We don't bother with actually building and updating a
+  // map as the only two named streams we need are these two (/LinkInfo and
+  // /names).
+  static const char string_data[] = "/LinkInfo\0/names\0\0\0";
+  *(u32*)block_ptr = sizeof(string_data);
+  block_ptr += sizeof(u32);
+  memcpy(block_ptr, string_data, sizeof(string_data));
+  block_ptr += sizeof(string_data);
+
+  // Then hash size, and capacity (capacity is seemingly irrelevant).
+  u32* hash = (u32*)block_ptr;
+  *hash++ = 2; // Size
+  *hash++ = 4; // Capacity
+  // Then two bit vectors, first for "present":
+  *hash++ = 0x01; // Present length (1 word follows)
+  *hash++ = 0x06; // 0b0000`0110    (second and third buckets occupied)
+  // then for "deleted" (we don't write any).
+  *hash++ = 0;    // Deleted length.
+  // Now, the maps: mapping "/names" at offset 0xa above to given names stream.
+  *hash++ = 0xa;
+  *hash++ = names_stream;
+  // And mapping "/LinkInfo" at (offset 0) to Stream 5 (hardcoded since we just
+  // leave it empty anyway.)
+  *hash++ = 0;
+  *hash++ = 5;
+  // This is "niMac", which is the last index allocated. We don't need it.
+  *hash++ = 0;
+
+  // Finally, feature codes, which indicate that we're somewhat modern.
+  // TODO: potentially don't declare this in order to drop TPI/IPI?
+  *hash++ = 20140508; /* VC140 */
+
+  block_ptr = (char*)hash;
+  stream->data_length = block_ptr - start;
+  return 1;
+}
+
+typedef struct TpiStreamHeader {
+  u32 Version;
+  u32 HeaderSize;
+  u32 TypeIndexBegin;
+  u32 TypeIndexEnd;
+  u32 TypeRecordBytes;
+
+  u16 HashStreamIndex;
+  u16 HashAuxStreamIndex;
+  u32 HashKeySize;
+  u32 NumHashBuckets;
+
+  i32 HashValueBufferOffset;
+  u32 HashValueBufferLength;
+
+  i32 IndexOffsetBufferOffset;
+  u32 IndexOffsetBufferLength;
+
+  i32 HashAdjBufferOffset;
+  u32 HashAdjBufferLength;
+} TpiStreamHeader;
+
+static int write_empty_tpi_ipi_stream(CTX, StreamData* stream) {
+  u32 block_id = alloc_block(ctx);
+  PUSH_BACK(stream->blocks, block_id);
+
+  // This is an "empty" TPI/IPI stream, we do not emit any user-defined types
+  // currently.
+  char* start = get_block_ptr(ctx, block_id);
+  TpiStreamHeader* tsh = (TpiStreamHeader*)start;
+  tsh->Version = 20040203; /* V80 */
+  tsh->HeaderSize = sizeof(TpiStreamHeader);
+  tsh->TypeIndexBegin = 0x1000;
+  tsh->TypeIndexEnd = 0x1000;
+  tsh->TypeRecordBytes = 0;
+  tsh->HashStreamIndex = -1;
+  tsh->HashAuxStreamIndex = -1;
+  tsh->HashKeySize = 4;
+  tsh->NumHashBuckets = 0x3ffff;
+  tsh->HashValueBufferOffset = 0;
+  tsh->HashValueBufferLength = 0;
+  tsh->IndexOffsetBufferOffset = 0;
+  tsh->IndexOffsetBufferLength = 0;
+  tsh->HashAdjBufferOffset = 0;
+  tsh->HashAdjBufferLength = 0;
+
+  stream->data_length = sizeof(TpiStreamHeader);
+  return 1;
+}
+
+static int write_directory(CTX) {
+  // TODO: Handle overflow past BLOCK_SIZE.
+  u32 directory_page = alloc_block(ctx);
+
+  u32* block_map = get_block_ptr(ctx, ctx->superblock->BlockMapAddr);
+  *block_map = directory_page;
+
+  u32* start = get_block_ptr(ctx, directory_page);
+  u32* dir = start;
+
+  // Starts with number of streams.
+  *dir++ = ctx->stream_data_len;
+
+  // Then, the number of blocks in each stream.
+  for (size_t i = 0; i < ctx->stream_data_len; ++i) {
+    *dir++ = ctx->stream_data[i]->data_length;
+    ENSURE((ctx->stream_data[i]->data_length + BLOCK_SIZE - 1) / BLOCK_SIZE,
+           ctx->stream_data[i]->blocks_len);
+  }
+
+  // Then the list of blocks for each stream.
+  for (size_t i = 0; i < ctx->stream_data_len; ++i) {
+    for (size_t j = 0; j < ctx->stream_data[i]->blocks_len; ++j) {
+      *dir++ = ctx->stream_data[i]->blocks[j];
+    }
+  }
+
+  // And finally, update the super block with the number of bytes in the
+  // directory.
+  ctx->superblock->NumDirectoryBytes = (dir - start) * sizeof(u32);
+
   return 1;
 }
 
@@ -249,12 +412,48 @@ int dbp_finish(DbpContext* ctx) {
 
   write_superblock(ctx);
 
-  u32* dir = get_block_ptr(ctx, 4);
-  *dir++ = 2;  // stream 0 and 1 to start with
-  *dir++ = 0;  // Old MSF Directory, size 0
-  u32* pdb_stream_size_fixup = dir++;  // PDB Info Stream, size written later
-  *dir = alloc_block(ctx);
-  ENSURE(1, write_pdb_info_stream(ctx, *dir++, pdb_stream_size_fixup));
+  // Stream 0: "Old MSF Directory", empty.
+  add_stream(ctx);
+
+  // Stream 1: PDB Info Stream.
+  StreamData* stream1 = add_stream(ctx);
+
+  // Stream 2: TPI Stream.
+  StreamData* stream2 = add_stream(ctx);
+
+#define HACK(stream, block)                                                      \
+  {                                                                              \
+    StreamData* sd##stream = calloc(1, sizeof(StreamData));                      \
+    sd##stream->data_length = str##stream##_raw_len;                             \
+    PUSH_BACK(sd##stream->blocks, block);                                        \
+    PUSH_BACK(ctx->stream_data, sd##stream);                                     \
+    mark_block_used(ctx, block);                                                 \
+    memcpy(get_block_ptr(ctx, block), str##stream##_raw, str##stream##_raw_len); \
+  }
+
+  HACK(3, 12);
+
+  // Stream 4: IPI Stream.
+  StreamData* stream4 = add_stream(ctx);
+
+  // Stream 5: "/LinkInfo", empty.
+  add_stream(ctx);
+
+  HACK(6, 4);
+  HACK(7, 5);
+  HACK(8, 6);
+  HACK(9, 8);
+  HACK(10, 9);
+  HACK(11, 10);
+  HACK(12, 11);
+  HACK(13, 13);
+  HACK(14, 15);
+
+  ENSURE(1, write_empty_tpi_ipi_stream(ctx, stream2));
+  ENSURE(1, write_empty_tpi_ipi_stream(ctx, stream4));
+  ENSURE(1, write_pdb_info_stream(ctx, stream1, /*names_stream=*/13));
+
+  ENSURE(1, write_directory(ctx));
 
   ENSURE(FlushViewOfFile(ctx->data, ctx->file_size), 1);
   ENSURE(UnmapViewOfFile(ctx->data), 1);
