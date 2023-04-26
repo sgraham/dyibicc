@@ -252,16 +252,17 @@ static int write_pdb_info_stream(CTX, StreamData* stream, u32 names_stream) {
   //
   //   https://llvm.org/docs/PDB/HashTable.html
   //
-  // But unfortunately, they're quite misleading. The microsoft-pdb repo is,
+  // But unfortunately, this specific page is quite misleading (unlike the rest
+  // of the PDB docs which are quite helpful). The microsoft-pdb repo is,
   // uh, "dense", but (obviously) correct:
   //
   // https://github.com/microsoft/microsoft-pdb/blob/082c5290e5aff028ae84e43affa8be717aa7af73/PDB/include/nmtni.h#L77-L95
   // https://github.com/microsoft/microsoft-pdb/blob/082c5290e5aff028ae84e43affa8be717aa7af73/PDB/include/map.h#L474-L508
   //
   // Someone naturally already figured this out, as LLVM writes the correct
-  // data, just the docs are wrong. (I didn't see a way to fix the docs without
-  // cloning the repo and figuring out their patch system, which is why I'm
-  // whining here instead of just fixing it...)
+  // data, just the docs are wrong. (LLVM's patch for docs setup seems a bit
+  // convoluted which is why I'm whining in a buried comment instead of just
+  // fixing it...)
 
   // Starts with the string buffer (which we pad to % 4, even though that's not
   // actually required). We don't bother with actually building and updating a
@@ -293,7 +294,6 @@ static int write_pdb_info_stream(CTX, StreamData* stream, u32 names_stream) {
   *hash++ = 0;
 
   // Finally, feature codes, which indicate that we're somewhat modern.
-  // TODO: potentially don't declare this in order to drop TPI/IPI?
   *hash++ = 20140508; /* VC140 */
 
   block_ptr = (char*)hash;
@@ -348,6 +348,141 @@ static int write_empty_tpi_ipi_stream(CTX, StreamData* stream) {
   tsh->HashAdjBufferLength = 0;
 
   stream->data_length = sizeof(TpiStreamHeader);
+  return 1;
+}
+
+typedef struct DbiStreamHeader {
+  i32 VersionSignature;
+  u32 VersionHeader;
+  u32 Age;
+  u16 GlobalStreamIndex;
+  u16 BuildNumber;
+  u16 PublicStreamIndex;
+  u16 PdbDllVersion;
+  u16 SymRecordStream;
+  u16 PdbDllRbld;
+  i32 ModInfoSize;
+  i32 SectionContributionSize;
+  i32 SectionMapSize;
+  i32 SourceInfoSize;
+  i32 TypeServerMapSize;
+  u32 MFCTypeServerIndex;
+  i32 OptionalDbgHeaderSize;
+  i32 ECSubstreamSize;
+  u16 Flags;
+  u16 Machine;
+  u32 Padding;
+} DbiStreamHeader;
+
+// Part of ModInfo
+typedef struct SectionContribEntry {
+    u16 Section;
+    char Padding1[2];
+    i32 Offset;
+    i32 Size;
+    u32 Characteristics;
+    u16 ModuleIndex;
+    char Padding2[2];
+    u32 DataCrc;
+    u32 RelocCrc;
+} SectionContribEntry;
+
+typedef struct ModInfo {
+  u32 Unused1;
+  SectionContribEntry SectionContr;
+  u16 Flags;
+  u16 ModuleSymStream;
+  u32 SymByteSize;
+  u32 C11ByteSize;
+  u32 C13ByteSize;
+  u16 SourceFileCount;
+  char Padding[2];
+  u32 Unused2;
+  u32 SourceFileNameIndex;
+  u32 PdbFilePathNameIndex;
+  // char ModuleName[];
+  // char ObjFileName[];
+} ModInfo;
+
+typedef struct DbiWriteData {
+  u32 global_symbol_stream;
+  u32 public_stream;
+  u32 sym_record_stream;
+  u32 module_sym_stream;
+  u32 module_symbols_byte_size;
+  u32 module_c13_byte_size;
+  u32 num_source_files;
+} DbiWriteData;
+
+static int write_dbi_stream(CTX,
+                            StreamData* stream,
+                            DbiWriteData* dwd) {
+  u32 block_id = alloc_block(ctx);
+  PUSH_BACK(stream->blocks, block_id);
+
+  char* start = get_block_ptr(ctx, block_id);
+  DbiStreamHeader* dsh = (DbiStreamHeader*)start;
+  dsh->VersionSignature = -1;
+  dsh->VersionHeader = 19990903; /* V70 */
+  dsh->Age = 1;
+  dsh->GlobalStreamIndex = dwd->global_symbol_stream;
+  dsh->BuildNumber = 0x8eb; // TODO This is what llvm emits.
+  dsh->PublicStreamIndex = dwd->public_stream;
+  dsh->PdbDllVersion = 0;
+  dsh->SymRecordStream = dwd->sym_record_stream;
+  dsh->PdbDllRbld = 0;
+  // ModInfoSize, SectionContributionSize, SectionMapSize, SourceInfoSize filled
+  // after written below.
+  dsh->TypeServerMapSize = 0;      // empty
+  dsh->MFCTypeServerIndex = 0;     // empty
+  dsh->OptionalDbgHeaderSize = 0;  // empty
+  // TBD: llvm emits stub e&c info, possibly // TBD: llvm emits stub e&c info, possibly
+  // necessary? It looks like it's an NMT containing just the pdb name.
+  dsh->ECSubstreamSize = 0;
+  dsh->Flags = 0;
+  dsh->Machine = 0x8664;
+  dsh->Padding = 0;
+
+  // Module Info Substream. We output a single module with a single section for
+  // the whole jit blob.
+  ModInfo* mod = (ModInfo*)(dsh + 1);
+  mod->Unused1 = 0;
+
+  SectionContribEntry* sce = &mod->SectionContr;
+  sce->Section = 1;
+  sce->Padding1[0] = 0;
+  sce->Padding1[1] = 0;
+  sce->Offset = 0;
+  sce->Size = ctx->image_size;
+  sce->Characteristics =
+      IMAGE_SCN_CNT_CODE | IMAGE_SCN_ALIGN_16BYTES | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ;
+  sce->ModuleIndex = 0;
+  sce->Padding2[0] = 0;
+  sce->Padding2[1] = 0;
+  sce->DataCrc = 0;
+  sce->RelocCrc = 0;
+
+  mod->Flags = 0;
+  mod->ModuleSymStream = dwd->module_sym_stream;
+  mod->SymByteSize = dwd->module_symbols_byte_size;
+  mod->C11ByteSize = 0;
+  mod->C13ByteSize = dwd->module_c13_byte_size;
+  mod->SourceFileCount = dwd->num_source_files;
+  mod->Padding[0] = 0;
+  mod->Padding[1] = 0;
+  mod->Unused2 = 0;
+  mod->SourceFileNameIndex = 0;
+  mod->PdbFilePathNameIndex = 0;
+
+  // Section Contribution Substream
+
+  // Section Map Substream
+
+  // File Info Substream
+
+  // No TypeServerMap, EC Substream
+
+  // Nominally empty Optional Debug Header Stream
   return 1;
 }
 
@@ -431,7 +566,8 @@ int dbp_finish(DbpContext* ctx) {
     memcpy(get_block_ptr(ctx, block), str##stream##_raw, str##stream##_raw_len); \
   }
 
-  HACK(3, 12);
+  // Stream 3: DBI Stream.
+  StreamData* stream3 = add_stream(ctx);
 
   // Stream 4: IPI Stream.
   StreamData* stream4 = add_stream(ctx);
@@ -442,18 +578,37 @@ int dbp_finish(DbpContext* ctx) {
   HACK(6, 4);
   HACK(7, 5);
   HACK(8, 6);
-  HACK(9, 8);
+
+  // Stream 9: TPI Hash, empty.
+  // TODO: I think this can be dropped once references in llvm-generated HACK to
+  // other streams are fixed.
+  add_stream(ctx);
+
   HACK(10, 9);
   HACK(11, 10);
   HACK(12, 11);
   HACK(13, 13);
-  HACK(14, 15);
+
+  // Stream 14: IPI Hash, empty.
+  // TODO: I think this can be dropped once references in llvm-generated HACK to
+  // other streams are fixed.
+  add_stream(ctx);
 
   ENSURE(1, write_empty_tpi_ipi_stream(ctx, stream2));
-  ENSURE(1, write_empty_tpi_ipi_stream(ctx, stream4));
-  ENSURE(1, write_pdb_info_stream(ctx, stream1, /*names_stream=*/13));
+  DbiWriteData dwd = {
+    .global_symbol_stream = 6,
+    .public_stream = 7,
+    .sym_record_stream = 8,
+    .module_sym_stream = 11,
+    .module_symbols_byte_size = 0,
+    .module_c13_byte_size = 0,
+    .num_source_files = 0,
+  };
+  ENSURE(write_dbi_stream(ctx, stream3, &dwd), 1);
+  ENSURE(write_empty_tpi_ipi_stream(ctx, stream4), 1);
+  ENSURE(write_pdb_info_stream(ctx, stream1, /*names_stream=*/13), 1);
 
-  ENSURE(1, write_directory(ctx));
+  ENSURE(write_directory(ctx), 1);
 
   ENSURE(FlushViewOfFile(ctx->data, ctx->file_size), 1);
   ENSURE(UnmapViewOfFile(ctx->data), 1);
