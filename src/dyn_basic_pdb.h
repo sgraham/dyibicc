@@ -159,6 +159,7 @@ struct SuperBlock {
 };
 
 #define BLOCK_SIZE 4096
+#define DEFAULT_NUM_BLOCKS 256
 #define CTX DbpContext* ctx
 #define PAGE_TO_WORD(pn) (pn >> 6)
 #define PAGE_MASK(pn) (1ULL << (pn & ((sizeof(u64) * CHAR_BIT) - 1)))
@@ -200,7 +201,7 @@ struct StreamData {
   size_t blocks_cap;
 };
 
-static void stream_write_block(CTX, StreamData* stream, void* data, size_t len) {
+static void stream_write_block(CTX, StreamData* stream, const void* data, size_t len) {
   if (!stream->cur_block_ptr) {
     u32 block_id = alloc_block(ctx);
     PUSH_BACK(stream->blocks, block_id);
@@ -215,6 +216,7 @@ static void stream_write_block(CTX, StreamData* stream, void* data, size_t len) 
   // TODO: useful things
 }
 
+#define SW_BLOCK(x, len) stream_write_block(ctx, stream, x, len)
 #define SW_U32(x) do { u32 _ = (x); stream_write_block(ctx, stream, &_, sizeof(_)); } while(0)
 #define SW_I32(x) do { i32 _ = (x); stream_write_block(ctx, stream, &_, sizeof(_)); } while(0)
 #define SW_U16(x) do { i16 _ = (x); stream_write_block(ctx, stream, &_, sizeof(_)); } while(0)
@@ -227,7 +229,7 @@ static void write_superblock(CTX) {
   sb->padding[1] = '\0';
   sb->BlockSize = BLOCK_SIZE;
   sb->FreeBlockMapBlock = 2;  // We never use map 1.
-  sb->NumBlocks = 128;
+  sb->NumBlocks = DEFAULT_NUM_BLOCKS;
   // NumDirectoryBytes filled in later once we've written everything else.
   sb->Unknown = 0;
   sb->BlockMapAddr = 3;
@@ -258,17 +260,13 @@ typedef struct PdbStreamHeader {
 } PdbStreamHeader;
 
 static int write_pdb_info_stream(CTX, StreamData* stream, u32 names_stream) {
-  u32 block_id = alloc_block(ctx);
-  PUSH_BACK(stream->blocks, block_id);
-  char* start = get_block_ptr(ctx, block_id);
-  char* block_ptr = start;
-  PdbStreamHeader* psh = (PdbStreamHeader*)block_ptr;
-  psh->Version = 20000404; /* VC70 */
-  psh->Signature = (u32)time(NULL);
-  psh->Age = 1;
-  ENSURE(UuidCreate(&psh->UniqueId), RPC_S_OK);
-
-  block_ptr += sizeof(PdbStreamHeader);
+  PdbStreamHeader psh = {
+    .Version = 20000404, /* VC70 */
+    .Signature = (u32)time(NULL),
+    .Age = 1,
+  };
+  ENSURE(UuidCreate(&psh.UniqueId), RPC_S_OK);
+  SW_BLOCK(&psh, sizeof(psh));
 
   // Named Stream Map.
 
@@ -278,7 +276,7 @@ static int write_pdb_info_stream(CTX, StreamData* stream, u32 names_stream) {
   //
   // But unfortunately, this specific page is quite misleading (unlike the rest
   // of the PDB docs which are quite helpful). The microsoft-pdb repo is,
-  // uh, "dense", but (obviously) correct:
+  // uh, "dense", but has the benefit of being correct by definition:
   //
   // https://github.com/microsoft/microsoft-pdb/blob/082c5290e5aff028ae84e43affa8be717aa7af73/PDB/include/nmtni.h#L77-L95
   // https://github.com/microsoft/microsoft-pdb/blob/082c5290e5aff028ae84e43affa8be717aa7af73/PDB/include/map.h#L474-L508
@@ -290,38 +288,28 @@ static int write_pdb_info_stream(CTX, StreamData* stream, u32 names_stream) {
 
   // Starts with the string buffer (which we pad to % 4, even though that's not
   // actually required). We don't bother with actually building and updating a
-  // map as the only two named streams we need are these two (/LinkInfo and
-  // /names).
-  static const char string_data[] = "/LinkInfo\0/names\0\0\0";
-  *(u32*)block_ptr = sizeof(string_data);
-  block_ptr += sizeof(u32);
-  memcpy(block_ptr, string_data, sizeof(string_data));
-  block_ptr += sizeof(string_data);
+  // map as the only named stream we need is /names (TBD: possibly /LinkInfo?).
+  static const char string_data[] = "/names\0";
+  SW_U32(sizeof(string_data));
+  SW_BLOCK(string_data, sizeof(string_data));
 
-  // Then hash size, and capacity (capacity is seemingly irrelevant).
-  u32* hash = (u32*)block_ptr;
-  *hash++ = 2; // Size
-  *hash++ = 4; // Capacity
+  // Then hash size, and capacity.
+  SW_U32(1); // Size
+  SW_U32(4); // Capacity
   // Then two bit vectors, first for "present":
-  *hash++ = 0x01; // Present length (1 word follows)
-  *hash++ = 0x06; // 0b0000`0110    (second and third buckets occupied)
-  // then for "deleted" (we don't write any).
-  *hash++ = 0;    // Deleted length.
-  // Now, the maps: mapping "/names" at offset 0xa above to given names stream.
-  *hash++ = 0xa;
-  *hash++ = names_stream;
-  // And mapping "/LinkInfo" at (offset 0) to Stream 5 (hardcoded since we just
-  // leave it empty anyway.)
-  *hash++ = 0;
-  *hash++ = 5;
+  SW_U32(0x01);  // Present length (1 word follows)
+  SW_U32(0x02);  // 0b0000`0010    (second bucket occupied)
+  // Then for "deleted" (we don't write any).
+  SW_U32(0);
+  // Now, the maps: mapping "/names" at offset 0 above to given names stream.
+  SW_U32(0);
+  SW_U32(names_stream);
   // This is "niMac", which is the last index allocated. We don't need it.
-  *hash++ = 0;
+  SW_U32(0);
 
   // Finally, feature codes, which indicate that we're somewhat modern.
-  *hash++ = 20140508; /* VC140 */
+  SW_U32(20140508); /* VC140 */
 
-  block_ptr = (char*)hash;
-  stream->data_length = block_ptr - start;
   return 1;
 }
 
@@ -348,30 +336,26 @@ typedef struct TpiStreamHeader {
 } TpiStreamHeader;
 
 static int write_empty_tpi_ipi_stream(CTX, StreamData* stream) {
-  u32 block_id = alloc_block(ctx);
-  PUSH_BACK(stream->blocks, block_id);
-
   // This is an "empty" TPI/IPI stream, we do not emit any user-defined types
   // currently.
-  char* start = get_block_ptr(ctx, block_id);
-  TpiStreamHeader* tsh = (TpiStreamHeader*)start;
-  tsh->Version = 20040203; /* V80 */
-  tsh->HeaderSize = sizeof(TpiStreamHeader);
-  tsh->TypeIndexBegin = 0x1000;
-  tsh->TypeIndexEnd = 0x1000;
-  tsh->TypeRecordBytes = 0;
-  tsh->HashStreamIndex = -1;
-  tsh->HashAuxStreamIndex = -1;
-  tsh->HashKeySize = 4;
-  tsh->NumHashBuckets = 0x3ffff;
-  tsh->HashValueBufferOffset = 0;
-  tsh->HashValueBufferLength = 0;
-  tsh->IndexOffsetBufferOffset = 0;
-  tsh->IndexOffsetBufferLength = 0;
-  tsh->HashAdjBufferOffset = 0;
-  tsh->HashAdjBufferLength = 0;
-
-  stream->data_length = sizeof(TpiStreamHeader);
+  TpiStreamHeader tsh = {
+      .Version = 20040203, /* V80 */
+      .HeaderSize = sizeof(TpiStreamHeader),
+      .TypeIndexBegin = 0x1000,
+      .TypeIndexEnd = 0x1000,
+      .TypeRecordBytes = 0,
+      .HashStreamIndex = -1,
+      .HashAuxStreamIndex = -1,
+      .HashKeySize = 4,
+      .NumHashBuckets = 0x3ffff,
+      .HashValueBufferOffset = 0,
+      .HashValueBufferLength = 0,
+      .IndexOffsetBufferOffset = 0,
+      .IndexOffsetBufferLength = 0,
+      .HashAdjBufferOffset = 0,
+      .HashAdjBufferLength = 0,
+  };
+  SW_BLOCK(&tsh, sizeof(tsh));
   return 1;
 }
 
@@ -924,7 +908,6 @@ static int write_dbi_stream(CTX,
 }
 
 static int write_directory(CTX) {
-  // TODO: Handle overflow past BLOCK_SIZE.
   u32 directory_page = alloc_block(ctx);
 
   u32* block_map = get_block_ptr(ctx, ctx->superblock->BlockMapAddr);
@@ -954,6 +937,15 @@ static int write_directory(CTX) {
   // directory.
   ctx->superblock->NumDirectoryBytes = (dir - start) * sizeof(u32);
 
+  // This can't easily use StreamData because it's the directory of streams. It
+  // would take a larger pdb that we expect to be writing here to overflow the
+  // first block (especially since we don't write types), so just assert that we
+  // didn't grow too large for now.
+  if (ctx->superblock->NumDirectoryBytes > BLOCK_SIZE) {
+    fprintf(stderr, "%s:%d: directory grew beyond BLOCK_SIZE\n", __FILE__, __LINE__);
+    return 0;
+  }
+
   return 1;
 }
 
@@ -962,7 +954,7 @@ static int create_file_map(CTX) {
                          FILE_ATTRIBUTE_NORMAL, NULL);
   ENSURE_NE(ctx->file, INVALID_HANDLE_VALUE);
 
-  ctx->file_size = BLOCK_SIZE * 128;  // TODO: 128 pages to start (see superblock)
+  ctx->file_size = BLOCK_SIZE * DEFAULT_NUM_BLOCKS;  // TODO: grow mapping as necessary
   ENSURE(SetFilePointer(ctx->file, (LONG)ctx->file_size, NULL, FILE_BEGIN), ctx->file_size);
 
   ENSURE(1, SetEndOfFile(ctx->file));
@@ -1000,13 +992,12 @@ int dbp_finish(DbpContext* ctx) {
   StreamData* stream4 = add_stream(ctx);
 
   // Stream 5: "/LinkInfo", empty.
-  add_stream(ctx);
+  //add_stream(ctx);
 
   // HACK
   StreamData* global_symbol_hash = add_stream(ctx);
   stream_write_block(ctx, global_symbol_hash, str6_raw, str6_raw_len);
 
-  // HACK
   StreamData* public_symbol_hash = add_stream(ctx);
   stream_write_block(ctx, public_symbol_hash, str7_raw, str7_raw_len);
 
