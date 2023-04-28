@@ -33,9 +33,12 @@ int dbp_finish(DbpContext* ctx);
 
 #define _CRT_SECURE_NO_WARNINGS
 #pragma warning(disable: 4668) // 'X' is not defined as a preprocessor macro, replacing with '0' for '#if/#elif'
+#pragma warning(disable: 4820) // 'X' bytes padding added after data member 'Y'
 #pragma warning(disable: 5045) // Compiler will insert Spectre mitigation for memory load if /Qspectre switch specified
 #pragma comment(lib, "rpcrt4")
 
+#include <assert.h>
+#include <malloc.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,9 +47,6 @@ int dbp_finish(DbpContext* ctx);
 #include <windows.h>
 
 #include "str3.h"
-#include "str6.h"
-#include "str7.h"
-#include "str8.h"
 #include "str11.h"
 
 typedef unsigned int u32;
@@ -211,7 +211,7 @@ static void stream_write_block(CTX, StreamData* stream, const void* data, size_t
   memcpy(stream->cur_write, data, len);
   stream->cur_write += len;
 
-  stream->data_length += len;
+  stream->data_length += (u32)len;
 
   // TODO: useful things
 }
@@ -219,7 +219,13 @@ static void stream_write_block(CTX, StreamData* stream, const void* data, size_t
 #define SW_BLOCK(x, len) stream_write_block(ctx, stream, x, len)
 #define SW_U32(x) do { u32 _ = (x); stream_write_block(ctx, stream, &_, sizeof(_)); } while(0)
 #define SW_I32(x) do { i32 _ = (x); stream_write_block(ctx, stream, &_, sizeof(_)); } while(0)
-#define SW_U16(x) do { i16 _ = (x); stream_write_block(ctx, stream, &_, sizeof(_)); } while(0)
+#define SW_U16(x) do { u16 _ = (x); stream_write_block(ctx, stream, &_, sizeof(_)); } while(0)
+#define SW_ALIGN(to)                        \
+  do {                                      \
+    while (stream->data_length % to != 0) { \
+      SW_BLOCK("", 1);                      \
+    }                                       \
+  } while (0)
 
 static void write_superblock(CTX) {
   SuperBlock* sb = (SuperBlock*)ctx->data;
@@ -243,7 +249,7 @@ static void write_superblock(CTX) {
 
 static StreamData* add_stream(CTX) {
   StreamData* stream = calloc(1, sizeof(StreamData));
-  stream->stream_index = ctx->stream_data_len;
+  stream->stream_index = (u32)ctx->stream_data_len;
   PUSH_BACK(ctx->stream_data, stream);
   return stream;
 }
@@ -295,10 +301,10 @@ static int write_pdb_info_stream(CTX, StreamData* stream, u32 names_stream) {
 
   // Then hash size, and capacity.
   SW_U32(1); // Size
-  SW_U32(4); // Capacity
+  SW_U32(1); // Capacity
   // Then two bit vectors, first for "present":
   SW_U32(0x01);  // Present length (1 word follows)
-  SW_U32(0x02);  // 0b0000`0010    (second bucket occupied)
+  SW_U32(0x01);  // 0b0000`0001    (only bucket occupied)
   // Then for "deleted" (we don't write any).
   SW_U32(0);
   // Now, the maps: mapping "/names" at offset 0 above to given names stream.
@@ -344,8 +350,8 @@ static int write_empty_tpi_ipi_stream(CTX, StreamData* stream) {
       .TypeIndexBegin = 0x1000,
       .TypeIndexEnd = 0x1000,
       .TypeRecordBytes = 0,
-      .HashStreamIndex = -1,
-      .HashAuxStreamIndex = -1,
+      .HashStreamIndex = 0xffff,
+      .HashAuxStreamIndex = 0xffff,
       .HashKeySize = 4,
       .NumHashBuckets = 0x3ffff,
       .HashValueBufferOffset = 0,
@@ -362,9 +368,9 @@ static int write_empty_tpi_ipi_stream(CTX, StreamData* stream) {
 
 // Copied from:
 // https://github.com/microsoft/microsoft-pdb/blob/082c5290e5aff028ae84e43affa8be717aa7af73/PDB/include/misc.h#L15
-// with minor type adaptations; I think it probably has to match to put things
-// in the right slots when loaded.
-static unsigned long calc_hash(char* pb, size_t cb, unsigned long mod) {
+// with minor type adaptations. It needs to match that implementation to make
+// serialized hashes match up.
+static unsigned long calc_hash(char* pb, size_t cb) {
   unsigned long ulHash = 0;
 
   // hash leading dwords using Duff's Device
@@ -412,9 +418,10 @@ static unsigned long calc_hash(char* pb, size_t cb, unsigned long mod) {
   ulHash |= toLowerMask;
   ulHash ^= (ulHash >> 11);
 
-  return (ulHash ^ (ulHash >> 16)) % (mod);
+  return (ulHash ^ (ulHash >> 16));
 }
 
+#if 0
 typedef struct NmtAlikeHashTable {
   u32 *hashni;
   size_t hashni_len;
@@ -423,6 +430,7 @@ typedef struct NmtAlikeHashTable {
 
 static int nmt_add_string(NmtAlikeHashTable* nmt, char* str, u32* name_index) {
 }
+#endif
 
 static int write_names_stream(CTX, StreamData* stream) {
   SW_U32(0xeffeeffe);  // Header
@@ -430,15 +438,15 @@ static int write_names_stream(CTX, StreamData* stream) {
   SW_U32(33);          // Size of string buffer
 
   // String buffer
-  static char names[] = "\0\0c:\\src\\dyibicc\\scratch\\pdb\\x.c";
+  static char names[] = "\0\0c:\\src\\dyibicc\\scratch\\zzz\\z.c";
   stream_write_block(ctx, stream, names, sizeof(names));
 
   SW_U32(4);  // 4 elements in array
 
   // TODO: This hash seems right for these two items; need to figure out what
   // actually goes in this stream, how the table grows, etc.
-  u32 hash1 = calc_hash(&names[1], 1, /*mod=*/4);
-  u32 hash2 = calc_hash(&names[2], 31, /*mod=*/4);
+  //u32 hash1 = calc_hash(&names[1], 1) % 4;
+  //u32 hash2 = calc_hash(&names[2], 31) % 4;
   SW_U32(1);  // offset 1 ""
   SW_U32(2);  // offset 2 "c:\...\x.c"
   SW_U32(0);
@@ -538,10 +546,14 @@ typedef struct FileInfoSubstreamHeader {
   //char NamesBuffer[][NumSourceFiles];
 } FileInfoSubstreamHeader;
 
-typedef struct DbiWriteData {
+typedef struct GsiData {
   u32 global_symbol_stream;
-  u32 public_stream;
+  u32 public_symbol_stream;
   u32 sym_record_stream;
+} GsiData;
+
+typedef struct DbiWriteData {
+  GsiData gsi_data;
   u32 section_header_stream;
   u32 module_sym_stream;
   u32 module_symbols_byte_size;
@@ -562,11 +574,11 @@ static int write_dbi_stream(CTX,
   dsh->VersionSignature = -1;
   dsh->VersionHeader = 19990903; /* V70 */
   dsh->Age = 1;
-  dsh->GlobalStreamIndex = dwd->global_symbol_stream;
-  dsh->BuildNumber = 0x8eb; // TODO This is what llvm emits.
-  dsh->PublicStreamIndex = dwd->public_stream;
+  dsh->GlobalStreamIndex = (u16)dwd->gsi_data.global_symbol_stream;
+  dsh->BuildNumber = 0x8eb; // link.exe 14.11, "new format" for compatibility.
+  dsh->PublicStreamIndex = (u16)dwd->gsi_data.public_symbol_stream;
   dsh->PdbDllVersion = 0;
-  dsh->SymRecordStream = dwd->sym_record_stream;
+  dsh->SymRecordStream = (u16)dwd->gsi_data.sym_record_stream;
   dsh->PdbDllRbld = 0;
 
   // All of these are filled in after being written later.
@@ -659,7 +671,7 @@ static int write_dbi_stream(CTX,
   sce->Padding1[0] = 0;
   sce->Padding1[1] = 0;
   sce->Offset = 0;
-  sce->Size = ctx->image_size;
+  sce->Size = (i32)ctx->image_size;
   sce->Characteristics =
       IMAGE_SCN_CNT_CODE | IMAGE_SCN_ALIGN_16BYTES | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ;
   sce->ModuleIndex = 0;
@@ -669,11 +681,11 @@ static int write_dbi_stream(CTX,
   sce->RelocCrc = 0;
 
   mod->Flags = 0;
-  mod->ModuleSymStream = dwd->module_sym_stream;
+  mod->ModuleSymStream = (u16)dwd->module_sym_stream;
   mod->SymByteSize = dwd->module_symbols_byte_size;
   mod->C11ByteSize = 0;
   mod->C13ByteSize = dwd->module_c13_byte_size;
-  mod->SourceFileCount = dwd->num_source_files;
+  mod->SourceFileCount = (u16)dwd->num_source_files;
   mod->Padding[0] = 0;
   mod->Padding[1] = 0;
   mod->Unused2 = 0;
@@ -687,7 +699,7 @@ static int write_dbi_stream(CTX,
   memcpy(names, obj_name, sizeof(obj_name));
   names += sizeof(obj_name);
 
-  dsh->ModInfoSize = align_to(names - cur, 4);
+  dsh->ModInfoSize = align_to((u32)(names - cur), 4);
 #endif
   cur += dsh->ModInfoSize;
 
@@ -850,7 +862,7 @@ static int write_dbi_stream(CTX,
   static const char source_name[] = "c:\\path\\source.c";
   memcpy(filename_buf, source_name, sizeof(source_name));
   filename_buf += sizeof(source_name);
-  dsh->SourceInfoSize = align_to(filename_buf - (char*)fish, 4);
+  dsh->SourceInfoSize = align_to((u32)(filename_buf - (char*)fish), 4);
 #endif
 
   cur += dsh->SourceInfoSize;
@@ -898,13 +910,306 @@ static int write_dbi_stream(CTX,
   dsh->OptionalDbgHeaderSize = sizeof(dbg_hdr);
   cur += dsh->OptionalDbgHeaderSize;
 
-  stream->data_length = cur - start;
+  stream->data_length = (u32)(cur - start);
   return 1;
 #else
   memcpy(start, str3_raw, str3_raw_len);
   stream->data_length = str3_raw_len;
   return 1;
 #endif
+}
+
+#define IPHR_HASH 4096
+
+typedef struct HashSym {
+  char* name;
+  u32 offset;
+  u32 hash_bucket;  // Must be % IPHR_HASH
+} HashSym;
+
+typedef struct HRFile {
+  u32 off;
+  u32 cref;
+} HRFile;
+
+typedef struct GsiHashBuilder {
+  HashSym* sym;
+  size_t sym_len;
+  size_t sym_cap;
+
+  HRFile* hash_records;
+  size_t hash_records_len;
+
+  u32* hash_buckets;
+  size_t hash_buckets_len;
+  size_t hash_buckets_cap;
+
+  u32 hash_bitmap[(IPHR_HASH + 32) / 32];
+} GsiHashBuilder;
+
+typedef struct GsiBuilder {
+  StreamData* public_hash_stream;
+  StreamData* global_hash_stream;
+  StreamData* sym_record_stream;
+
+  GsiHashBuilder publics;
+  GsiHashBuilder globals;
+} GsiBuilder;
+
+typedef enum CV_S_PUB32_FLAGS {
+  CVSPF_None = 0x00,
+  CVSPF_Code = 0x01,
+  CVSPF_Function = 0x02,
+  CVSPF_Managed = 0x04,
+  CVSPF_MSIL = 0x08,
+} CV_S_PUB32_FLAGS;
+
+static void gsi_builder_add_public(CTX,
+                                   GsiBuilder* builder,
+                                   CV_S_PUB32_FLAGS flags,
+                                   u32 offset_into_codeseg,
+                                   char* name) {
+  StreamData* stream = builder->sym_record_stream;
+
+  HashSym sym = {_strdup(name), stream->data_length, calc_hash(name, strlen(name)) % IPHR_HASH};
+  PUSH_BACK(builder->publics.sym, sym);
+
+  u16 name_len = (u16)strlen(name) + 1; // trailing \0 required
+  u16 record_len = (u16)align_to((u32)(name_len + 14), 4) - 2;
+
+  SW_U16(record_len);
+  SW_U16(0x110e);  // S_PUB32
+  SW_U32(flags);
+  SW_U32(offset_into_codeseg);
+  SW_U16(1); // segment is always 1
+  SW_BLOCK(name, name_len);
+  SW_ALIGN(4);
+}
+
+static void gsi_builder_add_procref(CTX,
+                                    GsiBuilder* builder,
+                                    u32 offset_into_module_data,
+                                    char* name) {
+  StreamData* stream = builder->sym_record_stream;
+
+  HashSym sym = {_strdup(name), stream->data_length, calc_hash(name, strlen(name)) % IPHR_HASH};
+  PUSH_BACK(builder->globals.sym, sym);
+
+  u16 name_len = (u16)strlen(name) + 1; // trailing \0 required
+  u16 record_len = (u16)align_to((u32)(name_len + 14), 4) - 2;
+  SW_U16(record_len);
+  SW_U16(0x1125); // S_PROCREF
+  SW_U32(0);  // "SUC of the name" always seems to be zero? I'm not sure what it is.
+  SW_U32(offset_into_module_data);
+  SW_U16(1); // segment is always 1
+  SW_BLOCK(name, name_len);
+  SW_ALIGN(4);
+}
+
+static int is_ascii_string(char* s) {
+  for (char* p = s; *p; ++p) {
+    if (*p >= 0x80) return 0;
+  }
+  return 1;
+}
+
+static int gsi_record_cmp(char* s1, char* s2) {
+  // Not-at-all-Accidentally Quadratic, but rather Wantonly. :/
+  size_t ls = strlen(s1);
+  size_t rs = strlen(s2);
+  if (ls != rs) {
+    return (ls > rs) - (ls < rs);
+  }
+
+  // Non-ascii: memcmp.
+  if (!is_ascii_string(s1) || !is_ascii_string(s2)) {
+    return memcmp(s1, s2, ls);
+  }
+
+  // Otherwise case-insensitive (so random!).
+  return _memicmp(s1, s2, ls);
+}
+
+// TODO: use a better sort impl
+static HashSym *_cur_hash_bucket_sort_syms = NULL;
+
+// See caseInsensitiveComparePchPchCchCch() in microsoft-pdb gsi.cpp.
+static int gsi_bucket_cmp(const void* a, const void* b) {
+  HRFile* hra = (HRFile*)a;
+  HRFile* hrb = (HRFile*)b;
+  HashSym* left = &_cur_hash_bucket_sort_syms[hra->off];
+  HashSym* right = &_cur_hash_bucket_sort_syms[hrb->off];
+  assert(left->hash_bucket == right->hash_bucket);
+  int cmp = gsi_record_cmp(left->name, right->name);
+  if (cmp != 0) {
+    return cmp < 0;
+  }
+  return left->offset < right->offset;
+}
+
+static void gsi_hash_builder_finish(GsiHashBuilder* hb) {
+  // Figure out the exact bucket layout in the very arbitrary way that somebody
+  // happened to decide on 30 years ago. The number of buckets in the
+  // microsoft-pdb implementation is constant at IPHR_HASH afaict.
+
+  // Figure out where each bucket starts.
+  u32 bucket_starts[IPHR_HASH] = {0};
+  {
+    u32 num_mapped_to_bucket[IPHR_HASH] = {0};
+    for (size_t i = 0; i < hb->sym_len; ++i) {
+      ++num_mapped_to_bucket[hb->sym[i].hash_bucket];
+    }
+
+    u32 total = 0;
+    for (size_t i = 0; i < IPHR_HASH; ++i) {
+      bucket_starts[i] = total;
+      total += num_mapped_to_bucket[i];
+    }
+  }
+
+  // Put symbols into the table in bucket order, updating the bucket starts as
+  // we go.
+  u32 bucket_cursors[IPHR_HASH];
+  memcpy(bucket_cursors, bucket_starts, sizeof(bucket_cursors));
+
+  size_t num_syms = hb->sym_len;
+
+  hb->hash_records = calloc(num_syms, sizeof(HRFile));
+  hb->hash_records_len = num_syms;
+
+  for (size_t i = 0; i < num_syms; ++i) {
+    u32 hash_idx = bucket_cursors[hb->sym[i].hash_bucket]++;
+    hb->hash_records[hash_idx].off = (u32)i;
+    hb->hash_records[hash_idx].cref = 1;
+  }
+
+  _cur_hash_bucket_sort_syms = hb->sym;
+  // Sort each *bucket* (approximately) by the memcmp of the symbol's name. This
+  // has to match microsoft-pdb, and it's bonkers. LLVM's implementation was
+  // more helpful than microsoft-pdb's gsi.cpp for this one, and these hashes
+  // aren't documented at all (in English) as of this writing as far as I know.
+  for (size_t i = 0; i < IPHR_HASH; ++i) {
+    size_t count = bucket_cursors[i] - bucket_starts[i];
+    if (count > 0) {
+      HRFile* begin = hb->hash_records + bucket_starts[i];
+      qsort(begin, count, sizeof(HRFile), gsi_bucket_cmp);
+
+      // Replace the indices with the stream offsets of each global, biased by 1
+      // because 0 is treated specially.
+      for (size_t j = 0; j < count; ++j) {
+        begin[j].off = hb->sym[j].offset + 1;
+      }
+    }
+  }
+  _cur_hash_bucket_sort_syms = NULL;
+
+  // Update the hash bitmap for each used bucket.
+  for (u32 i = 0; i < sizeof(hb->hash_bitmap) / sizeof(hb->hash_bitmap[0]); ++i) {
+    u32 word = 0;
+    for (u32 j = 0; j < 32; ++j) {
+      u32 bucket_idx = i * 32 + j;
+      if (bucket_idx >= IPHR_HASH || bucket_starts[bucket_idx] == bucket_cursors[bucket_idx]) {
+        continue;
+      }
+      word |= 1u << j;
+
+      // Calculate what the offset of the first hash record int he chain would
+      // be if it contained 32bit pointers: HROffsetCalc in microsoft-pdb gsi.h.
+      int size_of_hr_offset_calc = 12;
+      u32 chain_start_off = bucket_starts[bucket_idx] * size_of_hr_offset_calc;
+      PUSH_BACK(hb->hash_buckets, chain_start_off);
+    }
+    hb->hash_bitmap[i] = word;
+  }
+}
+
+static void gsi_hash_builder_write(CTX, GsiHashBuilder* hb, StreamData* stream) {
+  SW_U32(0xffffffff);             // HdrSignature
+  SW_U32(0xeffe0000 + 19990810);  // GSIHashSCImpv70
+  SW_U32((u32)(hb->hash_records_len * sizeof(HRFile)));
+  SW_U32((u32)(sizeof(hb->hash_bitmap) + hb->hash_buckets_len * sizeof(u32)));
+
+  SW_BLOCK(hb->hash_records, hb->hash_records_len * sizeof(HRFile));
+  SW_BLOCK(hb->hash_bitmap, sizeof(hb->hash_bitmap));
+  SW_BLOCK(hb->hash_buckets, hb->hash_buckets_len * sizeof(u32));
+}
+
+
+static HashSym* _cur_addr_map_sort_syms = NULL;
+static int addr_map_cmp(const void* a, const void* b) {
+  u32* left_idx = (u32*)a;
+  u32* right_idx = (u32*)b;
+  HashSym* left = &_cur_addr_map_sort_syms[*left_idx];
+  HashSym* right = &_cur_addr_map_sort_syms[*right_idx];
+  // Compare segment first, if we had one, but it's always 1.
+  if (left->offset != right->offset)
+    return left->offset < right->offset;
+  return strcmp(left->name, right->name);
+}
+
+static void gsi_write_publics_stream(CTX, GsiHashBuilder* hb, StreamData* stream) {
+  // microsoft-pdb PSGSIHDR first, then the hash table in the same format as
+  // "globals" (gsi_hash_builder_write).
+  u32 size_of_hash = (u32)(16 + (hb->hash_records_len * sizeof(HRFile)) + sizeof(hb->hash_bitmap) +
+                           (hb->hash_buckets_len * sizeof(u32)));
+  SW_U32(size_of_hash);                      // cbSymHash
+  SW_U32((u32)(hb->sym_len * sizeof(u32)));  // cbAddrMap
+  SW_U32(0);                                 // nThunks
+  SW_U32(0);                                 // cbSizeOfThunk
+  SW_U16(0);                                 // isectTunkTable
+  SW_U16(0);                                 // padding
+  SW_U32(0);                                 // offThunkTable
+  SW_U32(0);                                 // nSects
+
+  size_t before_hash_len = stream->data_length;
+
+  gsi_hash_builder_write(ctx, hb, stream);
+
+  size_t after_hash_len = stream->data_length;
+  assert(after_hash_len - before_hash_len == size_of_hash &&
+         "hash size calc doesn't match gsi_hash_builder_write");
+
+  u32* addr_map = _alloca(sizeof(u32) * hb->sym_len);
+  for (u32 i = 0; i < hb->sym_len; ++i)
+    addr_map[i] = i;
+  _cur_addr_map_sort_syms = hb->sym;
+  qsort(addr_map, hb->sym_len, sizeof(u32), addr_map_cmp);
+  _cur_addr_map_sort_syms = NULL;
+
+  // Rewrite public symbol indices into symbol offsets.
+  for (size_t i = 0; i < hb->sym_len; ++i) {
+    addr_map[i] = hb->sym[addr_map[i]].offset;
+  }
+
+  SW_BLOCK(addr_map, hb->sym_len * sizeof(u32));
+}
+
+static void gsi_builder_finish(CTX, GsiBuilder* gsi) {
+  gsi_hash_builder_finish(&gsi->publics);
+  gsi_hash_builder_finish(&gsi->globals);
+
+  gsi->public_hash_stream = add_stream(ctx);
+  gsi_write_publics_stream(ctx, &gsi->publics, gsi->public_hash_stream);
+
+  gsi->global_hash_stream = add_stream(ctx);
+  gsi_hash_builder_write(ctx, &gsi->globals, gsi->global_hash_stream);
+}
+
+static GsiData build_gsi_data(CTX) {
+  GsiBuilder* gsi = calloc(1, sizeof(GsiBuilder));
+  gsi->sym_record_stream = add_stream(ctx);
+
+  gsi_builder_add_public(ctx, gsi, CVSPF_Function, 0x10, "FuncX");
+  gsi_builder_add_public(ctx, gsi, CVSPF_Function, 0x0, "_DllMainCRTStartup");
+
+  gsi_builder_add_procref(ctx, gsi, 0x70, "_DllMainCRTStartup");
+  gsi_builder_add_procref(ctx, gsi, 0xd0, "FuncX");
+
+  gsi_builder_finish(ctx, gsi);
+
+  return (GsiData){.global_symbol_stream = gsi->global_hash_stream->stream_index,
+                   .public_symbol_stream = gsi->public_hash_stream->stream_index,
+                   .sym_record_stream = gsi->sym_record_stream->stream_index};
 }
 
 static int write_directory(CTX) {
@@ -917,7 +1222,7 @@ static int write_directory(CTX) {
   u32* dir = start;
 
   // Starts with number of streams.
-  *dir++ = ctx->stream_data_len;
+  *dir++ = (u32)ctx->stream_data_len;
 
   // Then, the number of blocks in each stream.
   for (size_t i = 0; i < ctx->stream_data_len; ++i) {
@@ -935,7 +1240,7 @@ static int write_directory(CTX) {
 
   // And finally, update the super block with the number of bytes in the
   // directory.
-  ctx->superblock->NumDirectoryBytes = (dir - start) * sizeof(u32);
+  ctx->superblock->NumDirectoryBytes = (u32)((dir - start) * sizeof(u32));
 
   // This can't easily use StreamData because it's the directory of streams. It
   // would take a larger pdb that we expect to be writing here to overflow the
@@ -994,16 +1299,7 @@ int dbp_finish(DbpContext* ctx) {
   // Stream 5: "/LinkInfo", empty.
   //add_stream(ctx);
 
-  // HACK
-  StreamData* global_symbol_hash = add_stream(ctx);
-  stream_write_block(ctx, global_symbol_hash, str6_raw, str6_raw_len);
-
-  StreamData* public_symbol_hash = add_stream(ctx);
-  stream_write_block(ctx, public_symbol_hash, str7_raw, str7_raw_len);
-
-  // HACK
-  StreamData* sym_records = add_stream(ctx);
-  stream_write_block(ctx, sym_records, str8_raw, str8_raw_len);
+  GsiData gsi_data = build_gsi_data(ctx);
 
   // Section Headers; empty. Referred to by DBI in 'optional' dbg headers, and
   // llvm-pdbutil wants it to exist, but handles an empty stream reasonably.
@@ -1019,9 +1315,7 @@ int dbp_finish(DbpContext* ctx) {
 
   ENSURE(1, write_empty_tpi_ipi_stream(ctx, stream2));
   DbiWriteData dwd = {
-    .global_symbol_stream = global_symbol_hash->stream_index,
-    .public_stream = public_symbol_hash->stream_index,
-    .sym_record_stream = sym_records->stream_index,
+    .gsi_data = gsi_data,
     .section_header_stream = section_headers->stream_index,
     .module_sym_stream = module_stream->stream_index,
     .module_symbols_byte_size = 0x148,
