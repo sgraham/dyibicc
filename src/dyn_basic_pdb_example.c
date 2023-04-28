@@ -7,7 +7,8 @@
 //   return x + 100;       // Line 7
 // }                       // Line 8
 //
-// When debugged, breakpoints and stepping should work in the comment above.
+// When debugged, breakpoints and stepping should work in the comment above. Set
+// a breakpoint on the call to dbp_finish() to see things happening.
 //
 static unsigned char test_data[] = {
   /* x0000 */ 0x48, 0x83, 0xec, 0x18,                    // sub rsp, 18h

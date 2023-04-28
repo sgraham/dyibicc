@@ -21,8 +21,8 @@
 //
 // Normally, a .pdb is referenced by another PE (exe/dll) or .dmp, and that's
 // how VS locates and decides to load the PDB. Because there's no PE in the case
-// of a JIT, dbp_finish() also does some goofy hacking to encourage the VS IDE
-// to find and load the generated .pdb.
+// of a JIT, in addition to writing a viable pdb, dbp_finish() also does some
+// goofy hacking to encourage the VS IDE to find and load the generated .pdb.
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,9 +50,11 @@ int dbp_finish(DbpContext* ctx);
 #ifdef DYN_BASIC_PDB_IMPLEMENTATION
 
 #define _CRT_SECURE_NO_WARNINGS
-#pragma warning(disable: 4668) // 'X' is not defined as a preprocessor macro, replacing with '0' for '#if/#elif'
-#pragma warning(disable: 4820) // 'X' bytes padding added after data member 'Y'
-#pragma warning(disable: 5045) // Compiler will insert Spectre mitigation for memory load if /Qspectre switch specified
+#pragma warning(disable : 4668)  // 'X' is not defined as a preprocessor macro, replacing with '0'
+                                 // for '#if/#elif'
+#pragma warning(disable : 4820)  // 'X' bytes padding added after data member 'Y'
+#pragma warning(disable : 5045)  // Compiler will insert Spectre mitigation for memory load if
+                                 // /Qspectre switch specified
 #pragma comment(lib, "rpcrt4")
 
 #include <assert.h>
@@ -181,6 +183,7 @@ struct SuperBlock {
 #define CTX DbpContext* ctx
 #define PAGE_TO_WORD(pn) (pn >> 6)
 #define PAGE_MASK(pn) (1ULL << (pn & ((sizeof(u64) * CHAR_BIT) - 1)))
+static const char synthetic_obj_name[] = "dyn_basic_pdb-synthetic-for-jit.obj";
 
 static void mark_block_used(CTX, u32 pn) {
   u64* map2 = (u64*)&ctx->data[BLOCK_SIZE * 2];
@@ -711,11 +714,10 @@ static int write_dbi_stream(CTX,
   mod->PdbFilePathNameIndex = 0;
 
   char* names = (char*)(mod + 1);
-  static const char obj_name[] = "dyn_basic_pdb-synthetic-for-jit.obj";
-  memcpy(names, obj_name, sizeof(obj_name));
-  names += sizeof(obj_name);
-  memcpy(names, obj_name, sizeof(obj_name));
-  names += sizeof(obj_name);
+  memcpy(names, synthetic_obj_name, sizeof(synthetic_obj_name));
+  names += sizeof(synthetic_obj_name);
+  memcpy(names, synthetic_obj_name, sizeof(synthetic_obj_name));
+  names += sizeof(synthetic_obj_name);
 
   dsh->ModInfoSize = align_to((u32)(names - cur), 4);
 #endif
@@ -974,6 +976,13 @@ typedef struct GsiBuilder {
   GsiHashBuilder globals;
 } GsiBuilder;
 
+// The CodeView structs are all smooshed.
+#pragma pack(push, 1)
+
+#define CV_SYM_HEADER \
+  u16 record_len;     \
+  u16 record_type
+
 typedef enum CV_S_PUB32_FLAGS {
   CVSPF_None = 0x00,
   CVSPF_Code = 0x01,
@@ -981,6 +990,37 @@ typedef enum CV_S_PUB32_FLAGS {
   CVSPF_Managed = 0x04,
   CVSPF_MSIL = 0x08,
 } CV_S_PUB32_FLAGS;
+
+typedef struct CV_S_PUB32 {
+  CV_SYM_HEADER;
+
+  u32 flags;
+  u32 offset_into_codeseg;
+  u16 segment;
+  //unsigned char name[];
+} CV_S_PUB32;
+
+typedef struct CV_S_PROCREF {
+  CV_SYM_HEADER;
+
+  u32 sum_name;
+  u32 offset_into_module_data;
+  u16 segment;
+  //unsigned char name[];
+} CV_S_PROCREF;
+
+#define SW_CV_SYM_TRAILING_NAME(sym, name)                                                    \
+  do {                                                                                        \
+    u16 name_len = (u16)strlen(name) + 1; /* trailing \0 seems required in (most?) records */ \
+    u16 record_len = (u16)align_to((u32)name_len + sizeof(sym), 4) -                          \
+                     sizeof(u16) /* length field not included in length count */;             \
+    sym.record_len = record_len;                                                              \
+    SW_BLOCK(&sym, sizeof(sym));                                                               \
+    SW_BLOCK(name, name_len);                                                                 \
+    SW_ALIGN(4);                                                                              \
+  } while (0);
+
+#pragma pack(pop)
 
 static void gsi_builder_add_public(CTX,
                                    GsiBuilder* builder,
@@ -992,16 +1032,13 @@ static void gsi_builder_add_public(CTX,
   HashSym sym = {_strdup(name), stream->data_length, calc_hash(name, strlen(name)) % IPHR_HASH};
   PUSH_BACK(builder->publics.sym, sym);
 
-  u16 name_len = (u16)strlen(name) + 1; // trailing \0 required
-  u16 record_len = (u16)align_to((u32)(name_len + 14), 4) - 2;
-
-  SW_U16(record_len);
-  SW_U16(0x110e);  // S_PUB32
-  SW_U32(flags);
-  SW_U32(offset_into_codeseg);
-  SW_U16(1); // segment is always 1
-  SW_BLOCK(name, name_len);
-  SW_ALIGN(4);
+  CV_S_PUB32 pub = {
+      .record_type = 0x110e,
+      .flags = flags,
+      .offset_into_codeseg = offset_into_codeseg,
+      .segment = 1  // segment is always 1 for us
+  };
+  SW_CV_SYM_TRAILING_NAME(pub, name);
 }
 
 static void gsi_builder_add_procref(CTX,
@@ -1013,15 +1050,13 @@ static void gsi_builder_add_procref(CTX,
   HashSym sym = {_strdup(name), stream->data_length, calc_hash(name, strlen(name)) % IPHR_HASH};
   PUSH_BACK(builder->globals.sym, sym);
 
-  u16 name_len = (u16)strlen(name) + 1; // trailing \0 required
-  u16 record_len = (u16)align_to((u32)(name_len + 14), 4) - 2;
-  SW_U16(record_len);
-  SW_U16(0x1125); // S_PROCREF
-  SW_U32(0);  // "SUC of the name" always seems to be zero? I'm not sure what it is.
-  SW_U32(offset_into_module_data);
-  SW_U16(1); // segment is always 1
-  SW_BLOCK(name, name_len);
-  SW_ALIGN(4);
+  CV_S_PROCREF procref = {
+      .record_type = 0x1125,
+      .sum_name = 0,
+      .offset_into_module_data = offset_into_module_data,
+      .segment = 1,  // segment is always 1 for us
+  };
+  SW_CV_SYM_TRAILING_NAME(procref, name);
 }
 
 static int is_ascii_string(char* s) {
@@ -1230,6 +1265,41 @@ static GsiData build_gsi_data(CTX) {
                    .sym_record_stream = gsi->sym_record_stream->stream_index};
 }
 
+static void module_write_sym_OBJNAME(CTX, StreamData* stream, char* name) {
+  (void)ctx;
+  (void)stream;
+  (void)name;
+#if 0
+  size_t name_len = strlen(name) + 1; // trailing \0 required (maybe?)
+  SW_U16(len);
+  SW_U16(0x1101); // S_OBJNAME
+  SW_U32(0);
+  SW_BLOCK(name, strlen(name) + 1);
+  SW_ALIGN(4);
+#endif
+}
+
+typedef struct ModuleData {
+  StreamData* stream;
+  u32 symbols_byte_size;
+  u32 c13_byte_size;
+} ModuleData;
+
+static ModuleData write_module_stream(CTX) {
+  StreamData* stream = add_stream(ctx);
+  ModuleData module_data = {stream};
+#if 0
+  SW_U32(4);  // Signature
+  module_write_sym_OBJNAME(ctx, stream, synthetic_obj_name);
+#else
+  stream_write_block(ctx, stream, str11_raw, str11_raw_len);
+  module_data.symbols_byte_size = 0x148;
+  module_data.c13_byte_size = 0x80;
+#endif
+
+  return module_data;
+}
+
 static int write_directory(CTX) {
   u32 directory_page = alloc_block(ctx);
 
@@ -1316,10 +1386,7 @@ int dbp_finish(DbpContext* ctx) {
 
   GsiData gsi_data = build_gsi_data(ctx);
 
-  // Module blah.obj
-  // HACK
-  StreamData* module_stream = add_stream(ctx);
-  stream_write_block(ctx, module_stream, str11_raw, str11_raw_len);
+  ModuleData module_data = write_module_stream(ctx);
 
   // "/names": named, so stream index doesn't matter.
   StreamData* names_stream = add_stream(ctx);
@@ -1333,9 +1400,9 @@ int dbp_finish(DbpContext* ctx) {
   DbiWriteData dwd = {
     .gsi_data = gsi_data,
     .section_header_stream = section_headers->stream_index,
-    .module_sym_stream = module_stream->stream_index,
-    .module_symbols_byte_size = 0x148,
-    .module_c13_byte_size = 0x80,
+    .module_sym_stream = module_data.stream->stream_index,
+    .module_symbols_byte_size = module_data.symbols_byte_size,
+    .module_c13_byte_size = module_data.c13_byte_size,
     .num_source_files = 1,
   };
   ENSURE(write_dbi_stream(ctx, stream3, &dwd), 1);
