@@ -1115,7 +1115,7 @@ static void gsi_hash_builder_finish(GsiHashBuilder* hb) {
       // Replace the indices with the stream offsets of each global, biased by 1
       // because 0 is treated specially.
       for (size_t j = 0; j < count; ++j) {
-        begin[j].off = hb->sym[j].offset + 1;
+        begin[j].off = hb->sym[begin[j].off].offset + 1;
       }
     }
   }
@@ -1206,11 +1206,11 @@ static void gsi_builder_finish(CTX, GsiBuilder* gsi) {
   gsi_hash_builder_finish(&gsi->publics);
   gsi_hash_builder_finish(&gsi->globals);
 
-  gsi->public_hash_stream = add_stream(ctx);
-  gsi_write_publics_stream(ctx, &gsi->publics, gsi->public_hash_stream);
-
   gsi->global_hash_stream = add_stream(ctx);
   gsi_hash_builder_write(ctx, &gsi->globals, gsi->global_hash_stream);
+
+  gsi->public_hash_stream = add_stream(ctx);
+  gsi_write_publics_stream(ctx, &gsi->publics, gsi->public_hash_stream);
 }
 
 static GsiData build_gsi_data(CTX) {
@@ -1316,10 +1316,6 @@ int dbp_finish(DbpContext* ctx) {
 
   GsiData gsi_data = build_gsi_data(ctx);
 
-  // Section Headers; empty. Referred to by DBI in 'optional' dbg headers, and
-  // llvm-pdbutil wants it to exist, but handles an empty stream reasonably.
-  StreamData* section_headers = add_stream(ctx);
-
   // Module blah.obj
   // HACK
   StreamData* module_stream = add_stream(ctx);
@@ -1329,6 +1325,11 @@ int dbp_finish(DbpContext* ctx) {
   StreamData* names_stream = add_stream(ctx);
 
   ENSURE(1, write_empty_tpi_ipi_stream(ctx, stream2));
+
+  // Section Headers; empty. Referred to by DBI in 'optional' dbg headers, and
+  // llvm-pdbutil wants it to exist, but handles an empty stream reasonably.
+  StreamData* section_headers = add_stream(ctx);
+
   DbiWriteData dwd = {
     .gsi_data = gsi_data,
     .section_header_stream = section_headers->stream_index,
