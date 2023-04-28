@@ -3,8 +3,26 @@
 
 // In exactly *one* C file:
 //
-// #define DYN_BASIC_PDB_IMPLEMENTATION
-// #include "dyn_basic_pdb.h"
+//   #define DYN_BASIC_PDB_IMPLEMENTATION
+//   #include "dyn_basic_pdb.h"
+//
+// then include and use dyn_basic_pdb.h in other files as usual.
+//
+// See dyn_basic_pdb_example.c for sample usage.
+//
+// This implementation only outputs function symbols and line mappings, not full
+// type information, though it could be extended to do so with a bunch more
+// futzing around. It also doesn't (can't) output the .pdata/.xdata that for a
+// JIT you typically register with RtlAddFunctionTable(). You will get incorrect
+// stacks in VS until you do that.
+//
+// Only one module is supported (equivalent to one .obj file), because in my jit
+// implementation, all code is generated into a single code segment.
+//
+// Normally, a .pdb is referenced by another PE (exe/dll) or .dmp, and that's
+// how VS locates and decides to load the PDB. Because there's no PE in the case
+// of a JIT, dbp_finish() also does some goofy hacking to encourage the VS IDE
+// to find and load the generated .pdb.
 
 #ifdef __cplusplus
 extern "C" {
@@ -1295,9 +1313,6 @@ int dbp_finish(DbpContext* ctx) {
 
   // Stream 4: IPI Stream.
   StreamData* stream4 = add_stream(ctx);
-
-  // Stream 5: "/LinkInfo", empty.
-  //add_stream(ctx);
 
   GsiData gsi_data = build_gsi_data(ctx);
 
