@@ -13,7 +13,7 @@
 static unsigned char test_data[] = {
   /* x0000 */ 0x48, 0x83, 0xec, 0x18,                    // sub rsp, 18h
   /* x0004 */ 0xc7, 0x04, 0x24, 0x04, 0x00, 0x00, 0x00,  // mov dword ptr [rsp], 4
-  /* x000b */ 0x8b, 0x04, 0x24,                          // mov eax dword ptr [rsp]
+  /* x000b */ 0x8b, 0x04, 0x24,                          // mov eax, dword ptr [rsp]
   /* x000e */ 0x83, 0xc0, 0x64,                          // add eax, 64h
   /* x0011 */ 0x48, 0x83, 0xc4, 0x18,                    // add rsp, 18h
   /* x0015 */ 0xc3,                                      // ret

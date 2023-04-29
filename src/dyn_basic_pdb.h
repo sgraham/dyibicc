@@ -66,9 +66,6 @@ int dbp_finish(DbpContext* ctx);
 #include <time.h>
 #include <windows.h>
 
-#include "str3.h"
-#include "str11.h"
-
 typedef unsigned int u32;
 typedef signed int i32;
 typedef unsigned short u16;
@@ -456,10 +453,10 @@ static int nmt_add_string(NmtAlikeHashTable* nmt, char* str, u32* name_index) {
 static int write_names_stream(CTX, StreamData* stream) {
   SW_U32(0xeffeeffe);  // Header
   SW_U32(1);           // verLongHash
-  SW_U32(33);          // Size of string buffer
+  SW_U32(40);          // Size of string buffer
 
   // String buffer
-  static char names[] = "\0\0c:\\src\\dyibicc\\scratch\\zzz\\z.c";
+  static char names[] = "\0c:\\src\\dyibicc\\dyn_basic_pdb_example.c";
   stream_write_block(ctx, stream, names, sizeof(names));
 
   SW_U32(4);  // 4 elements in array
@@ -467,12 +464,17 @@ static int write_names_stream(CTX, StreamData* stream) {
   // TODO: This hash seems right for these two items; need to figure out what
   // actually goes in this stream, how the table grows, etc.
   //u32 hash1 = calc_hash(&names[1], 1) % 4;
-  //u32 hash2 = calc_hash(&names[2], 31) % 4;
-  SW_U32(1);  // offset 1 ""
-  SW_U32(2);  // offset 2 "c:\...\x.c"
+#if 0
+  printf("%zu\n", strlen(&names[1]));
+  u32 hash2 = calc_hash(&names[1], 39) % 4;
+  printf("%d\n", hash2);
+  printf("%d\n", hash2 % 4);
+#endif
+  SW_U32(0);
+  SW_U32(1);  // offset 1 "c:\...ple.c"
   SW_U32(0);
   SW_U32(0);
-  SW_U32(2);  // 2 elements filled
+  SW_U32(1);  // 1 elements filled
 
   return 1;
 }
@@ -723,7 +725,7 @@ static int write_dbi_stream(CTX,
 #endif
   cur += dsh->ModInfoSize;
 
-#if 1
+#if 0
   unsigned char seccontrib[] = {
   // Section Contribution Substream
   0x2d, 0xba, 0x2e, 0xf1,  // Ver60
@@ -799,7 +801,7 @@ static int write_dbi_stream(CTX,
   cur += dsh->SectionContributionSize;
 
 
-#if 1
+#if 0
   // Section Map Substream
   unsigned char smss[] = {
   0x04, 0x00,  // Count
@@ -879,7 +881,7 @@ static int write_dbi_stream(CTX,
   u32* file_name_offsets = (u32*)file_info;
   *file_name_offsets++ = 0;
   char* filename_buf = (char*)file_name_offsets;
-  static const char source_name[] = "c:\\path\\source.c";
+  static const char source_name[] = "c:\\src\\dyibicc\\dyn_basic_pdb_example.c";
   memcpy(filename_buf, source_name, sizeof(source_name));
   filename_buf += sizeof(source_name);
   dsh->SourceInfoSize = align_to((u32)(filename_buf - (char*)fish), 4);
@@ -993,7 +995,6 @@ typedef enum CV_S_PUB32_FLAGS {
 
 typedef struct CV_S_PUB32 {
   CV_SYM_HEADER;
-
   u32 flags;
   u32 offset_into_codeseg;
   u16 segment;
@@ -1002,12 +1003,143 @@ typedef struct CV_S_PUB32 {
 
 typedef struct CV_S_PROCREF {
   CV_SYM_HEADER;
-
   u32 sum_name;
   u32 offset_into_module_data;
   u16 segment;
   //unsigned char name[];
 } CV_S_PROCREF;
+
+typedef struct CV_S_OBJNAME {
+  CV_SYM_HEADER;
+  u32 signature;
+  // unsigned char name[];
+} CV_S_OBJNAME;
+
+typedef struct CV_S_COMPILE3 {
+  CV_SYM_HEADER;
+
+  struct {
+    u32 language : 8;         // language index
+    u32 ec : 1;               // compiled for E/C
+    u32 no_dbg_info : 1;      // not compiled with debug info
+    u32 ltcg : 1;             // compiled with LTCG
+    u32 no_data_align : 1;    // compiled with -Bzalign
+    u32 managed_present : 1;  // managed code/data present
+    u32 security_checks : 1;  // compiled with /GS
+    u32 hot_patch : 1;        // compiled with /hotpatch
+    u32 cvtcil : 1;           // converted with CVTCIL
+    u32 msil_module : 1;      // MSIL netmodule
+    u32 sdl : 1;              // compiled with /sdl
+    u32 pgo : 1;              // compiled with /ltcg:pgo or pgu
+    u32 exp : 1;              // .exp module
+    u32 pad : 12;             // reserved, must be 0
+  } flags;
+  u16 machine;
+  u16 ver_fe_major;
+  u16 ver_fe_minor;
+  u16 ver_fe_build;
+  u16 ver_fe_qfe;
+  u16 ver_be_major;
+  u16 ver_be_minor;
+  u16 ver_be_build;
+  u16 ver_be_qfe;
+
+  //unsigned char version[];
+} CV_S_COMPILE3;
+
+typedef struct CV_S_PROCFLAGS {
+  unsigned char CV_PFLAG_NOFPO : 1;       // frame pointer present
+  unsigned char CV_PFLAG_INT : 1;         // interrupt return
+  unsigned char CV_PFLAG_FAR : 1;         // far return
+  unsigned char CV_PFLAG_NEVER : 1;       // function does not return
+  unsigned char CV_PFLAG_NOTREACHED : 1;  // label isn't fallen into
+  unsigned char CV_PFLAG_CUST_CALL : 1;   // custom calling convention
+  unsigned char CV_PFLAG_NOINLINE : 1;    // function marked as noinline
+  unsigned char CV_PFLAG_OPTDBGINFO : 1;  // function has debug information for optimized code
+} CV_S_PROCFLAGS;
+
+typedef struct CV_S_GPROC32 {
+  CV_SYM_HEADER;
+
+  u32 parent;
+  u32 end;
+  u32 next;
+  u32 len;
+  u32 dbg_start;
+  u32 dbg_end;
+  u32 type_index;
+  u32 offset;
+  u16 seg;
+  CV_S_PROCFLAGS flags;  // Proc flags
+
+  // unsigned char name[];
+} CV_S_GPROC32;
+
+typedef enum CV_LineFlags {
+  CF_LF_None = 0,
+  CF_LF_HaveColumns = 1,
+} CV_LineFlags;
+
+typedef struct CV_LineFragmentHeader {
+  u32 reloc_offset;
+  u16 reloc_segment;
+  u16 flags;  // CV_LineFlags
+  u32 code_size;
+} CV_LineFragmentHeader;
+
+typedef struct CV_LineBlockFragmentHeader {
+  u32 name_index;  // Offset of file_checksum entry in file checksums buffer. The checksum entry
+                   // then contains another offset into the string table of the actual name.
+  u32 num_lines;
+  u32 block_size;
+  // CV_LineNumberEntry lines[num_lines];
+  // Columns array goes here too, but we don't currently support that.
+} CV_LineBlockFragmentHeader;
+
+typedef struct CV_LineNumberEntry {
+  u32 offset;               // Offset to start of code bytes for line number.
+  u32 line_num_start : 24;  // Line where statement/expression starts.
+  u32 delta_line_end : 7;   // Delta to line where statement ends (optional).
+  u32 is_statement : 1;     // true if statement, false if expression.
+} CV_LineNumberEntry;
+
+typedef struct CV_S_NODATA {
+  CV_SYM_HEADER;
+} CV_S_NODATA;
+
+typedef enum CV_FileChecksumKind {
+  CV_FCSK_None,
+  CV_FCSK_MD5,
+  CV_FCSK_SHA1,
+  CV_FCSK_SHA256,
+} CV_FileChecksumKind;
+
+typedef struct CV_FileChecksumEntryHeader {
+  u32 filename_offset;
+  unsigned char checksum_size;
+  unsigned char checksum_kind;
+} CV_FileChecksumEntryHeader;
+
+typedef enum CV_DebugSubsectionKind {
+  CV_DSF_Symbols = 0xf1,
+  CV_DSF_Lines = 0xf2,
+  CV_DSF_StringTable = 0xf3,
+  CV_DSF_FileChecksums = 0xf4,
+  // There are also others that we don't need.
+} CV_DebugSubsectionKind;
+
+typedef struct CV_DebugSubsectionHeader {
+  u32 kind;  // CV_DebugSubsectionKind enum
+  u32 length; // includes data after, but not this struct.
+} CV_DebugSubsectionHeader;
+
+typedef char* SwFixup;
+#define SW_CAPTURE_FIXUP(offset) (stream->cur_write + offset)
+
+#define SW_WRITE_FIXUP_FOR_LOCATION_U32(swfixup) \
+  do {                                           \
+    *(u32*)swfixup = stream->data_length;        \
+  } while (0)
 
 #define SW_CV_SYM_TRAILING_NAME(sym, name)                                                    \
   do {                                                                                        \
@@ -1015,10 +1147,20 @@ typedef struct CV_S_PROCREF {
     u16 record_len = (u16)align_to((u32)name_len + sizeof(sym), 4) -                          \
                      sizeof(u16) /* length field not included in length count */;             \
     sym.record_len = record_len;                                                              \
-    SW_BLOCK(&sym, sizeof(sym));                                                               \
+    assert(sym.record_type);                                                                  \
+    SW_BLOCK(&sym, sizeof(sym));                                                              \
     SW_BLOCK(name, name_len);                                                                 \
     SW_ALIGN(4);                                                                              \
-  } while (0);
+  } while (0)
+
+#define SW_CV_SYM(sym)                                            \
+  do {                                                            \
+    u16 record_len = (u16)align_to(sizeof(sym), 4) - sizeof(u16); \
+    sym.record_len = record_len;                                  \
+    assert(sym.record_type);                                      \
+    SW_BLOCK(&sym, sizeof(sym));                                  \
+    /* No need to align because we should already be. */          \
+  } while (0)
 
 #pragma pack(pop)
 
@@ -1265,37 +1407,135 @@ static GsiData build_gsi_data(CTX) {
                    .sym_record_stream = gsi->sym_record_stream->stream_index};
 }
 
-static void module_write_sym_OBJNAME(CTX, StreamData* stream, char* name) {
-  (void)ctx;
-  (void)stream;
-  (void)name;
-#if 0
-  size_t name_len = strlen(name) + 1; // trailing \0 required (maybe?)
-  SW_U16(len);
-  SW_U16(0x1101); // S_OBJNAME
-  SW_U32(0);
-  SW_BLOCK(name, strlen(name) + 1);
-  SW_ALIGN(4);
-#endif
-}
-
 typedef struct ModuleData {
   StreamData* stream;
   u32 symbols_byte_size;
   u32 c13_byte_size;
 } ModuleData;
 
+typedef struct DebugLinesBlock {
+  u32 checksum_buffer_offset;
+  CV_LineNumberEntry* lines;
+  size_t lines_len;
+  size_t lines_cap;
+} DebugLinesBlock;
+
+typedef struct DebugLines {
+  DebugLinesBlock* blocks;
+  size_t blocks_len;
+  size_t blocks_cap;
+
+  u32 reloc_offset;
+  u32 code_size;
+
+  //DebugChecksums* checksums;
+} DebugLines;
+
 static ModuleData write_module_stream(CTX) {
   StreamData* stream = add_stream(ctx);
-  ModuleData module_data = {stream};
-#if 0
+  ModuleData module_data = {stream, 0, 0};
+
+  u32 symbol_start = stream->data_length;
+
   SW_U32(4);  // Signature
-  module_write_sym_OBJNAME(ctx, stream, synthetic_obj_name);
-#else
-  stream_write_block(ctx, stream, str11_raw, str11_raw_len);
-  module_data.symbols_byte_size = 0x148;
-  module_data.c13_byte_size = 0x80;
-#endif
+
+  //
+  // Symbols
+  //
+  CV_S_OBJNAME objname = {.record_type = 0x1101, .signature = 0};
+  SW_CV_SYM_TRAILING_NAME(objname, synthetic_obj_name);
+
+  CV_S_COMPILE3 compile3 = {.record_type=0x113c,
+    .flags = {.language = 0x00 /* CV_CFL_C */ },
+  };
+  // TODO: Add name, version, language, etc. to ctx.
+  SW_CV_SYM_TRAILING_NAME(compile3, "dyn_basic_pdb git-HEAD");
+
+  CV_S_GPROC32 gproc32 = {
+      .record_type = 0x1110,
+      .parent = 0,
+      .end = ~0U,
+      .next = 0,
+      .len = 0,
+      .dbg_start = 0,
+      .dbg_end = 0,
+      .type_index = 0x1001,  // hrm, first UDT, undefined but we're not writing types.
+      .offset = 0,  /* address of proc */
+      .seg = 1,
+      .flags = 0,
+  };
+  SwFixup end_fixup = SW_CAPTURE_FIXUP(offsetof(CV_S_GPROC32, end));
+  SW_CV_SYM_TRAILING_NAME(gproc32, "Func");
+
+  CV_S_NODATA end = {.record_type = 0x0006};
+  SW_WRITE_FIXUP_FOR_LOCATION_U32(end_fixup);
+  SW_CV_SYM(end);
+
+  // TODO: all funcs here, possibly data too, but we wouldn't have typeinfo so
+  // might fairly pointless
+
+  module_data.symbols_byte_size = stream->data_length - symbol_start;
+
+  //
+  // C13LineInfo
+  //
+  u32 c13_start = stream->data_length;
+
+  {
+    u32 len = sizeof(CV_LineFragmentHeader) + sizeof(CV_LineBlockFragmentHeader) +
+              3 * sizeof(CV_LineNumberEntry);
+    CV_DebugSubsectionHeader lines_header = {.kind = CV_DSF_Lines, .length = len};
+    SW_BLOCK(&lines_header, sizeof(lines_header));
+
+    CV_LineFragmentHeader header = {.code_size = 0x16,
+                                    .flags = CF_LF_None,
+                                    .reloc_segment = 1,
+                                    .reloc_offset = 0 /* func start */};
+    SW_BLOCK(&header, sizeof(header));
+
+    CV_LineBlockFragmentHeader block_header;
+    block_header.num_lines = 3;
+    block_header.block_size = sizeof(CV_LineBlockFragmentHeader);
+    block_header.block_size += block_header.num_lines * sizeof(CV_LineNumberEntry);
+    block_header.name_index = 0;  ///*block->*/checksum_buffer_offset;
+    SW_BLOCK(&block_header, sizeof(block_header));
+
+    CV_LineNumberEntry line_entry = {
+        .offset = 0, .line_num_start = 5, .delta_line_end = 1, .is_statement = 0};
+    SW_BLOCK(&line_entry, sizeof(line_entry));
+    line_entry.offset = 4;
+    line_entry.line_num_start = 6;
+    SW_BLOCK(&line_entry, sizeof(line_entry));
+    line_entry.offset = 0xb;
+    line_entry.line_num_start = 7;
+    SW_BLOCK(&line_entry, sizeof(line_entry));
+
+    SW_ALIGN(4);
+  }
+
+  {
+    u32 len = sizeof(CV_FileChecksumEntryHeader);
+    CV_DebugSubsectionHeader checksums_header = {.kind = CV_DSF_FileChecksums, .length = len};
+    SW_BLOCK(&checksums_header, sizeof(checksums_header));
+
+    CV_FileChecksumEntryHeader header = {
+        .filename_offset = 1, .checksum_size = 0, .checksum_kind = CV_FCSK_None};
+    SW_BLOCK(&header, sizeof(header));
+    //unsigned char checksum[16] = {
+        //0xab, 0xbc, 0xcd, 0xde, 0xef, 0xf0, 0x01, 0x12,
+        //0x23, 0x34, 0x45, 0x56, 0x67, 0x78, 0x89, 0x9a,
+    //};
+    //SW_BLOCK(checksum, sizeof(checksum));
+
+    SW_ALIGN(4);
+  }
+
+  module_data.c13_byte_size = stream->data_length - c13_start;
+
+  //
+  // GlobalRefs, don't know, don't write it.
+  //
+  SW_U32(0); // GlobalRefsSize
 
   return module_data;
 }
