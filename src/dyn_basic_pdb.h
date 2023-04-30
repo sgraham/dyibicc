@@ -36,9 +36,9 @@ typedef struct DbpSourceFile DbpSourceFile;
 DbpContext* dbp_create(void* image_addr, size_t image_size, const char* output_pdb_name);
 DbpSourceFile* dbp_add_source_file(DbpContext* ctx, const char* name);
 int dbp_add_line_mapping(DbpSourceFile* src,
-                          unsigned int line_number,
-                          unsigned int begin_addr,
-                          unsigned int end_addr);
+                         unsigned int line_number,
+                         unsigned int begin_addr,
+                         unsigned int end_addr);
 int dbp_finish(DbpContext* ctx);
 
 #ifdef __cplusplus
@@ -126,9 +126,10 @@ DbpContext* dbp_create(void* image_addr, size_t image_size, const char* output_p
   GetFullPathName(output_pdb_name, sizeof(full_pdb_name), full_pdb_name, NULL);
   ctx->output_pdb_name = _strdup(full_pdb_name);
   size_t len = strlen(full_pdb_name);
-  ctx->output_dll_name = malloc(len + 5);
+  static char suffix[] = ".synthetic.dll";
+  ctx->output_dll_name = malloc(len + sizeof(suffix));
   memcpy(ctx->output_dll_name, full_pdb_name, len);
-  memcpy(ctx->output_dll_name + len, ".dll", 5);
+  memcpy(ctx->output_dll_name + len, suffix, sizeof(suffix));
   if (UuidCreate(&ctx->unique_id) != RPC_S_OK) {
     fprintf(stderr, "UuidCreate failed\n");
     return NULL;
@@ -144,78 +145,14 @@ DbpSourceFile* dbp_add_source_file(DbpContext* ctx, const char* name) {
 }
 
 int dbp_add_line_mapping(DbpSourceFile* src,
-                          unsigned int line_number,
-                          unsigned int begin_addr,
-                          unsigned int end_addr) {
+                         unsigned int line_number,
+                         unsigned int begin_addr,
+                         unsigned int end_addr) {
   (void)src;
   (void)line_number;
   (void)begin_addr;
   (void)end_addr;
   return 1;
-}
-
-static void free_ctx(DbpContext* ctx) {
-  for (size_t i = 0; i < ctx->source_files_len; ++i) {
-    free(ctx->source_files[i]->name);
-  }
-  free(ctx->source_files);
-  free(ctx->output_pdb_name);
-}
-
-static const char big_hdr_magic[0x1e] = "Microsoft C/C++ MSF 7.00\r\n\x1a\x44\x53";
-
-#define ENSURE(x, want)                                                             \
-  if (want != x) {                                                                  \
-    fprintf(stderr, "%s:%d: failed %s wasn't %s\n", __FILE__, __LINE__, #x, #want); \
-    return 0;                                                                       \
-  }
-
-#define ENSURE_NE(x, bad)                                                        \
-  if (bad == x) {                                                                \
-    fprintf(stderr, "%s:%d: failed %s was %s\n", __FILE__, __LINE__, #x, #bad); \
-    return 0;                                                                    \
-  }
-
-struct SuperBlock {
-  char file_magic[0x1e];
-  char padding[2];
-  u32 block_size;
-  u32 free_block_map_block;
-  u32 num_blocks;
-  u32 num_directory_bytes;
-  u32 unknown;
-  u32 block_map_addr;
-};
-
-#define BLOCK_SIZE 4096
-#define DEFAULT_NUM_BLOCKS 256
-#define CTX DbpContext* ctx
-#define PAGE_TO_WORD(pn) (pn >> 6)
-#define PAGE_MASK(pn) (1ULL << (pn & ((sizeof(u64) * CHAR_BIT) - 1)))
-static const char synthetic_obj_name[] = "dyn_basic_pdb-synthetic-for-jit.obj";
-
-static void mark_block_used(CTX, u32 pn) {
-  u64* map2 = (u64*)&ctx->data[BLOCK_SIZE * 2];
-  map2[PAGE_TO_WORD(pn)] &= ~PAGE_MASK(pn);
-}
-
-static int block_is_free(CTX, u32 pn) {
-  u64* map2 = (u64*)&ctx->data[BLOCK_SIZE * 2];
-  return !!(map2[PAGE_TO_WORD(pn)] & PAGE_MASK(pn));
-}
-
-static void* get_block_ptr(CTX, u32 i) {
-  return &ctx->data[BLOCK_SIZE * i];
-}
-
-static u32 alloc_block(CTX) {
-  for (;;) {
-    if (block_is_free(ctx, ctx->next_potential_block)) {
-      mark_block_used(ctx, ctx->next_potential_block);
-      return ctx->next_potential_block++;
-    }
-    ctx->next_potential_block++;
-  }
 }
 
 struct StreamData {
@@ -231,7 +168,80 @@ struct StreamData {
   size_t blocks_cap;
 };
 
-static void stream_write_block(CTX, StreamData* stream, const void* data, size_t len) {
+static void free_ctx(DbpContext* ctx) {
+  for (size_t i = 0; i < ctx->source_files_len; ++i) {
+    free(ctx->source_files[i]->name);
+    free(ctx->source_files[i]);
+  }
+  free(ctx->source_files);
+  free(ctx->output_pdb_name);
+  free(ctx->output_dll_name);
+
+  for (size_t i = 0; i < ctx->stream_data_len; ++i) {
+    free(ctx->stream_data[i]->blocks);
+    free(ctx->stream_data[i]);
+  }
+  free(ctx->stream_data);
+
+  free(ctx);
+}
+
+static const char big_hdr_magic[0x1e] = "Microsoft C/C++ MSF 7.00\r\n\x1a\x44\x53";
+
+#define ENSURE(x, want)                                                             \
+  if (want != x) {                                                                  \
+    fprintf(stderr, "%s:%d: failed %s wasn't %s\n", __FILE__, __LINE__, #x, #want); \
+    return 0;                                                                       \
+  }
+
+#define ENSURE_NE(x, bad)                                                       \
+  if (bad == x) {                                                               \
+    fprintf(stderr, "%s:%d: failed %s was %s\n", __FILE__, __LINE__, #x, #bad); \
+    return 0;                                                                   \
+  }
+
+struct SuperBlock {
+  char file_magic[0x1e];
+  char padding[2];
+  u32 block_size;
+  u32 free_block_map_block;
+  u32 num_blocks;
+  u32 num_directory_bytes;
+  u32 unknown;
+  u32 block_map_addr;
+};
+
+#define BLOCK_SIZE 4096
+#define DEFAULT_NUM_BLOCKS 256
+#define PAGE_TO_WORD(pn) (pn >> 6)
+#define PAGE_MASK(pn) (1ULL << (pn & ((sizeof(u64) * CHAR_BIT) - 1)))
+static const char synthetic_obj_name[] = "dyn_basic_pdb-synthetic-for-jit.obj";
+
+static void mark_block_used(DbpContext* ctx, u32 pn) {
+  u64* map2 = (u64*)&ctx->data[BLOCK_SIZE * 2];
+  map2[PAGE_TO_WORD(pn)] &= ~PAGE_MASK(pn);
+}
+
+static int block_is_free(DbpContext* ctx, u32 pn) {
+  u64* map2 = (u64*)&ctx->data[BLOCK_SIZE * 2];
+  return !!(map2[PAGE_TO_WORD(pn)] & PAGE_MASK(pn));
+}
+
+static void* get_block_ptr(DbpContext* ctx, u32 i) {
+  return &ctx->data[BLOCK_SIZE * i];
+}
+
+static u32 alloc_block(DbpContext* ctx) {
+  for (;;) {
+    if (block_is_free(ctx, ctx->next_potential_block)) {
+      mark_block_used(ctx, ctx->next_potential_block);
+      return ctx->next_potential_block++;
+    }
+    ctx->next_potential_block++;
+  }
+}
+
+static void stream_write_block(DbpContext* ctx, StreamData* stream, const void* data, size_t len) {
   if (!stream->cur_block_ptr) {
     u32 block_id = alloc_block(ctx);
     PUSH_BACK(stream->blocks, block_id);
@@ -244,12 +254,25 @@ static void stream_write_block(CTX, StreamData* stream, const void* data, size_t
   stream->data_length += (u32)len;
 
   // TODO: useful things
+  assert(stream->data_length < BLOCK_SIZE && "overflowed page");
 }
 
 #define SW_BLOCK(x, len) stream_write_block(ctx, stream, x, len)
-#define SW_U32(x) do { u32 _ = (x); stream_write_block(ctx, stream, &_, sizeof(_)); } while(0)
-#define SW_I32(x) do { i32 _ = (x); stream_write_block(ctx, stream, &_, sizeof(_)); } while(0)
-#define SW_U16(x) do { u16 _ = (x); stream_write_block(ctx, stream, &_, sizeof(_)); } while(0)
+#define SW_U32(x)                                   \
+  do {                                              \
+    u32 _ = (x);                                    \
+    stream_write_block(ctx, stream, &_, sizeof(_)); \
+  } while (0)
+#define SW_I32(x)                                   \
+  do {                                              \
+    i32 _ = (x);                                    \
+    stream_write_block(ctx, stream, &_, sizeof(_)); \
+  } while (0)
+#define SW_U16(x)                                   \
+  do {                                              \
+    u16 _ = (x);                                    \
+    stream_write_block(ctx, stream, &_, sizeof(_)); \
+  } while (0)
 #define SW_ALIGN(to)                        \
   do {                                      \
     while (stream->data_length % to != 0) { \
@@ -257,7 +280,7 @@ static void stream_write_block(CTX, StreamData* stream, const void* data, size_t
     }                                       \
   } while (0)
 
-static void write_superblock(CTX) {
+static void write_superblock(DbpContext* ctx) {
   SuperBlock* sb = (SuperBlock*)ctx->data;
   ctx->superblock = sb;
   memcpy(sb->file_magic, big_hdr_magic, sizeof(big_hdr_magic));
@@ -277,7 +300,7 @@ static void write_superblock(CTX) {
     mark_block_used(ctx, i);
 }
 
-static StreamData* add_stream(CTX) {
+static StreamData* add_stream(DbpContext* ctx) {
   StreamData* stream = calloc(1, sizeof(StreamData));
   stream->stream_index = (u32)ctx->stream_data_len;
   PUSH_BACK(ctx->stream_data, stream);
@@ -295,11 +318,11 @@ typedef struct PdbStreamHeader {
   UUID UniqueId;
 } PdbStreamHeader;
 
-static int write_pdb_info_stream(CTX, StreamData* stream, u32 names_stream) {
+static int write_pdb_info_stream(DbpContext* ctx, StreamData* stream, u32 names_stream) {
   PdbStreamHeader psh = {
-    .Version = 20000404, /* VC70 */
-    .Signature = (u32)time(NULL),
-    .Age = 1,
+      .Version = 20000404, /* VC70 */
+      .Signature = (u32)time(NULL),
+      .Age = 1,
   };
   memcpy(&psh.UniqueId, &ctx->unique_id, sizeof(UUID));
   SW_BLOCK(&psh, sizeof(psh));
@@ -330,8 +353,8 @@ static int write_pdb_info_stream(CTX, StreamData* stream, u32 names_stream) {
   SW_BLOCK(string_data, sizeof(string_data));
 
   // Then hash size, and capacity.
-  SW_U32(1); // Size
-  SW_U32(1); // Capacity
+  SW_U32(1);  // Size
+  SW_U32(1);  // Capacity
   // Then two bit vectors, first for "present":
   SW_U32(0x01);  // Present length (1 word follows)
   SW_U32(0x01);  // 0b0000`0001    (only bucket occupied)
@@ -371,7 +394,7 @@ typedef struct TpiStreamHeader {
   u32 hash_adj_buffer_length;
 } TpiStreamHeader;
 
-static int write_empty_tpi_ipi_stream(CTX, StreamData* stream) {
+static int write_empty_tpi_ipi_stream(DbpContext* ctx, StreamData* stream) {
   // This is an "empty" TPI/IPI stream, we do not emit any user-defined types
   // currently.
   TpiStreamHeader tsh = {
@@ -461,7 +484,7 @@ static int nmt_add_string(NmtAlikeHashTable* nmt, char* str, u32* name_index) {
 }
 #endif
 
-static int write_names_stream(CTX, StreamData* stream) {
+static int write_names_stream(DbpContext* ctx, StreamData* stream) {
   SW_U32(0xeffeeffe);  // Header
   SW_U32(1);           // verLongHash
   SW_U32(44);          // Size of string buffer
@@ -474,7 +497,7 @@ static int write_names_stream(CTX, StreamData* stream) {
 
   // TODO: This hash seems right for these two items; need to figure out what
   // actually goes in this stream, how the table grows, etc.
-  //u32 hash1 = calc_hash(&names[1], 1) % 4;
+  // u32 hash1 = calc_hash(&names[1], 1) % 4;
 #if 0
   printf("%zu\n", strlen(&names[1]));
   u32 hash2 = calc_hash(&names[1], 39) % 4;
@@ -491,93 +514,93 @@ static int write_names_stream(CTX, StreamData* stream) {
 }
 
 typedef struct DbiStreamHeader {
-  i32 VersionSignature;
-  u32 VersionHeader;
-  u32 Age;
-  u16 GlobalStreamIndex;
-  u16 BuildNumber;
-  u16 PublicStreamIndex;
-  u16 PdbDllVersion;
-  u16 SymRecordStream;
-  u16 PdbDllRbld;
-  i32 ModInfoSize;
-  i32 SectionContributionSize;
-  i32 SectionMapSize;
-  i32 SourceInfoSize;
-  i32 TypeServerMapSize;
-  u32 MFCTypeServerIndex;
-  i32 OptionalDbgHeaderSize;
-  i32 ECSubstreamSize;
-  u16 Flags;
-  u16 Machine;
-  u32 Padding;
+  i32 version_signature;
+  u32 version_header;
+  u32 age;
+  u16 global_stream_index;
+  u16 build_number;
+  u16 public_stream_index;
+  u16 pdb_dll_version;
+  u16 sym_record_stream;
+  u16 pdb_dll_rbld;
+  i32 mod_info_size;
+  i32 section_contribution_size;
+  i32 section_map_size;
+  i32 source_info_size;
+  i32 type_server_map_size;
+  u32 mfc_type_server_index;
+  i32 optional_dbg_header_size;
+  i32 ec_substream_size;
+  u16 flags;
+  u16 machine;
+  u32 padding;
 } DbiStreamHeader;
 
 // Part of ModInfo
 typedef struct SectionContribEntry {
-    u16 Section;
-    char Padding1[2];
-    i32 Offset;
-    i32 Size;
-    u32 Characteristics;
-    u16 ModuleIndex;
-    char Padding2[2];
-    u32 DataCrc;
-    u32 RelocCrc;
+  u16 section;
+  char padding1[2];
+  i32 offset;
+  i32 size;
+  u32 characteristics;
+  u16 module_index;
+  char padding2[2];
+  u32 data_crc;
+  u32 reloc_crc;
 } SectionContribEntry;
 
 typedef struct ModInfo {
-  u32 Unused1;
-  SectionContribEntry SectionContr;
-  u16 Flags;
-  u16 ModuleSymStream;
-  u32 SymByteSize;
-  u32 C11ByteSize;
-  u32 C13ByteSize;
-  u16 SourceFileCount;
-  char Padding[2];
-  u32 Unused2;
-  u32 SourceFileNameIndex;
-  u32 PdbFilePathNameIndex;
-  // char ModuleName[];
-  // char ObjFileName[];
+  u32 unused1;
+  SectionContribEntry section_contr;
+  u16 flags;
+  u16 module_sym_stream;
+  u32 sym_byte_size;
+  u32 c11_byte_size;
+  u32 c13_byte_size;
+  u16 source_file_count;
+  char padding[2];
+  u32 unused2;
+  u32 source_file_name_index;
+  u32 pdb_file_path_name_index;
+  // char module_name[];
+  // char obj_file_name[];
 } ModInfo;
 
 typedef struct SectionMapHeader {
-  u16 Count;     // Number of segment descriptors
-  u16 LogCount;  // Number of logical segment descriptors
+  u16 count;      // Number of segment descriptors
+  u16 log_count;  // Number of logical segment descriptors
 } SectionMapHeader;
 
 typedef struct SectionMapEntry {
-  u16 Flags;  // See the SectionMapEntryFlags enum below.
-  u16 Ovl;    // Logical overlay number
-  u16 Group;  // Group index into descriptor array.
-  u16 Frame;
-  u16 SectionName;    // Byte index of segment / group name in string table, or 0xFFFF.
-  u16 ClassName;      // Byte index of class in string table, or 0xFFFF.
-  u32 Offset;         // Byte offset of the logical segment within physical segment. If group is set
-                      // in flags, this is the offset of the group.
-  u32 SectionLength;  // Byte count of the segment or group.
+  u16 flags;  // See the SectionMapEntryFlags enum below.
+  u16 ovl;    // Logical overlay number
+  u16 group;  // Group index into descriptor array.
+  u16 frame;
+  u16 section_name;  // Byte index of segment / group name in string table, or 0xFFFF.
+  u16 class_name;    // Byte index of class in string table, or 0xFFFF.
+  u32 offset;        // Byte offset of the logical segment within physical segment. If group is set
+                     // in flags, this is the offset of the group.
+  u32 section_length;  // Byte count of the segment or group.
 } SectionMapEntry;
 
 enum SectionMapEntryFlags {
-  SMEF_Read = 1 << 0,              // Segment is readable.
-  SMEF_Write = 1 << 1,             // Segment is writable.
-  SMEF_Execute = 1 << 2,           // Segment is executable.
-  SMEF_AddressIs32Bit = 1 << 3,    // Descriptor describes a 32-bit linear address.
-  SMEF_IsSelector = 1 << 8,        // Frame represents a selector.
-  SMEF_IsAbsoluteAddress = 1 << 9, // Frame represents an absolute address.
-  SMEF_IsGroup = 1 << 10           // If set, descriptor represents a group.
+  SMEF_Read = 1 << 0,               // Segment is readable.
+  SMEF_Write = 1 << 1,              // Segment is writable.
+  SMEF_Execute = 1 << 2,            // Segment is executable.
+  SMEF_AddressIs32Bit = 1 << 3,     // Descriptor describes a 32-bit linear address.
+  SMEF_IsSelector = 1 << 8,         // Frame represents a selector.
+  SMEF_IsAbsoluteAddress = 1 << 9,  // Frame represents an absolute address.
+  SMEF_IsGroup = 1 << 10            // If set, descriptor represents a group.
 };
 
 typedef struct FileInfoSubstreamHeader {
-  u16 NumModules;
-  u16 NumSourceFiles;
+  u16 num_modules;
+  u16 num_source_files;
 
-  //u16 ModIndices[NumModules];
-  //u16 ModFileCounts[NumModules];
-  //u32 FileNameOffsets[NumSourceFiles];
-  //char NamesBuffer[][NumSourceFiles];
+  // u16 mod_indices[num_modules];
+  // u16 mod_file_counts[num_modules];
+  // u32 file_name_offsets[num_source_files];
+  // char names_buffer[][num_source_files];
 } FileInfoSubstreamHeader;
 
 typedef struct GsiData {
@@ -595,9 +618,7 @@ typedef struct DbiWriteData {
   u32 num_source_files;
 } DbiWriteData;
 
-static int write_dbi_stream(CTX,
-                            StreamData* stream,
-                            DbiWriteData* dwd) {
+static int write_dbi_stream(DbpContext* ctx, StreamData* stream, DbiWriteData* dwd) {
   u32 block_id = alloc_block(ctx);
   PUSH_BACK(stream->blocks, block_id);
 
@@ -605,29 +626,29 @@ static int write_dbi_stream(CTX,
   char* cur = start;
 #if 1
   DbiStreamHeader* dsh = (DbiStreamHeader*)cur;
-  dsh->VersionSignature = -1;
-  dsh->VersionHeader = 19990903; /* V70 */
-  dsh->Age = 1;
-  dsh->GlobalStreamIndex = (u16)dwd->gsi_data.global_symbol_stream;
-  dsh->BuildNumber = 0x8eb; // link.exe 14.11, "new format" for compatibility.
-  dsh->PublicStreamIndex = (u16)dwd->gsi_data.public_symbol_stream;
-  dsh->PdbDllVersion = 0;
-  dsh->SymRecordStream = (u16)dwd->gsi_data.sym_record_stream;
-  dsh->PdbDllRbld = 0;
+  dsh->version_signature = -1;
+  dsh->version_header = 19990903; /* V70 */
+  dsh->age = 1;
+  dsh->global_stream_index = (u16)dwd->gsi_data.global_symbol_stream;
+  dsh->build_number = 0x8eb;  // link.exe 14.11, "new format" for compatibility.
+  dsh->public_stream_index = (u16)dwd->gsi_data.public_symbol_stream;
+  dsh->pdb_dll_version = 0;
+  dsh->sym_record_stream = (u16)dwd->gsi_data.sym_record_stream;
+  dsh->pdb_dll_rbld = 0;
 
   // All of these are filled in after being written later.
-  dsh->ModInfoSize = 0;
-  dsh->SectionContributionSize = 0;
-  dsh->SectionMapSize = 0;
-  dsh->SourceInfoSize = 0;
-  dsh->OptionalDbgHeaderSize = 0;
-  dsh->ECSubstreamSize = 0;
+  dsh->mod_info_size = 0;
+  dsh->section_contribution_size = 0;
+  dsh->section_map_size = 0;
+  dsh->source_info_size = 0;
+  dsh->optional_dbg_header_size = 0;
+  dsh->ec_substream_size = 0;
 
-  dsh->TypeServerMapSize = 0;      // empty
-  dsh->MFCTypeServerIndex = 0;     // empty
-  dsh->Flags = 0;
-  dsh->Machine = 0xd0;  // x64
-  dsh->Padding = 0;
+  dsh->type_server_map_size = 0;   // empty
+  dsh->mfc_type_server_index = 0;  // empty
+  dsh->flags = 0;
+  dsh->machine = 0x8664;  // x64
+  dsh->padding = 0;
 
   cur = (char*)(dsh + 1);
 
@@ -698,33 +719,33 @@ static int write_dbi_stream(CTX,
   // Module Info Substream. We output a single module with a single section for
   // the whole jit blob.
   ModInfo* mod = (ModInfo*)cur;
-  mod->Unused1 = 0;
+  mod->unused1 = 0;
 
-  SectionContribEntry* sce = &mod->SectionContr;
-  sce->Section = 1;
-  sce->Padding1[0] = 0;
-  sce->Padding1[1] = 0;
-  sce->Offset = 0x1000;
-  sce->Size = 22; //(i32)ctx->image_size;
-  sce->Characteristics =
+  SectionContribEntry* sce = &mod->section_contr;
+  sce->section = 1;
+  sce->padding1[0] = 0;
+  sce->padding1[1] = 0;
+  sce->offset = 0x1000;
+  sce->size = 22;  //(i32)ctx->image_size;
+  sce->characteristics =
       IMAGE_SCN_CNT_CODE | IMAGE_SCN_ALIGN_16BYTES | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ;
-  sce->ModuleIndex = 0;
-  sce->Padding2[0] = 0;
-  sce->Padding2[1] = 0;
-  sce->DataCrc = 0;
-  sce->RelocCrc = 0;
+  sce->module_index = 0;
+  sce->padding2[0] = 0;
+  sce->padding2[1] = 0;
+  sce->data_crc = 0;
+  sce->reloc_crc = 0;
 
-  mod->Flags = 0;
-  mod->ModuleSymStream = (u16)dwd->module_sym_stream;
-  mod->SymByteSize = dwd->module_symbols_byte_size;
-  mod->C11ByteSize = 0;
-  mod->C13ByteSize = dwd->module_c13_byte_size;
-  mod->SourceFileCount = (u16)dwd->num_source_files;
-  mod->Padding[0] = 0;
-  mod->Padding[1] = 0;
-  mod->Unused2 = 0;
-  mod->SourceFileNameIndex = 0;
-  mod->PdbFilePathNameIndex = 0;
+  mod->flags = 0;
+  mod->module_sym_stream = (u16)dwd->module_sym_stream;
+  mod->sym_byte_size = dwd->module_symbols_byte_size;
+  mod->c11_byte_size = 0;
+  mod->c13_byte_size = dwd->module_c13_byte_size;
+  mod->source_file_count = (u16)dwd->num_source_files;
+  mod->padding[0] = 0;
+  mod->padding[1] = 0;
+  mod->unused2 = 0;
+  mod->source_file_name_index = 0;
+  mod->pdb_file_path_name_index = 0;
 
   char* names = (char*)(mod + 1);
   memcpy(names, synthetic_obj_name, sizeof(synthetic_obj_name));
@@ -732,85 +753,182 @@ static int write_dbi_stream(CTX,
   memcpy(names, synthetic_obj_name, sizeof(synthetic_obj_name));
   names += sizeof(synthetic_obj_name);
 
-  dsh->ModInfoSize = align_to((u32)(names - cur), 4);
+  dsh->mod_info_size = align_to((u32)(names - cur), 4);
 #endif
-  cur += dsh->ModInfoSize;
+  cur += dsh->mod_info_size;
 
 #if 1
   unsigned char seccontrib[] = {
-  // Section Contribution Substream
-  0x2d, 0xba, 0x2e, 0xf1,  // Ver60
+      // Section Contribution Substream
+      0x2d,
+      0xba,
+      0x2e,
+      0xf1,  // Ver60
 
-  // Expecting 5 SectionContribEntry based on SectionContributionSize
-  // TBD: Why are there some here and some inside ModInfo?
+      // Expecting 5 SectionContribEntry based on SectionContributionSize
+      // TBD: Why are there some here and some inside ModInfo?
 
-  // SectionContribEntry0
-  0x01, 0x00,  // Section
-  0x00, 0x00,  // Padding1
-  0x00, 0x00, 0x00, 0x00, // Offset
-  0x22, 0x00, 0x00, 0x00, // Size
-  0x20, 0x00, 0x50, 0x60, // Characteristics
-  0x00, 0x00, // ModuleIndex
-  0x00, 0x00, // Padding2
-  0,0,0,0,//0x24, 0x58, 0xd2, 0x68, // DataCrc
-  0x00, 0x00, 0x00, 0x00, // RelocCrc
+      // SectionContribEntry0
+      0x01,
+      0x00,  // Section
+      0x00,
+      0x00,  // Padding1
+      0x00,
+      0x00,
+      0x00,
+      0x00,  // Offset
+      0x22,
+      0x00,
+      0x00,
+      0x00,  // Size
+      0x20,
+      0x00,
+      0x50,
+      0x60,  // Characteristics
+      0x00,
+      0x00,  // ModuleIndex
+      0x00,
+      0x00,  // Padding2
+      0,
+      0,
+      0,
+      0,  // 0x24, 0x58, 0xd2, 0x68, // DataCrc
+      0x00,
+      0x00,
+      0x00,
+      0x00,  // RelocCrc
 
-  // SectionContribEntry1
-  0x02, 0x00,
-  0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
-  0x1c, 0x00, 0x00, 0x00,  // Size
-  0x40, 0x00, 0x00, 0x40,
-  0x01, 0x00,
-  0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
+      // SectionContribEntry1
+      0x02,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x1c,
+      0x00,
+      0x00,
+      0x00,  // Size
+      0x40,
+      0x00,
+      0x00,
+      0x40,
+      0x01,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
 
-  // SectionContribEntry2
-  0x02, 0x00,
-  0x00, 0x00,
-  0x1c, 0x00, 0x00, 0x00,
-  0x39, 0x00, 0x00, 0x00,  // Size
-  0x40, 0x00, 0x00, 0x40,
-  0x01, 0x00,
-  0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
+      // SectionContribEntry2
+      0x02,
+      0x00,
+      0x00,
+      0x00,
+      0x1c,
+      0x00,
+      0x00,
+      0x00,
+      0x39,
+      0x00,
+      0x00,
+      0x00,  // Size
+      0x40,
+      0x00,
+      0x00,
+      0x40,
+      0x01,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
 
-  // SectionContribEntry3
-  0x02, 0x00,
-  0x00, 0x00,
-  0x58, 0x00, 0x00, 0x00,
-  0x08, 0x00, 0x00, 0x00,  // Size
-  0x40, 0x00, 0x30, 0x40,
-  0x00, 0x00,
-  0x00, 0x00,
-  0x84, 0x6b, 0xb9, 0x1a,
-  0x00, 0x00, 0x00, 0x00,
+      // SectionContribEntry3
+      0x02,
+      0x00,
+      0x00,
+      0x00,
+      0x58,
+      0x00,
+      0x00,
+      0x00,
+      0x08,
+      0x00,
+      0x00,
+      0x00,  // Size
+      0x40,
+      0x00,
+      0x30,
+      0x40,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x84,
+      0x6b,
+      0xb9,
+      0x1a,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
 
-  // SectionContribEntry4
-  0x03, 0x00,
-  0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
-  0x0c, 0x00, 0x00, 0x00,  // Size
-  0x40, 0x00, 0x30, 0x40,
-  0x00, 0x00,
-  0x00, 0x00,
-  0xd7, 0x88, 0x4b, 0xb7,
-  0x00, 0x00, 0x00, 0x00,
+      // SectionContribEntry4
+      0x03,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x0c,
+      0x00,
+      0x00,
+      0x00,  // Size
+      0x40,
+      0x00,
+      0x30,
+      0x40,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0xd7,
+      0x88,
+      0x4b,
+      0xb7,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
   };
   memcpy(cur, seccontrib, sizeof(seccontrib));
-  dsh->SectionContributionSize = sizeof(seccontrib);
+  dsh->section_contribution_size = sizeof(seccontrib);
 #else
   // Section Contribution Substream
   u32* section_contrib = (u32*)cur;
   *section_contrib = 0xeffe0000 + 19970605; /* Ver60 */
-  dsh->SectionContributionSize = 4;
-  //SectionContribEntry* sce2 = (SectionContribEntry*)(section_contrib + 1);
-  //memcpy(sce2, sce, sizeof(SectionContribEntry));
+  dsh->section_contribution_size = 4;
+  // SectionContribEntry* sce2 = (SectionContribEntry*)(section_contrib + 1);
+  // memcpy(sce2, sce, sizeof(SectionContribEntry));
 #endif
-  cur += dsh->SectionContributionSize;
-
+  cur += dsh->section_contribution_size;
 
 #if 0
   // Section Map Substream
@@ -854,29 +972,29 @@ static int write_dbi_stream(CTX,
   // to be the text segment. llvm doesn't seem to have any more info on these
   // other than they're required, and somehow duplicate coff sections elsewhere.
   SectionMapHeader* smh = (SectionMapHeader*)cur;
-  smh->Count = 2;
-  smh->LogCount = 2;
+  smh->count = 2;
+  smh->log_count = 2;
   SectionMapEntry* sme = (SectionMapEntry*)(smh + 1);
-  sme[0].Flags = SMEF_Read | SMEF_Execute | SMEF_AddressIs32Bit | SMEF_IsSelector;
-  sme[0].Ovl = 0;
-  sme[0].Group = 0;
-  sme[0].Frame = 1;
-  sme[0].SectionName = 0xffff;
-  sme[0].ClassName = 0xffff;
-  sme[0].Offset = 0;
-  sme[0].SectionLength = 0x22;
-  sme[1].Flags = SMEF_Read | SMEF_AddressIs32Bit;
-  sme[1].Ovl = 0;
-  sme[1].Group = 0;
-  sme[1].Frame = 2;
-  sme[1].SectionName = 0xffff;
-  sme[1].ClassName = 0xffff;
-  sme[1].Offset = 0;
-  sme[1].SectionLength = 0x22;
-  dsh->SectionMapSize = sizeof(SectionMapHeader) + sizeof(SectionMapEntry) * 2;
+  sme[0].flags = SMEF_Read | SMEF_Execute | SMEF_AddressIs32Bit | SMEF_IsSelector;
+  sme[0].ovl = 0;
+  sme[0].group = 0;
+  sme[0].frame = 1;
+  sme[0].section_name = 0xffff;
+  sme[0].class_name = 0xffff;
+  sme[0].offset = 0;
+  sme[0].section_length = 0x22;
+  sme[1].flags = SMEF_Read | SMEF_AddressIs32Bit;
+  sme[1].ovl = 0;
+  sme[1].group = 0;
+  sme[1].frame = 2;
+  sme[1].section_name = 0xffff;
+  sme[1].class_name = 0xffff;
+  sme[1].offset = 0;
+  sme[1].section_length = 0x22;
+  dsh->section_map_size = sizeof(SectionMapHeader) + sizeof(SectionMapEntry) * 2;
 #endif
 
-  cur += dsh->SectionMapSize;
+  cur += dsh->section_map_size;
 
 #if 0
   unsigned char file_info_ss[] = {
@@ -900,23 +1018,23 @@ static int write_dbi_stream(CTX,
 #else
   // File Info Substream
   FileInfoSubstreamHeader* fish = (FileInfoSubstreamHeader*)cur;
-  fish->NumModules = 1;
-  fish->NumSourceFiles = 1;
+  fish->num_modules = 1;
+  fish->num_source_files = 1;
   u16* file_info = (u16*)(fish + 1);
-  *file_info++ = 0; // ModIndices[0]
-  *file_info++ = 1; // ModFileCounts[0]
+  *file_info++ = 0;  // mod_indices[0]
+  *file_info++ = 1;  // mod_file_counts[0]
   u32* file_name_offsets = (u32*)file_info;
   *file_name_offsets++ = 0;
   char* filename_buf = (char*)file_name_offsets;
   static const char source_name[] = "c:\\src\\dyibicc\\src\\dyn_basic_pdb_example.c";
   memcpy(filename_buf, source_name, sizeof(source_name));
   filename_buf += sizeof(source_name);
-  dsh->SourceInfoSize = align_to((u32)(filename_buf - (char*)fish), 4);
+  dsh->source_info_size = align_to((u32)(filename_buf - (char*)fish), 4);
 #endif
 
-  cur += dsh->SourceInfoSize;
+  cur += dsh->source_info_size;
 
-  // No TypeServerMap, MFCTypeServerMap
+  // No Type Server Map or MFC Type Server Map
 
   // llvm-pdbutil tries to load a pdb name from the ECSubstream. Emit a single
   // nul byte, as we only refer to index 0. (This is an NMT if it needs to be
@@ -932,32 +1050,40 @@ static int write_dbi_stream(CTX,
                                // Doesn't include initial nul which is always in the table.
   };
   memcpy(cur, empty_nmt, sizeof(empty_nmt));
-  dsh->ECSubstreamSize = sizeof(empty_nmt);
-  cur += dsh->ECSubstreamSize;
-
+  dsh->ec_substream_size = sizeof(empty_nmt);
+  cur += dsh->ec_substream_size;
 
   // TODO, use SW_
   // Index 5 points to the section header stream, which is theoretically
   // optional, but llvm-pdbutil doesn't like it if it's not there, so I'm
   // guessing that various microsoft things don't either. The stream it points
   // at is empty, but that seems to be sufficient.
-  unsigned char dbg_hdr[] = {
-    // OptionalDbgHeader Stream
-    0xff, 0xff,
-    0xff, 0xff,
-    0xff, 0xff,
-    0xff, 0xff,
-    0xff, 0xff,
-    (unsigned char)dwd->section_header_stream, 0,  // Section Header
-    0xff, 0xff,
-    0xff, 0xff,
-    0xff, 0xff,
-    0xff, 0xff,
-    0xff, 0xff
-  };
+  unsigned char dbg_hdr[] = {// Optional Dbg Header Stream
+                             0xff,
+                             0xff,
+                             0xff,
+                             0xff,
+                             0xff,
+                             0xff,
+                             0xff,
+                             0xff,
+                             0xff,
+                             0xff,
+                             (unsigned char)dwd->section_header_stream,
+                             0,  // Section Header
+                             0xff,
+                             0xff,
+                             0xff,
+                             0xff,
+                             0xff,
+                             0xff,
+                             0xff,
+                             0xff,
+                             0xff,
+                             0xff};
   memcpy(cur, dbg_hdr, sizeof(dbg_hdr));
-  dsh->OptionalDbgHeaderSize = sizeof(dbg_hdr);
-  cur += dsh->OptionalDbgHeaderSize;
+  dsh->optional_dbg_header_size = sizeof(dbg_hdr);
+  cur += dsh->optional_dbg_header_size;
 
   stream->data_length = (u32)(cur - start);
   return 1;
@@ -1025,7 +1151,7 @@ typedef struct CV_S_PUB32 {
   u32 flags;
   u32 offset_into_codeseg;
   u16 segment;
-  //unsigned char name[];
+  // unsigned char name[];
 } CV_S_PUB32;
 
 typedef struct CV_S_PROCREF {
@@ -1033,7 +1159,7 @@ typedef struct CV_S_PROCREF {
   u32 sum_name;
   u32 offset_into_module_data;
   u16 segment;
-  //unsigned char name[];
+  // unsigned char name[];
 } CV_S_PROCREF;
 
 typedef struct CV_S_OBJNAME {
@@ -1071,7 +1197,7 @@ typedef struct CV_S_COMPILE3 {
   u16 ver_be_build;
   u16 ver_be_qfe;
 
-  //unsigned char version[];
+  // unsigned char version[];
 } CV_S_COMPILE3;
 
 typedef struct CV_S_PROCFLAGS {
@@ -1156,8 +1282,8 @@ typedef enum CV_DebugSubsectionKind {
 } CV_DebugSubsectionKind;
 
 typedef struct CV_DebugSubsectionHeader {
-  u32 kind;  // CV_DebugSubsectionKind enum
-  u32 length; // includes data after, but not this struct.
+  u32 kind;    // CV_DebugSubsectionKind enum
+  u32 length;  // includes data after, but not this struct.
 } CV_DebugSubsectionHeader;
 
 typedef char* SwFixup;
@@ -1191,7 +1317,7 @@ typedef char* SwFixup;
 
 #pragma pack(pop)
 
-static void gsi_builder_add_public(CTX,
+static void gsi_builder_add_public(DbpContext* ctx,
                                    GsiBuilder* builder,
                                    CV_S_PUB32_FLAGS flags,
                                    u32 offset_into_codeseg,
@@ -1210,7 +1336,7 @@ static void gsi_builder_add_public(CTX,
   SW_CV_SYM_TRAILING_NAME(pub, name);
 }
 
-static void gsi_builder_add_procref(CTX,
+static void gsi_builder_add_procref(DbpContext* ctx,
                                     GsiBuilder* builder,
                                     u32 offset_into_module_data,
                                     char* name) {
@@ -1230,7 +1356,8 @@ static void gsi_builder_add_procref(CTX,
 
 static int is_ascii_string(char* s) {
   for (char* p = s; *p; ++p) {
-    if (*p >= 0x80) return 0;
+    if (*p >= 0x80)
+      return 0;
   }
   return 1;
 }
@@ -1253,7 +1380,7 @@ static int gsi_record_cmp(char* s1, char* s2) {
 }
 
 // TODO: use a better sort impl
-static HashSym *_cur_hash_bucket_sort_syms = NULL;
+static HashSym* _cur_hash_bucket_sort_syms = NULL;
 
 // See caseInsensitiveComparePchPchCchCch() in microsoft-pdb gsi.cpp.
 static int gsi_bucket_cmp(const void* a, const void* b) {
@@ -1345,7 +1472,7 @@ static void gsi_hash_builder_finish(GsiHashBuilder* hb) {
   }
 }
 
-static void gsi_hash_builder_write(CTX, GsiHashBuilder* hb, StreamData* stream) {
+static void gsi_hash_builder_write(DbpContext* ctx, GsiHashBuilder* hb, StreamData* stream) {
   SW_U32(0xffffffff);             // HdrSignature
   SW_U32(0xeffe0000 + 19990810);  // GSIHashSCImpv70
   SW_U32((u32)(hb->hash_records_len * sizeof(HRFile)));
@@ -1355,7 +1482,6 @@ static void gsi_hash_builder_write(CTX, GsiHashBuilder* hb, StreamData* stream) 
   SW_BLOCK(hb->hash_bitmap, sizeof(hb->hash_bitmap));
   SW_BLOCK(hb->hash_buckets, hb->hash_buckets_len * sizeof(u32));
 }
-
 
 static HashSym* _cur_addr_map_sort_syms = NULL;
 static int addr_map_cmp(const void* a, const void* b) {
@@ -1369,7 +1495,7 @@ static int addr_map_cmp(const void* a, const void* b) {
   return strcmp(left->name, right->name);
 }
 
-static void gsi_write_publics_stream(CTX, GsiHashBuilder* hb, StreamData* stream) {
+static void gsi_write_publics_stream(DbpContext* ctx, GsiHashBuilder* hb, StreamData* stream) {
   // microsoft-pdb PSGSIHDR first, then the hash table in the same format as
   // "globals" (gsi_hash_builder_write).
   u32 size_of_hash = (u32)(16 + (hb->hash_records_len * sizeof(HRFile)) + sizeof(hb->hash_bitmap) +
@@ -1406,7 +1532,16 @@ static void gsi_write_publics_stream(CTX, GsiHashBuilder* hb, StreamData* stream
   SW_BLOCK(addr_map, hb->sym_len * sizeof(u32));
 }
 
-static void gsi_builder_finish(CTX, GsiBuilder* gsi) {
+static void free_gsi_hash_builder(GsiHashBuilder* hb) {
+  for (size_t i = 0; i < hb->sym_len; ++i) {
+    free(hb->sym[i].name);
+  }
+  free(hb->sym);
+  free(hb->hash_records);
+  free(hb->hash_buckets);
+}
+
+static GsiData gsi_builder_finish(DbpContext* ctx, GsiBuilder* gsi) {
   gsi_hash_builder_finish(&gsi->publics);
   gsi_hash_builder_finish(&gsi->globals);
 
@@ -1415,21 +1550,27 @@ static void gsi_builder_finish(CTX, GsiBuilder* gsi) {
 
   gsi->public_hash_stream = add_stream(ctx);
   gsi_write_publics_stream(ctx, &gsi->publics, gsi->public_hash_stream);
+
+  GsiData result = {.global_symbol_stream = gsi->global_hash_stream->stream_index,
+                    .public_symbol_stream = gsi->public_hash_stream->stream_index,
+                    .sym_record_stream = gsi->sym_record_stream->stream_index};
+
+  free_gsi_hash_builder(&gsi->publics);
+  free_gsi_hash_builder(&gsi->globals);
+  free(gsi);
+
+  return result;
 }
 
-static GsiData build_gsi_data(CTX) {
+static GsiData build_gsi_data(DbpContext* ctx) {
   GsiBuilder* gsi = calloc(1, sizeof(GsiBuilder));
   gsi->sym_record_stream = add_stream(ctx);
 
-  gsi_builder_add_procref(ctx, gsi, 100, "Func"); // HACK 100 is based on module gen
+  gsi_builder_add_procref(ctx, gsi, 100, "Func");  // HACK 100 is based on module gen
 
   gsi_builder_add_public(ctx, gsi, CVSPF_Function, 0x0, "Func");
 
-  gsi_builder_finish(ctx, gsi);
-
-  return (GsiData){.global_symbol_stream = gsi->global_hash_stream->stream_index,
-                   .public_symbol_stream = gsi->public_hash_stream->stream_index,
-                   .sym_record_stream = gsi->sym_record_stream->stream_index};
+  return gsi_builder_finish(ctx, gsi);
 }
 
 typedef struct ModuleData {
@@ -1453,10 +1594,10 @@ typedef struct DebugLines {
   u32 reloc_offset;
   u32 code_size;
 
-  //DebugChecksums* checksums;
+  // DebugChecksums* checksums;
 } DebugLines;
 
-static ModuleData write_module_stream(CTX) {
+static ModuleData write_module_stream(DbpContext* ctx) {
   StreamData* stream = add_stream(ctx);
   ModuleData module_data = {stream, 0, 0};
 
@@ -1470,9 +1611,10 @@ static ModuleData write_module_stream(CTX) {
   CV_S_OBJNAME objname = {.record_type = 0x1101, .signature = 0};
   SW_CV_SYM_TRAILING_NAME(objname, synthetic_obj_name);
 
-  CV_S_COMPILE3 compile3 = {.record_type=0x113c,
-    .flags = {.language = 0x00 /* CV_CFL_C */ },
-    .machine = 0xd0,  // x64
+  CV_S_COMPILE3 compile3 = {
+      .record_type = 0x113c,
+      .flags = {.language = 0x00 /* CV_CFL_C */},
+      .machine = 0xd0,  // x64
   };
   // TODO: Add name, version, language, etc. to ctx.
   SW_CV_SYM_TRAILING_NAME(compile3, "dyn_basic_pdb git-HEAD");
@@ -1486,7 +1628,7 @@ static ModuleData write_module_stream(CTX) {
       .dbg_start = 0,
       .dbg_end = 0x15,
       .type_index = 0x1001,  // hrm, first UDT, undefined but we're not writing types.
-      .offset = 0,  /* address of proc */
+      .offset = 0,           /* address of proc */
       .seg = 1,
       .flags = 0,
   };
@@ -1549,11 +1691,11 @@ static ModuleData write_module_stream(CTX) {
     CV_FileChecksumEntryHeader header = {
         .filename_offset = 1, .checksum_size = 0, .checksum_kind = CV_FCSK_None};
     SW_BLOCK(&header, sizeof(header));
-    //unsigned char checksum[16] = {
-        //0xab, 0xbc, 0xcd, 0xde, 0xef, 0xf0, 0x01, 0x12,
-        //0x23, 0x34, 0x45, 0x56, 0x67, 0x78, 0x89, 0x9a,
+    // unsigned char checksum[16] = {
+    // 0xab, 0xbc, 0xcd, 0xde, 0xef, 0xf0, 0x01, 0x12,
+    // 0x23, 0x34, 0x45, 0x56, 0x67, 0x78, 0x89, 0x9a,
     //};
-    //SW_BLOCK(checksum, sizeof(checksum));
+    // SW_BLOCK(checksum, sizeof(checksum));
 
     SW_ALIGN(4);
   }
@@ -1563,12 +1705,12 @@ static ModuleData write_module_stream(CTX) {
   //
   // GlobalRefs, don't know, don't write it.
   //
-  SW_U32(0); // GlobalRefsSize
+  SW_U32(0);  // GlobalRefsSize
 
   return module_data;
 }
 
-static int write_directory(CTX) {
+static int write_directory(DbpContext* ctx) {
   u32 directory_page = alloc_block(ctx);
 
   u32* block_map = get_block_ptr(ctx, ctx->superblock->block_map_addr);
@@ -1610,7 +1752,7 @@ static int write_directory(CTX) {
   return 1;
 }
 
-static int create_file_map(CTX) {
+static int create_file_map(DbpContext* ctx) {
   ctx->file = CreateFile(ctx->output_pdb_name, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
                          FILE_ATTRIBUTE_NORMAL, NULL);
   ENSURE_NE(ctx->file, INVALID_HANDLE_VALUE);
@@ -1638,7 +1780,7 @@ typedef struct RsdsDataHeader {
   // unsigned char name[]
 } RsdsDataHeader;
 
-static int write_stub_dll(CTX) {
+static int write_stub_dll(DbpContext* ctx) {
   FILE* f;
   if (fopen_s(&f, ctx->output_dll_name, "wb") != 0) {
     fprintf(stderr, "couldn't open %s\n", ctx->output_dll_name);
@@ -1741,8 +1883,14 @@ static int write_stub_dll(CTX) {
   fwrite(&text, sizeof(text), 1, f);
 
   RsdsDataHeader rsds_header = {
-    .magic = {'R', 'S', 'D', 'S',},
-    .age = 1,
+      .magic =
+          {
+              'R',
+              'S',
+              'D',
+              'S',
+          },
+      .age = 1,
   };
   memcpy(&rsds_header.unique_id, &ctx->unique_id, sizeof(UUID));
   size_t name_len = strlen(ctx->output_pdb_name);
@@ -1752,8 +1900,8 @@ static int write_stub_dll(CTX) {
       .Name = ".rdata\0",
       .Misc = {.VirtualSize = sizeof(IMAGE_DEBUG_DIRECTORY) + rsds_len},
       .VirtualAddress = 0x2000,
-      .SizeOfRawData = 0x200, // sizeof(IMAGE_DEBUG_DIRECTORY) + rsds_len,
-      .PointerToRawData = 0x400, //(DWORD)(0x200 + ctx->image_size),
+      .SizeOfRawData = 0x200,     // sizeof(IMAGE_DEBUG_DIRECTORY) + rsds_len,
+      .PointerToRawData = 0x400,  //(DWORD)(0x200 + ctx->image_size),
       .PointerToRelocations = 0,
       .PointerToLinenumbers = 0,
       .NumberOfRelocations = 0,
@@ -1806,16 +1954,20 @@ static int write_stub_dll(CTX) {
   return 1;
 }
 
-static int force_symbol_load(CTX) {
-  // Save current code block, VirtualFree() it or I assume LoadLibrary() will fail.
-
+static int force_symbol_load(DbpContext* ctx) {
   // Write stub dll with target address/size and fixed base address.
   ENSURE(write_stub_dll(ctx), 1);
 
+  // Save current code block and then VirtualFree() it.
+
   VirtualFree(ctx->image_addr, 0, MEM_RELEASE);
+  // There's a race here with other threads, but... I think that's the least of
+  // our problems.
   LoadLibraryEx(ctx->output_dll_name, NULL, DONT_RESOLVE_DLL_REFERENCES);
 
   // Make DLL writable and slam jitted code back into same location.
+
+  // Make code EXECUTE_READ before returning.
 
   return 1;
 }
@@ -1855,12 +2007,12 @@ int dbp_finish(DbpContext* ctx) {
   StreamData* section_headers = add_stream(ctx);
 
   DbiWriteData dwd = {
-    .gsi_data = gsi_data,
-    .section_header_stream = section_headers->stream_index,
-    .module_sym_stream = module_data.stream->stream_index,
-    .module_symbols_byte_size = module_data.symbols_byte_size,
-    .module_c13_byte_size = module_data.c13_byte_size,
-    .num_source_files = 1,
+      .gsi_data = gsi_data,
+      .section_header_stream = section_headers->stream_index,
+      .module_sym_stream = module_data.stream->stream_index,
+      .module_symbols_byte_size = module_data.symbols_byte_size,
+      .module_c13_byte_size = module_data.c13_byte_size,
+      .num_source_files = 1,
   };
   ENSURE(write_dbi_stream(ctx, stream3, &dwd), 1);
   ENSURE(write_empty_tpi_ipi_stream(ctx, stream4), 1);
