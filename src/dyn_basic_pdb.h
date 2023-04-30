@@ -444,13 +444,13 @@ static int write_empty_tpi_ipi_stream(DbpContext* ctx, StreamData* stream) {
 // https://github.com/microsoft/microsoft-pdb/blob/082c5290e5aff028ae84e43affa8be717aa7af73/PDB/include/misc.h#L15
 // with minor type adaptations. It needs to match that implementation to make
 // serialized hashes match up.
-static unsigned long calc_hash(char* pb, size_t cb) {
-  unsigned long ulHash = 0;
+static u32 calc_hash(char* pb, size_t cb) {
+  u32 ulHash = 0;
 
   // hash leading dwords using Duff's Device
   size_t cl = cb >> 2;
-  unsigned long* pul = (unsigned long*)pb;
-  unsigned long* pulMac = pul + cl;
+  u32* pul = (u32*)pb;
+  u32* pulMac = pul + cl;
   size_t dcul = cl & 7;
 
   switch (dcul) {
@@ -488,49 +488,176 @@ static unsigned long calc_hash(char* pb, size_t cb) {
     ulHash ^= *(pb++);
   }
 
-  const unsigned long toLowerMask = 0x20202020;
+  const u32 toLowerMask = 0x20202020;
   ulHash |= toLowerMask;
   ulHash ^= (ulHash >> 11);
 
   return (ulHash ^ (ulHash >> 16));
 }
 
-#if 0
+// A hash table that emulates the microsoft-pdb nmt.h as required by the /names
+// stream.
 typedef struct NmtAlikeHashTable {
-  u32 *hashni;
-  size_t hashni_len;
-  size_t hashni_cap;
+  char* strings;
+  size_t strings_len;
+  size_t strings_cap;
+
+  u32* hash;
+  size_t hash_len;
+  size_t hash_cap;
+
+  u32 num_names;
 } NmtAlikeHashTable;
 
-static int nmt_add_string(NmtAlikeHashTable* nmt, char* str, u32* name_index) {
+#define NMT_INVALID (~0u)
+
+NmtAlikeHashTable* nmtalike_create(void) {
+  NmtAlikeHashTable* ret = calloc(1, sizeof(NmtAlikeHashTable));
+  PUSH_BACK(ret->strings, '\0');
+  PUSH_BACK(ret->hash, NMT_INVALID);
+  return ret;
 }
-#endif
+
+static char* _nmtalike_string_for_name_index(NmtAlikeHashTable* nmt, u32 name_index) {
+  if (name_index >= nmt->strings_len)
+    return NULL;
+  return &nmt->strings[name_index];
+}
+
+// If |str| already exists, return 1 with *out_name_index set to its name_index.
+// Else, return 0 and *out_slot is where a new name_index should be stored for
+// |str|.
+static void _nmtalike_find(NmtAlikeHashTable* nmt, char* str, u32* out_name_index, u32* out_slot) {
+  assert(nmt->strings_len > 0);
+  assert(nmt->hash_len > 0);
+
+  size_t len = strlen(str);
+  u32 slot = calc_hash(str, len) % nmt->hash_len;
+  u32 name_index = NMT_INVALID;
+  for (;;) {
+    name_index = nmt->hash[slot];
+    if (name_index == NMT_INVALID)
+      break;
+
+    if (strcmp(str, _nmtalike_string_for_name_index(nmt, name_index)) == 0)
+      break;
+
+    ++slot;
+    if (slot >= nmt->hash_len)
+      slot = 0;
+  }
+
+  *out_slot = slot;
+  *out_name_index = name_index;
+}
+
+// Returns new name index.
+static u32 _nmtalike_append_to_string_buffer(NmtAlikeHashTable* nmt, char* str) {
+  size_t len = strlen(str) + 1;
+
+  while (nmt->strings_cap < nmt->strings_len + len) {
+    nmt->strings = realloc(nmt->strings, sizeof(*nmt->strings) * nmt->strings_cap * 2);
+    nmt->strings_cap *= 2;
+  }
+
+  char* start = &nmt->strings[nmt->strings_len];
+  memcpy(start, str, len);
+  nmt->strings_len += len;
+  return (u32)(start - nmt->strings);
+}
+
+static void _nmtalike_rehash(NmtAlikeHashTable* nmt, u32 new_count) {
+  size_t new_hash_byte_len = sizeof(u32) * new_count;
+  u32* new_hash = malloc(new_hash_byte_len);
+  size_t new_hash_len = new_count;
+  size_t new_hash_cap = new_count;
+
+  memset(new_hash, 0xff, new_hash_byte_len);
+
+  for (u32 i = 0; i < nmt->hash_len; ++i) {
+    u32 name_index = nmt->hash[i];
+    if (name_index != NMT_INVALID) {
+      char* str = _nmtalike_string_for_name_index(nmt, name_index);
+      u32 j = calc_hash(str, strlen(str)) % new_count;
+      for (;;) {
+        if (new_hash[j] == NMT_INVALID)
+          break;
+        ++j;
+        if (j == new_count)
+          j = 0;
+      }
+      new_hash[j] = name_index;
+    }
+  }
+
+  free(nmt->hash);
+  nmt->hash = new_hash;
+  nmt->hash_len = new_hash_len;
+  nmt->hash_cap = new_hash_cap;
+}
+
+static void _nmtalike_grow(NmtAlikeHashTable* nmt) {
+  ++nmt->num_names;
+
+  // These growth factors have to match so that the buckets line up as expected
+  // when serialized.
+  if (nmt->hash_len * 3 / 4 < nmt->num_names) {
+    _nmtalike_rehash(nmt, (u32)(nmt->hash_len * 3/2 + 1));
+  }
+}
+
+static u32 nmtalike_add_string(NmtAlikeHashTable* nmt, char* str) {
+  u32 name_index = NMT_INVALID;
+  u32 insert_location;
+  _nmtalike_find(nmt, str, &name_index, &insert_location);
+  if (name_index != NMT_INVALID)
+    return name_index;
+
+  name_index = _nmtalike_append_to_string_buffer(nmt, str);
+  nmt->hash[insert_location] = name_index;
+  _nmtalike_grow(nmt);
+  return name_index;
+}
+
+static u32 nmtalike_name_index_for_string(NmtAlikeHashTable* nmt, char* str) {
+  (void)nmt;
+  (void)str;
+  return NMT_INVALID;
+}
+
+static char* nmtalike_string_for_name_index(NmtAlikeHashTable* nmt, u32 name_index) {
+  (void)nmt;
+  (void)name_index;
+  return NULL;
+}
 
 static int write_names_stream(DbpContext* ctx, StreamData* stream) {
-  SW_U32(0xeffeeffe);  // Header
-  SW_U32(1);           // verLongHash
-  SW_U32(44);          // Size of string buffer
+  NmtAlikeHashTable* nmt = nmtalike_create();
+  nmtalike_add_string(nmt, "c:\\src\\dyibicc\\src\\dyn_basic_pdb_example.c");
 
-  // String buffer
-  static char names[] = "\0c:\\src\\dyibicc\\src\\dyn_basic_pdb_example.c";
-  stream_write_block(ctx, stream, names, sizeof(names));
+  // "/names" is:
+  //
+  // header
+  // string bufer
+  // hash table
+  // number of names in the table
+  //
+  // Most of the 'magic' is in NmtAlikeHashTable, specifically in how it's
+  // grown.
 
-  SW_U32(4);  // 4 elements in array
+  SW_U32(0xeffeeffe);               // Header
+  SW_U32(1);                        // verLongHash
+  SW_U32((u32)(nmt->strings_len));  // Size of string buffer
+  SW_BLOCK(nmt->strings, nmt->strings_len);
 
-  // TODO: This hash seems right for these two items; need to figure out what
-  // actually goes in this stream, how the table grows, etc.
-  // u32 hash1 = calc_hash(&names[1], 1) % 4;
-#if 0
-  printf("%zu\n", strlen(&names[1]));
-  u32 hash2 = calc_hash(&names[1], 39) % 4;
-  printf("%d\n", hash2);
-  printf("%d\n", hash2 % 4);
-#endif
-  SW_U32(0);
-  SW_U32(1);  // offset 1 "c:\...ple.c"
-  SW_U32(0);
-  SW_U32(0);
-  SW_U32(1);  // 1 elements filled
+  SW_U32((u32)(nmt->hash_len));                      // Number of buckets
+  SW_BLOCK(nmt->hash, nmt->hash_len * sizeof(u32));  // Hash buckets
+
+  SW_U32(nmt->num_names);  // Number of names in the hash
+
+  free(nmt->strings);
+  free(nmt->hash);
+  free(nmt);
 
   return 1;
 }
