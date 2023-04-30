@@ -66,12 +66,6 @@ int dbp_finish(DbpContext* ctx);
 #include <time.h>
 #include <windows.h>
 
-#include "str2.h"
-#include "str4.h"
-#include "str9.h"
-#include "str10.h"
-#include "str14.h"
-
 typedef unsigned int u32;
 typedef signed int i32;
 typedef unsigned short u16;
@@ -356,46 +350,46 @@ static int write_pdb_info_stream(CTX, StreamData* stream, u32 names_stream) {
 }
 
 typedef struct TpiStreamHeader {
-  u32 Version;
-  u32 HeaderSize;
-  u32 TypeIndexBegin;
-  u32 TypeIndexEnd;
-  u32 TypeRecordBytes;
+  u32 version;
+  u32 header_size;
+  u32 type_index_begin;
+  u32 type_index_end;
+  u32 type_record_bytes;
 
-  u16 HashStreamIndex;
-  u16 HashAuxStreamIndex;
-  u32 HashKeySize;
-  u32 NumHashBuckets;
+  u16 hash_stream_index;
+  u16 hash_aux_stream_index;
+  u32 hash_key_size;
+  u32 num_hash_buckets;
 
-  i32 HashValueBufferOffset;
-  u32 HashValueBufferLength;
+  i32 hash_value_buffer_offset;
+  u32 hash_value_buffer_length;
 
-  i32 IndexOffsetBufferOffset;
-  u32 IndexOffsetBufferLength;
+  i32 index_offset_buffer_offset;
+  u32 index_offset_buffer_length;
 
-  i32 HashAdjBufferOffset;
-  u32 HashAdjBufferLength;
+  i32 hash_adj_buffer_offset;
+  u32 hash_adj_buffer_length;
 } TpiStreamHeader;
 
 static int write_empty_tpi_ipi_stream(CTX, StreamData* stream) {
   // This is an "empty" TPI/IPI stream, we do not emit any user-defined types
   // currently.
   TpiStreamHeader tsh = {
-      .Version = 20040203, /* V80 */
-      .HeaderSize = sizeof(TpiStreamHeader),
-      .TypeIndexBegin = 0x1000,
-      .TypeIndexEnd = 0x1000,
-      .TypeRecordBytes = 0,
-      .HashStreamIndex = 0xffff,
-      .HashAuxStreamIndex = 0xffff,
-      .HashKeySize = 4,
-      .NumHashBuckets = 0x3ffff,
-      .HashValueBufferOffset = 0,
-      .HashValueBufferLength = 0,
-      .IndexOffsetBufferOffset = 0,
-      .IndexOffsetBufferLength = 0,
-      .HashAdjBufferOffset = 0,
-      .HashAdjBufferLength = 0,
+      .version = 20040203, /* V80 */
+      .header_size = sizeof(TpiStreamHeader),
+      .type_index_begin = 0x1000,
+      .type_index_end = 0x1000,
+      .type_record_bytes = 0,
+      .hash_stream_index = 0xffff,
+      .hash_aux_stream_index = 0xffff,
+      .hash_key_size = 4,
+      .num_hash_buckets = 0x3ffff,
+      .hash_value_buffer_offset = 0,
+      .hash_value_buffer_length = 0,
+      .index_offset_buffer_offset = 0,
+      .index_offset_buffer_length = 0,
+      .hash_adj_buffer_offset = 0,
+      .hash_adj_buffer_length = 0,
   };
   SW_BLOCK(&tsh, sizeof(tsh));
   return 1;
@@ -1941,26 +1935,10 @@ int dbp_finish(DbpContext* ctx) {
   StreamData* names_stream = add_stream(ctx);
 
   ENSURE(1, write_empty_tpi_ipi_stream(ctx, stream2));
-#if 0
-  {
-    StreamData* stream = stream2;
-    SW_BLOCK(str2_raw, str2_raw_len);
-  }
-  {
-    StreamData* stream = stream4;
-    SW_BLOCK(str4_raw, str4_raw_len);
-  }
-#endif
 
   // Section Headers; empty. Referred to by DBI in 'optional' dbg headers, and
   // llvm-pdbutil wants it to exist, but handles an empty stream reasonably.
   StreamData* section_headers = add_stream(ctx);
-#if 1
-  {
-    StreamData* stream = section_headers;
-    SW_BLOCK(str10_raw, str10_raw_len);
-  }
-#endif
 
   DbiWriteData dwd = {
     .gsi_data = gsi_data,
@@ -1974,22 +1952,6 @@ int dbp_finish(DbpContext* ctx) {
   ENSURE(write_empty_tpi_ipi_stream(ctx, stream4), 1);
   ENSURE(write_names_stream(ctx, names_stream), 1);
   ENSURE(write_pdb_info_stream(ctx, stream1, names_stream->stream_index), 1);
-
-#if 0
-  // has to be 11
-  StreamData* tpi_hash_hack = add_stream(ctx);
-  {
-    StreamData* stream = tpi_hash_hack;
-    SW_BLOCK(str9_raw, str9_raw_len);
-  }
-
-  // has to be 12
-  StreamData* ipi_hash_hack = add_stream(ctx);
-  {
-    StreamData* stream = ipi_hash_hack;
-    SW_BLOCK(str14_raw, str14_raw_len);
-  }
-#endif
 
   ENSURE(write_directory(ctx), 1);
 
