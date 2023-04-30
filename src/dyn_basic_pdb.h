@@ -66,6 +66,12 @@ int dbp_finish(DbpContext* ctx);
 #include <time.h>
 #include <windows.h>
 
+#include "str2.h"
+#include "str4.h"
+#include "str9.h"
+#include "str10.h"
+#include "str14.h"
+
 typedef unsigned int u32;
 typedef signed int i32;
 typedef unsigned short u16;
@@ -78,9 +84,11 @@ struct DbpContext {
   void* image_addr;
   size_t image_size;
   char* output_pdb_name;
+  char* output_dll_name;
   DbpSourceFile** source_files;
   size_t source_files_len;
   size_t source_files_cap;
+  UUID unique_id;
 
   HANDLE file;
   char* data;
@@ -120,7 +128,17 @@ DbpContext* dbp_create(void* image_addr, size_t image_size, const char* output_p
   DbpContext* ctx = calloc(1, sizeof(DbpContext));
   ctx->image_addr = image_addr;
   ctx->image_size = image_size;
-  ctx->output_pdb_name = _strdup(output_pdb_name);
+  char full_pdb_name[MAX_PATH];
+  GetFullPathName(output_pdb_name, sizeof(full_pdb_name), full_pdb_name, NULL);
+  ctx->output_pdb_name = _strdup(full_pdb_name);
+  size_t len = strlen(full_pdb_name);
+  ctx->output_dll_name = malloc(len + 5);
+  memcpy(ctx->output_dll_name, full_pdb_name, len);
+  memcpy(ctx->output_dll_name + len, ".dll", 5);
+  if (UuidCreate(&ctx->unique_id) != RPC_S_OK) {
+    fprintf(stderr, "UuidCreate failed\n");
+    return NULL;
+  }
   return ctx;
 }
 
@@ -289,7 +307,7 @@ static int write_pdb_info_stream(CTX, StreamData* stream, u32 names_stream) {
     .Signature = (u32)time(NULL),
     .Age = 1,
   };
-  ENSURE(UuidCreate(&psh.UniqueId), RPC_S_OK);
+  memcpy(&psh.UniqueId, &ctx->unique_id, sizeof(UUID));
   SW_BLOCK(&psh, sizeof(psh));
 
   // Named Stream Map.
@@ -453,10 +471,10 @@ static int nmt_add_string(NmtAlikeHashTable* nmt, char* str, u32* name_index) {
 static int write_names_stream(CTX, StreamData* stream) {
   SW_U32(0xeffeeffe);  // Header
   SW_U32(1);           // verLongHash
-  SW_U32(40);          // Size of string buffer
+  SW_U32(44);          // Size of string buffer
 
   // String buffer
-  static char names[] = "\0c:\\src\\dyibicc\\dyn_basic_pdb_example.c";
+  static char names[] = "\0c:\\src\\dyibicc\\src\\dyn_basic_pdb_example.c";
   stream_write_block(ctx, stream, names, sizeof(names));
 
   SW_U32(4);  // 4 elements in array
@@ -615,7 +633,7 @@ static int write_dbi_stream(CTX,
   dsh->TypeServerMapSize = 0;      // empty
   dsh->MFCTypeServerIndex = 0;     // empty
   dsh->Flags = 0;
-  dsh->Machine = 0x8664;
+  dsh->Machine = 0xd0;  // x64
   dsh->Padding = 0;
 
   cur = (char*)(dsh + 1);
@@ -693,8 +711,8 @@ static int write_dbi_stream(CTX,
   sce->Section = 1;
   sce->Padding1[0] = 0;
   sce->Padding1[1] = 0;
-  sce->Offset = 0;
-  sce->Size = (i32)ctx->image_size;
+  sce->Offset = 0x1000;
+  sce->Size = 22; //(i32)ctx->image_size;
   sce->Characteristics =
       IMAGE_SCN_CNT_CODE | IMAGE_SCN_ALIGN_16BYTES | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ;
   sce->ModuleIndex = 0;
@@ -725,7 +743,7 @@ static int write_dbi_stream(CTX,
 #endif
   cur += dsh->ModInfoSize;
 
-#if 0
+#if 1
   unsigned char seccontrib[] = {
   // Section Contribution Substream
   0x2d, 0xba, 0x2e, 0xf1,  // Ver60
@@ -741,7 +759,7 @@ static int write_dbi_stream(CTX,
   0x20, 0x00, 0x50, 0x60, // Characteristics
   0x00, 0x00, // ModuleIndex
   0x00, 0x00, // Padding2
-  0x24, 0x58, 0xd2, 0x68, // DataCrc
+  0,0,0,0,//0x24, 0x58, 0xd2, 0x68, // DataCrc
   0x00, 0x00, 0x00, 0x00, // RelocCrc
 
   // SectionContribEntry1
@@ -804,8 +822,8 @@ static int write_dbi_stream(CTX,
 #if 0
   // Section Map Substream
   unsigned char smss[] = {
-  0x04, 0x00,  // Count
-  0x04, 0x00,  // LogCount
+  0x02, 0x00,  // Count
+  0x02, 0x00,  // LogCount
 
   0x0d, 0x01, 0x00, 0x00,
   0x00, 0x00, 0x01, 0x00,
@@ -819,6 +837,7 @@ static int write_dbi_stream(CTX,
   0x00, 0x00, 0x00, 0x00,
   0x60, 0x00, 0x00, 0x00,
 
+#if 0
   0x09, 0x01, 0x00, 0x00,
   0x00, 0x00, 0x03, 0x00,
   0xff, 0xff, 0xff, 0xff,
@@ -830,23 +849,34 @@ static int write_dbi_stream(CTX,
   0xff, 0xff, 0xff, 0xff,
   0x00, 0x00, 0x00, 0x00,
   0xff, 0xff, 0xff, 0xff,
+#endif
   };
   memcpy(cur, smss, sizeof(smss));
   dsh->SectionMapSize = sizeof(smss);
 #else
+  // XXX THIS! IS THE MAIN THING THAT WAS MISSING TO GET LINES WORKING
+  // OTHERWISE ALL FUNCTIONS ARE MISSING RVAS
   SectionMapHeader* smh = (SectionMapHeader*)cur;
-  smh->Count = 1;
-  smh->LogCount = 1;
+  smh->Count = 2;
+  smh->LogCount = 2;
   SectionMapEntry* sme = (SectionMapEntry*)(smh + 1);
-  sme->Flags = SMEF_Read | SMEF_Write | SMEF_AddressIs32Bit | SMEF_IsSelector;
-  sme->Ovl = 0;
-  sme->Group = 0;
-  sme->Frame = 1;
-  sme->SectionName = 0xffff;
-  sme->ClassName = 0xffff;
-  sme->Offset = 0;
-  sme->SectionLength = 0x22;
-  dsh->SectionMapSize = sizeof(SectionMapHeader) + sizeof(SectionMapEntry);
+  sme[0].Flags = SMEF_Read | SMEF_Execute | SMEF_AddressIs32Bit | SMEF_IsSelector;
+  sme[0].Ovl = 0;
+  sme[0].Group = 0;
+  sme[0].Frame = 1;
+  sme[0].SectionName = 0xffff;
+  sme[0].ClassName = 0xffff;
+  sme[0].Offset = 0;
+  sme[0].SectionLength = 0x22;
+  sme[1].Flags = SMEF_Read | SMEF_AddressIs32Bit;
+  sme[1].Ovl = 0;
+  sme[1].Group = 0;
+  sme[1].Frame = 2;
+  sme[1].SectionName = 0xffff;
+  sme[1].ClassName = 0xffff;
+  sme[1].Offset = 0;
+  sme[1].SectionLength = 0x22;
+  dsh->SectionMapSize = sizeof(SectionMapHeader) + sizeof(SectionMapEntry) * 2;
 #endif
 
   cur += dsh->SectionMapSize;
@@ -881,7 +911,7 @@ static int write_dbi_stream(CTX,
   u32* file_name_offsets = (u32*)file_info;
   *file_name_offsets++ = 0;
   char* filename_buf = (char*)file_name_offsets;
-  static const char source_name[] = "c:\\src\\dyibicc\\dyn_basic_pdb_example.c";
+  static const char source_name[] = "c:\\src\\dyibicc\\src\\dyn_basic_pdb_example.c";
   memcpy(filename_buf, source_name, sizeof(source_name));
   filename_buf += sizeof(source_name);
   dsh->SourceInfoSize = align_to((u32)(filename_buf - (char*)fish), 4);
@@ -1074,6 +1104,66 @@ typedef struct CV_S_GPROC32 {
 
   // unsigned char name[];
 } CV_S_GPROC32;
+
+typedef struct CV_S_FRAMEPROC {
+  CV_SYM_HEADER;
+
+  u32 frame;
+  u32 pad;
+  u32 off_pad;
+  u32 save_regs;
+  u32 off_exception_handler;
+  u16 sect_exception_handler;
+  struct {
+    unsigned long fHasAlloca : 1;          // function uses _alloca()
+    unsigned long fHasSetJmp : 1;          // function uses setjmp()
+    unsigned long fHasLongJmp : 1;         // function uses longjmp()
+    unsigned long fHasInlAsm : 1;          // function uses inline asm
+    unsigned long fHasEH : 1;              // function has EH states
+    unsigned long fInlSpec : 1;            // function was speced as inline
+    unsigned long fHasSEH : 1;             // function has SEH
+    unsigned long fNaked : 1;              // function is __declspec(naked)
+    unsigned long fSecurityChecks : 1;     // function has buffer security check introduced by /GS.
+    unsigned long fAsyncEH : 1;            // function compiled with /EHa
+    unsigned long fGSNoStackOrdering : 1;  // function has /GS buffer checks, but stack ordering
+                                           // couldn't be done
+    unsigned long fWasInlined : 1;         // function was inlined within another function
+    unsigned long fGSCheck : 1;            // function is __declspec(strict_gs_check)
+    unsigned long fSafeBuffers : 1;        // function is __declspec(safebuffers)
+    unsigned long encodedLocalBasePointer : 2;  // record function's local pointer explicitly.
+    unsigned long encodedParamBasePointer : 2;  // record function's parameter pointer explicitly.
+    unsigned long fPogoOn : 1;                  // function was compiled with PGO/PGU
+    unsigned long fValidCounts : 1;             // Do we have valid Pogo counts?
+    unsigned long fOptSpeed : 1;                // Did we optimize for speed?
+    unsigned long fGuardCF : 1;   // function contains CFG checks (and no write checks)
+    unsigned long fGuardCFW : 1;  // function contains CFW checks and/or instrumentation
+    unsigned long pad : 9;        // must be zero
+  } flags;
+} CV_S_FRAMEPROC;
+
+typedef struct CV_S_SECTION {
+  CV_SYM_HEADER;
+
+  u16 sec;
+  unsigned char align;
+  unsigned char reserved;
+  u32 rva;
+  u32 size;
+  u32 characteristics;
+
+  // unsigned char name[]
+} CV_S_SECTION;
+
+typedef struct CV_S_COFFGROUP {
+  CV_SYM_HEADER;
+
+  u32 size;
+  u32 characteristics;
+  u32 off;
+  u16 seg;
+
+  // unsigned char name[]
+} CV_S_COFFGROUP;
 
 typedef enum CV_LineFlags {
   CF_LF_None = 0,
@@ -1394,11 +1484,9 @@ static GsiData build_gsi_data(CTX) {
   GsiBuilder* gsi = calloc(1, sizeof(GsiBuilder));
   gsi->sym_record_stream = add_stream(ctx);
 
-  gsi_builder_add_public(ctx, gsi, CVSPF_Function, 0x10, "FuncX");
-  gsi_builder_add_public(ctx, gsi, CVSPF_Function, 0x0, "_DllMainCRTStartup");
+  gsi_builder_add_procref(ctx, gsi, 100, "Func"); // HACK 100 is based on module gen
 
-  gsi_builder_add_procref(ctx, gsi, 0x70, "_DllMainCRTStartup");
-  gsi_builder_add_procref(ctx, gsi, 0xd0, "FuncX");
+  gsi_builder_add_public(ctx, gsi, CVSPF_Function, 0x0, "Func");
 
   gsi_builder_finish(ctx, gsi);
 
@@ -1447,6 +1535,7 @@ static ModuleData write_module_stream(CTX) {
 
   CV_S_COMPILE3 compile3 = {.record_type=0x113c,
     .flags = {.language = 0x00 /* CV_CFL_C */ },
+    .machine = 0xd0,  // x64
   };
   // TODO: Add name, version, language, etc. to ctx.
   SW_CV_SYM_TRAILING_NAME(compile3, "dyn_basic_pdb git-HEAD");
@@ -1456,9 +1545,9 @@ static ModuleData write_module_stream(CTX) {
       .parent = 0,
       .end = ~0U,
       .next = 0,
-      .len = 0,
+      .len = 0x16,
       .dbg_start = 0,
-      .dbg_end = 0,
+      .dbg_end = 0x15,
       .type_index = 0x1001,  // hrm, first UDT, undefined but we're not writing types.
       .offset = 0,  /* address of proc */
       .seg = 1,
@@ -1467,9 +1556,38 @@ static ModuleData write_module_stream(CTX) {
   SwFixup end_fixup = SW_CAPTURE_FIXUP(offsetof(CV_S_GPROC32, end));
   SW_CV_SYM_TRAILING_NAME(gproc32, "Func");
 
+#if 0
+  CV_S_FRAMEPROC frameproc = {.record_type = 0x1012};
+  frameproc.flags.encodedParamBasePointer = 2;
+  frameproc.flags.encodedLocalBasePointer = 2;
+  frameproc.flags.fSafeBuffers = 1;
+  SW_CV_SYM(frameproc);
+#endif
+
   CV_S_NODATA end = {.record_type = 0x0006};
   SW_WRITE_FIXUP_FOR_LOCATION_U32(end_fixup);
   SW_CV_SYM(end);
+
+#if 0
+  CV_S_SECTION text_section = {
+      .record_type = 0x1136,
+      .sec = 1,
+      .align = 12,
+      .rva = 0x1000,
+      .size = 22,
+      .characteristics = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ,
+  };
+  SW_CV_SYM_TRAILING_NAME(text_section, ".text");
+
+  CV_S_COFFGROUP text_coffgroup = {
+    .record_type = 0x1137,
+    .size = 22,
+    .characteristics = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ,
+    .off = 0,
+    .seg = 1,
+  }; 
+  SW_CV_SYM_TRAILING_NAME(text_coffgroup, ".text");
+#endif
 
   // TODO: all funcs here, possibly data too, but we wouldn't have typeinfo so
   // might fairly pointless
@@ -1501,11 +1619,13 @@ static ModuleData write_module_stream(CTX) {
     SW_BLOCK(&block_header, sizeof(block_header));
 
     CV_LineNumberEntry line_entry = {
-        .offset = 0, .line_num_start = 5, .delta_line_end = 1, .is_statement = 0};
+        .offset = 0, .line_num_start = 5, .delta_line_end = 0, .is_statement = 1};
     SW_BLOCK(&line_entry, sizeof(line_entry));
+
     line_entry.offset = 4;
     line_entry.line_num_start = 6;
     SW_BLOCK(&line_entry, sizeof(line_entry));
+
     line_entry.offset = 0xb;
     line_entry.line_num_start = 7;
     SW_BLOCK(&line_entry, sizeof(line_entry));
@@ -1603,6 +1723,195 @@ static int create_file_map(CTX) {
   return 1;
 }
 
+typedef struct RsdsDataHeader {
+  unsigned char magic[4];
+  UUID unique_id;
+  u32 age;
+  // unsigned char name[]
+} RsdsDataHeader;
+
+static int write_stub_dll(CTX) {
+  FILE* f;
+  if (fopen_s(&f, ctx->output_dll_name, "wb") != 0) {
+    fprintf(stderr, "couldn't open %s\n", ctx->output_dll_name);
+    return 0;
+  }
+  DWORD timedate = (DWORD)time(NULL);
+  static char dos_stub_and_pe_magic[172] = {
+      0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0xff, 0xff, 0x00,
+      0x00, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0xa8, 0x00, 0x00, 0x00, 0x0e, 0x1f, 0xba, 0x0e, 0x00, 0xb4, 0x09, 0xcd, 0x21, 0xb8, 0x01,
+      0x4c, 0xcd, 0x21, 0x54, 0x68, 0x69, 0x73, 0x20, 0x70, 0x72, 0x6f, 0x67, 0x72, 0x61, 0x6d,
+      0x20, 0x63, 0x61, 0x6e, 0x6e, 0x6f, 0x74, 0x20, 0x62, 0x65, 0x20, 0x72, 0x75, 0x6e, 0x20,
+      0x69, 0x6e, 0x20, 0x44, 0x4f, 0x53, 0x20, 0x6d, 0x6f, 0x64, 0x65, 0x2e, 0x0d, 0x0d, 0x0a,
+      0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x61, 0x46, 0x33, 0xdf, 0x25, 0x27, 0x5d,
+      0x8c, 0x25, 0x27, 0x5d, 0x8c, 0x25, 0x27, 0x5d, 0x8c, 0xe4, 0x5b, 0x59, 0x8d, 0x24, 0x27,
+      0x5d, 0x8c, 0xe4, 0x5b, 0x5f, 0x8d, 0x24, 0x27, 0x5d, 0x8c, 0x52, 0x69, 0x63, 0x68, 0x25,
+      0x27, 0x5d, 0x8c, 'P',  'E',  '\0', '\0',
+  };
+  // PE pointer is a 0x3c, points at 0xa8, IMAGE_FILE_HEADER starts there.
+  fwrite(dos_stub_and_pe_magic, sizeof(dos_stub_and_pe_magic), 1, f);
+  IMAGE_FILE_HEADER image_file_header = {
+      .Machine = IMAGE_FILE_MACHINE_AMD64,
+      .NumberOfSections = 2,
+      .TimeDateStamp = timedate,
+      .PointerToSymbolTable = 0,
+      .NumberOfSymbols = 0,
+      .SizeOfOptionalHeader = sizeof(IMAGE_OPTIONAL_HEADER64),
+      .Characteristics = IMAGE_FILE_RELOCS_STRIPPED | IMAGE_FILE_EXECUTABLE_IMAGE |
+                         IMAGE_FILE_LARGE_ADDRESS_AWARE | IMAGE_FILE_DLL,
+  };
+  fwrite(&image_file_header, sizeof(image_file_header), 1, f);
+  IMAGE_OPTIONAL_HEADER64 opt_header = {
+      .Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC,
+      .MajorLinkerVersion = 14,
+      .MinorLinkerVersion = 0x22,
+      .SizeOfCode = 0x200,  //(DWORD)ctx->image_size,
+      .SizeOfInitializedData = 0x200,
+      .SizeOfUninitializedData = 0,
+      .AddressOfEntryPoint = 0x1000,
+      .BaseOfCode = 0x1000,
+      .ImageBase = (ULONGLONG)ctx->image_addr,
+      .SectionAlignment = 0x1000,
+      .FileAlignment = 0x200,
+      .MajorOperatingSystemVersion = 6,
+      .MinorOperatingSystemVersion = 0,
+      .MajorImageVersion = 6,
+      .MinorImageVersion = 0,
+      .MajorSubsystemVersion = 6,
+      .MinorSubsystemVersion = 0,
+      .Win32VersionValue = 0,
+      .SizeOfImage = 0x3000,   // TODO
+      .SizeOfHeaders = 0x200,  // ??
+      .CheckSum = 0,
+      .Subsystem = IMAGE_SUBSYSTEM_WINDOWS_GUI,
+      .DllCharacteristics =
+          IMAGE_DLLCHARACTERISTICS_NX_COMPAT | IMAGE_DLLCHARACTERISTICS_HIGH_ENTROPY_VA,
+      .SizeOfStackReserve = 0x100000,
+      .SizeOfStackCommit = 0x1000,
+      .SizeOfHeapReserve = 0x100000,
+      .SizeOfHeapCommit = 0x1000,
+      .LoaderFlags = 0,
+      .NumberOfRvaAndSizes = 0x10,
+      .DataDirectory =
+          {
+              {0, 0},
+              {0, 0},
+              {0, 0},
+              {0, 0},
+              {0, 0},
+              {0, 0},
+              {0x2000, sizeof(IMAGE_DEBUG_DIRECTORY)},
+              {0, 0},
+              {0, 0},
+              {0, 0},
+              {0, 0},
+              {0, 0},
+              {0, 0},
+              {0, 0},
+              {0, 0},
+              {0, 0},
+          },
+  };
+  fwrite(&opt_header, sizeof(opt_header), 1, f);
+
+  IMAGE_SECTION_HEADER text = {
+      .Name = ".text\0\0",
+      .Misc = {.VirtualSize = 3},  //.VirtualSize = (DWORD)ctx->image_size},
+      .VirtualAddress = 0x1000,
+      .SizeOfRawData = 0x200,     // 3,//(DWORD)ctx->image_size,
+      .PointerToRawData = 0x200,  // This is the aligned address that just happens to be right after
+                                  // the rdata header.
+      .PointerToRelocations = 0,
+      .PointerToLinenumbers = 0,
+      .NumberOfRelocations = 0,
+      .NumberOfLinenumbers = 0,
+      .Characteristics = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ,
+  };
+  fwrite(&text, sizeof(text), 1, f);
+
+  RsdsDataHeader rsds_header = {
+    .magic = {'R', 'S', 'D', 'S',},
+    .age = 1,
+  };
+  memcpy(&rsds_header.unique_id, &ctx->unique_id, sizeof(UUID));
+  size_t name_len = strlen(ctx->output_pdb_name);
+  DWORD rsds_len = (DWORD)(sizeof(rsds_header) + name_len + 1);
+
+  IMAGE_SECTION_HEADER rdata = {
+      .Name = ".rdata\0",
+      .Misc = {.VirtualSize = sizeof(IMAGE_DEBUG_DIRECTORY) + rsds_len},
+      .VirtualAddress = 0x2000,
+      .SizeOfRawData = 0x200, // sizeof(IMAGE_DEBUG_DIRECTORY) + rsds_len,
+      .PointerToRawData = 0x400, //(DWORD)(0x200 + ctx->image_size),
+      .PointerToRelocations = 0,
+      .PointerToLinenumbers = 0,
+      .NumberOfRelocations = 0,
+      .NumberOfLinenumbers = 0,
+      .Characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ,
+  };
+  fwrite(&rdata, sizeof(rdata), 1, f);
+
+  assert(ftell(f) == 0x200);
+
+  unsigned char code[] = {0x33, 0xc0, 0xc3};
+  fwrite(code, sizeof(code), 1, f);
+#if 0
+  // Now at 0x200 to write block of code. We don't any code here, but fill with
+  // int3s to make sure we know if we execute it.
+  unsigned char int3 = 0xcc;
+  for (size_t i = 0; i < ctx->image_size; ++i) {
+    fwrite(&int3, sizeof(int3), 1, f);
+  }
+#endif
+
+  unsigned char zero = 0;
+  while (ftell(f) != 0x400) {
+    fwrite(&zero, sizeof(zero), 1, f);
+  }
+
+  unsigned long long rdata_start = ftell(f);
+
+  // Now the .rdata data which points to the pdb.
+  IMAGE_DEBUG_DIRECTORY debug_dir = {
+      .Characteristics = 0,
+      .TimeDateStamp = timedate,
+      .MajorVersion = 0,
+      .MinorVersion = 0,
+      .Type = IMAGE_DEBUG_TYPE_CODEVIEW,
+      .SizeOfData = rsds_len,
+      .AddressOfRawData = 0x201c,
+      .PointerToRawData = (DWORD)(rdata_start + sizeof(IMAGE_DEBUG_DIRECTORY)),
+  };
+  fwrite(&debug_dir, sizeof(debug_dir), 1, f);
+  fwrite(&rsds_header, sizeof(rsds_header), 1, f);
+  fwrite(ctx->output_pdb_name, 1, name_len + 1, f);
+
+  while (ftell(f) != 0x600) {
+    fwrite(&zero, sizeof(zero), 1, f);
+  }
+
+  fclose(f);
+
+  return 1;
+}
+
+static int force_symbol_load(CTX) {
+  // Save current code block, VirtualFree() it or I assume LoadLibrary() will fail.
+
+  // Write stub dll with target address/size and fixed base address.
+  ENSURE(write_stub_dll(ctx), 1);
+
+  VirtualFree(ctx->image_addr, 0, MEM_RELEASE);
+  LoadLibraryEx(ctx->output_dll_name, NULL, DONT_RESOLVE_DLL_REFERENCES);
+
+  // Make DLL writable and slam jitted code back into same location.
+
+  return 1;
+}
+
 int dbp_finish(DbpContext* ctx) {
   if (!create_file_map(ctx))
     return 0;
@@ -1632,10 +1941,26 @@ int dbp_finish(DbpContext* ctx) {
   StreamData* names_stream = add_stream(ctx);
 
   ENSURE(1, write_empty_tpi_ipi_stream(ctx, stream2));
+#if 0
+  {
+    StreamData* stream = stream2;
+    SW_BLOCK(str2_raw, str2_raw_len);
+  }
+  {
+    StreamData* stream = stream4;
+    SW_BLOCK(str4_raw, str4_raw_len);
+  }
+#endif
 
   // Section Headers; empty. Referred to by DBI in 'optional' dbg headers, and
   // llvm-pdbutil wants it to exist, but handles an empty stream reasonably.
   StreamData* section_headers = add_stream(ctx);
+#if 1
+  {
+    StreamData* stream = section_headers;
+    SW_BLOCK(str10_raw, str10_raw_len);
+  }
+#endif
 
   DbiWriteData dwd = {
     .gsi_data = gsi_data,
@@ -1650,11 +1975,29 @@ int dbp_finish(DbpContext* ctx) {
   ENSURE(write_names_stream(ctx, names_stream), 1);
   ENSURE(write_pdb_info_stream(ctx, stream1, names_stream->stream_index), 1);
 
+#if 0
+  // has to be 11
+  StreamData* tpi_hash_hack = add_stream(ctx);
+  {
+    StreamData* stream = tpi_hash_hack;
+    SW_BLOCK(str9_raw, str9_raw_len);
+  }
+
+  // has to be 12
+  StreamData* ipi_hash_hack = add_stream(ctx);
+  {
+    StreamData* stream = ipi_hash_hack;
+    SW_BLOCK(str14_raw, str14_raw_len);
+  }
+#endif
+
   ENSURE(write_directory(ctx), 1);
 
   ENSURE(FlushViewOfFile(ctx->data, ctx->file_size), 1);
   ENSURE(UnmapViewOfFile(ctx->data), 1);
   CloseHandle(ctx->file);
+
+  ENSURE(force_symbol_load(ctx), 1);
 
   free_ctx(ctx);
   return 1;

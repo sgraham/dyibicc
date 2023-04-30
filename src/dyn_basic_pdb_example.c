@@ -34,6 +34,8 @@ static unsigned char test_data[] = {
   }
 
 int main(int argc, char** argv) {
+//  LoadLibraryEx("xf.dll", NULL, DONT_RESOLVE_DLL_REFERENCES);
+
   // "JIT" some code. The source code is lines 5-8 in this file, and the
   // compiled code is in |test_data|.
   size_t code_size = 4096;
@@ -49,26 +51,20 @@ int main(int argc, char** argv) {
   CHECK(dbp_add_line_mapping(src, 7, 0x0b, 0x11));
   CHECK(dbp_add_line_mapping(src, 8, 0x11, 0x16));
 
-  // Complete the generation of the pdb. This takes the following "fun" steps to
-  // trigger pdb load in VS:
-  // - writes out a final pdb
-  // - makes a copy of the code block (as it's overwritten by LoadLibrary below)
-  // - creates a stub dll with fixed load address that matches where the code is
-  // in memory already
-  // - calls LoadLibrary() on that dll, which is recognized by VS in order to
-  // load the pdb.
-  // - replaces the code that LoadLibrary() blasted
-  // - frees |ctx|.
+  // Completes the generation of the pdb, tricks VS into loading it, and frees
+  // all resources associated with |ctx|.
   CHECK(dbp_finish(ctx));
 
   // Finally, make the code executable.
   DWORD old_protect;
-  CHECK(VirtualProtect(base_addr, code_size, PAGE_EXECUTE_READ, &old_protect));
+  CHECK(VirtualProtect(base_addr+0x1000, code_size, PAGE_READWRITE, &old_protect));
+  memcpy(base_addr+0x1000, test_data, sizeof(test_data));
+  CHECK(VirtualProtect(base_addr+0x1000, code_size, PAGE_EXECUTE_READ, &old_protect));
 
   // Set a breakpoint here in VS, and step into the following call.
-  int result = ((int (*)(void))base_addr)();
+  int result = ((int (*)(void))(base_addr+0x1000))();
 
   printf("returned: %d\n", result);
 
-  CHECK(VirtualFree(base_addr, 0, MEM_RELEASE));
+  //CHECK(VirtualFree(base_addr, 0, MEM_RELEASE));
 }
