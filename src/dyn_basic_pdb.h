@@ -162,7 +162,7 @@ static void free_ctx(DbpContext* ctx) {
   free(ctx->output_pdb_name);
 }
 
-static const char BigHdrMagic[0x1e] = "Microsoft C/C++ MSF 7.00\r\n\x1a\x44\x53";
+static const char big_hdr_magic[0x1e] = "Microsoft C/C++ MSF 7.00\r\n\x1a\x44\x53";
 
 #define ENSURE(x, want)                                                             \
   if (want != x) {                                                                  \
@@ -177,14 +177,14 @@ static const char BigHdrMagic[0x1e] = "Microsoft C/C++ MSF 7.00\r\n\x1a\x44\x53"
   }
 
 struct SuperBlock {
-  char FileMagic[0x1e];
+  char file_magic[0x1e];
   char padding[2];
-  u32 BlockSize;
-  u32 FreeBlockMapBlock;
-  u32 NumBlocks;
-  u32 NumDirectoryBytes;
-  u32 Unknown;
-  u32 BlockMapAddr;
+  u32 block_size;
+  u32 free_block_map_block;
+  u32 num_blocks;
+  u32 num_directory_bytes;
+  u32 unknown;
+  u32 block_map_addr;
 };
 
 #define BLOCK_SIZE 4096
@@ -260,15 +260,15 @@ static void stream_write_block(CTX, StreamData* stream, const void* data, size_t
 static void write_superblock(CTX) {
   SuperBlock* sb = (SuperBlock*)ctx->data;
   ctx->superblock = sb;
-  memcpy(sb->FileMagic, BigHdrMagic, sizeof(BigHdrMagic));
+  memcpy(sb->file_magic, big_hdr_magic, sizeof(big_hdr_magic));
   sb->padding[0] = '\0';
   sb->padding[1] = '\0';
-  sb->BlockSize = BLOCK_SIZE;
-  sb->FreeBlockMapBlock = 2;  // We never use map 1.
-  sb->NumBlocks = DEFAULT_NUM_BLOCKS;
-  // NumDirectoryBytes filled in later once we've written everything else.
-  sb->Unknown = 0;
-  sb->BlockMapAddr = 3;
+  sb->block_size = BLOCK_SIZE;
+  sb->free_block_map_block = 2;  // We never use map 1.
+  sb->num_blocks = DEFAULT_NUM_BLOCKS;
+  // num_directory_bytes filled in later once we've written everything else.
+  sb->unknown = 0;
+  sb->block_map_addr = 3;
 
   // Mark all pages as free, then mark the first four in use:
   // 0 is super block, 1 is FPM1, 2 is FPM2, 3 is the block map.
@@ -394,7 +394,6 @@ static int write_empty_tpi_ipi_stream(CTX, StreamData* stream) {
   SW_BLOCK(&tsh, sizeof(tsh));
   return 1;
 }
-
 
 // Copied from:
 // https://github.com/microsoft/microsoft-pdb/blob/082c5290e5aff028ae84e43affa8be717aa7af73/PDB/include/misc.h#L15
@@ -849,7 +848,11 @@ static int write_dbi_stream(CTX,
   dsh->SectionMapSize = sizeof(smss);
 #else
   // XXX THIS! IS THE MAIN THING THAT WAS MISSING TO GET LINES WORKING
-  // OTHERWISE ALL FUNCTIONS ARE MISSING RVAS
+  // OTHERWISE ALL FUNCTIONS ARE MISSING RVAS.
+  //
+  // In particular the second one which makes no sense because it's not supposed
+  // to be the text segment. llvm doesn't seem to have any more info on these
+  // other than they're required, and somehow duplicate coff sections elsewhere.
   SectionMapHeader* smh = (SectionMapHeader*)cur;
   smh->Count = 2;
   smh->LogCount = 2;
@@ -1098,66 +1101,6 @@ typedef struct CV_S_GPROC32 {
 
   // unsigned char name[];
 } CV_S_GPROC32;
-
-typedef struct CV_S_FRAMEPROC {
-  CV_SYM_HEADER;
-
-  u32 frame;
-  u32 pad;
-  u32 off_pad;
-  u32 save_regs;
-  u32 off_exception_handler;
-  u16 sect_exception_handler;
-  struct {
-    unsigned long fHasAlloca : 1;          // function uses _alloca()
-    unsigned long fHasSetJmp : 1;          // function uses setjmp()
-    unsigned long fHasLongJmp : 1;         // function uses longjmp()
-    unsigned long fHasInlAsm : 1;          // function uses inline asm
-    unsigned long fHasEH : 1;              // function has EH states
-    unsigned long fInlSpec : 1;            // function was speced as inline
-    unsigned long fHasSEH : 1;             // function has SEH
-    unsigned long fNaked : 1;              // function is __declspec(naked)
-    unsigned long fSecurityChecks : 1;     // function has buffer security check introduced by /GS.
-    unsigned long fAsyncEH : 1;            // function compiled with /EHa
-    unsigned long fGSNoStackOrdering : 1;  // function has /GS buffer checks, but stack ordering
-                                           // couldn't be done
-    unsigned long fWasInlined : 1;         // function was inlined within another function
-    unsigned long fGSCheck : 1;            // function is __declspec(strict_gs_check)
-    unsigned long fSafeBuffers : 1;        // function is __declspec(safebuffers)
-    unsigned long encodedLocalBasePointer : 2;  // record function's local pointer explicitly.
-    unsigned long encodedParamBasePointer : 2;  // record function's parameter pointer explicitly.
-    unsigned long fPogoOn : 1;                  // function was compiled with PGO/PGU
-    unsigned long fValidCounts : 1;             // Do we have valid Pogo counts?
-    unsigned long fOptSpeed : 1;                // Did we optimize for speed?
-    unsigned long fGuardCF : 1;   // function contains CFG checks (and no write checks)
-    unsigned long fGuardCFW : 1;  // function contains CFW checks and/or instrumentation
-    unsigned long pad : 9;        // must be zero
-  } flags;
-} CV_S_FRAMEPROC;
-
-typedef struct CV_S_SECTION {
-  CV_SYM_HEADER;
-
-  u16 sec;
-  unsigned char align;
-  unsigned char reserved;
-  u32 rva;
-  u32 size;
-  u32 characteristics;
-
-  // unsigned char name[]
-} CV_S_SECTION;
-
-typedef struct CV_S_COFFGROUP {
-  CV_SYM_HEADER;
-
-  u32 size;
-  u32 characteristics;
-  u32 off;
-  u16 seg;
-
-  // unsigned char name[]
-} CV_S_COFFGROUP;
 
 typedef enum CV_LineFlags {
   CF_LF_None = 0,
@@ -1550,38 +1493,9 @@ static ModuleData write_module_stream(CTX) {
   SwFixup end_fixup = SW_CAPTURE_FIXUP(offsetof(CV_S_GPROC32, end));
   SW_CV_SYM_TRAILING_NAME(gproc32, "Func");
 
-#if 0
-  CV_S_FRAMEPROC frameproc = {.record_type = 0x1012};
-  frameproc.flags.encodedParamBasePointer = 2;
-  frameproc.flags.encodedLocalBasePointer = 2;
-  frameproc.flags.fSafeBuffers = 1;
-  SW_CV_SYM(frameproc);
-#endif
-
   CV_S_NODATA end = {.record_type = 0x0006};
   SW_WRITE_FIXUP_FOR_LOCATION_U32(end_fixup);
   SW_CV_SYM(end);
-
-#if 0
-  CV_S_SECTION text_section = {
-      .record_type = 0x1136,
-      .sec = 1,
-      .align = 12,
-      .rva = 0x1000,
-      .size = 22,
-      .characteristics = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ,
-  };
-  SW_CV_SYM_TRAILING_NAME(text_section, ".text");
-
-  CV_S_COFFGROUP text_coffgroup = {
-    .record_type = 0x1137,
-    .size = 22,
-    .characteristics = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ,
-    .off = 0,
-    .seg = 1,
-  }; 
-  SW_CV_SYM_TRAILING_NAME(text_coffgroup, ".text");
-#endif
 
   // TODO: all funcs here, possibly data too, but we wouldn't have typeinfo so
   // might fairly pointless
@@ -1657,7 +1571,7 @@ static ModuleData write_module_stream(CTX) {
 static int write_directory(CTX) {
   u32 directory_page = alloc_block(ctx);
 
-  u32* block_map = get_block_ptr(ctx, ctx->superblock->BlockMapAddr);
+  u32* block_map = get_block_ptr(ctx, ctx->superblock->block_map_addr);
   *block_map = directory_page;
 
   u32* start = get_block_ptr(ctx, directory_page);
@@ -1682,13 +1596,13 @@ static int write_directory(CTX) {
 
   // And finally, update the super block with the number of bytes in the
   // directory.
-  ctx->superblock->NumDirectoryBytes = (u32)((dir - start) * sizeof(u32));
+  ctx->superblock->num_directory_bytes = (u32)((dir - start) * sizeof(u32));
 
   // This can't easily use StreamData because it's the directory of streams. It
   // would take a larger pdb that we expect to be writing here to overflow the
   // first block (especially since we don't write types), so just assert that we
   // didn't grow too large for now.
-  if (ctx->superblock->NumDirectoryBytes > BLOCK_SIZE) {
+  if (ctx->superblock->num_directory_bytes > BLOCK_SIZE) {
     fprintf(stderr, "%s:%d: directory grew beyond BLOCK_SIZE\n", __FILE__, __LINE__);
     return 0;
   }
