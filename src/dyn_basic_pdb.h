@@ -41,6 +41,10 @@ int dbp_add_line_mapping(DbpSourceFile* src,
                          unsigned int end_addr);
 int dbp_finish(DbpContext* ctx);
 
+// Stored in CodeView records, default is "dyn_basic_pdb writer 1.0.0.0".
+void dbp_set_compiler_information(DbpContext* ctx, const char* compiler_version_string,
+    unsigned short major, unsigned short minor, unsigned short build, unsigned short qfe);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
@@ -83,6 +87,12 @@ struct DbpContext {
   size_t source_files_len;
   size_t source_files_cap;
   UUID unique_id;
+
+  char* compiler_version_string;
+  u16 version_major;
+  u16 version_minor;
+  u16 version_build;
+  u16 version_qfe;
 
   HANDLE file;
   char* data;
@@ -134,7 +144,19 @@ DbpContext* dbp_create(void* image_addr, size_t image_size, const char* output_p
     fprintf(stderr, "UuidCreate failed\n");
     return NULL;
   }
+  dbp_set_compiler_information(ctx, "dyn_basic_pdb writer 1.0.0.0", 1, 0, 0, 0);
   return ctx;
+}
+
+void dbp_set_compiler_information(DbpContext* ctx, const char* compiler_version_string,
+    unsigned short major, unsigned short minor, unsigned short build, unsigned short qfe) {
+  if (ctx->compiler_version_string)
+    free(ctx->compiler_version_string);
+  ctx->compiler_version_string = _strdup(compiler_version_string);
+  ctx->version_major = major;
+  ctx->version_minor = minor;
+  ctx->version_build = build;
+  ctx->version_qfe = qfe;
 }
 
 DbpSourceFile* dbp_add_source_file(DbpContext* ctx, const char* name) {
@@ -182,7 +204,7 @@ static void free_ctx(DbpContext* ctx) {
     free(ctx->stream_data[i]);
   }
   free(ctx->stream_data);
-
+  free(ctx->compiler_version_string);
   free(ctx);
 }
 
@@ -1566,7 +1588,7 @@ static GsiData build_gsi_data(DbpContext* ctx) {
   GsiBuilder* gsi = calloc(1, sizeof(GsiBuilder));
   gsi->sym_record_stream = add_stream(ctx);
 
-  gsi_builder_add_procref(ctx, gsi, 100, "Func");  // HACK 100 is based on module gen
+  gsi_builder_add_procref(ctx, gsi, 104, "Func");  // HACK 104 is based on module gen
 
   gsi_builder_add_public(ctx, gsi, CVSPF_Function, 0x0, "Func");
 
@@ -1615,9 +1637,16 @@ static ModuleData write_module_stream(DbpContext* ctx) {
       .record_type = 0x113c,
       .flags = {.language = 0x00 /* CV_CFL_C */},
       .machine = 0xd0,  // x64
+      .ver_fe_major = ctx->version_major,
+      .ver_fe_minor = ctx->version_minor,
+      .ver_fe_build = ctx->version_build,
+      .ver_fe_qfe = ctx->version_qfe,
+      .ver_be_major = ctx->version_major,
+      .ver_be_minor = ctx->version_minor,
+      .ver_be_build = ctx->version_build,
+      .ver_be_qfe = ctx->version_qfe,
   };
-  // TODO: Add name, version, language, etc. to ctx.
-  SW_CV_SYM_TRAILING_NAME(compile3, "dyn_basic_pdb git-HEAD");
+  SW_CV_SYM_TRAILING_NAME(compile3, ctx->compiler_version_string);
 
   CV_S_GPROC32 gproc32 = {
       .record_type = 0x1110,
