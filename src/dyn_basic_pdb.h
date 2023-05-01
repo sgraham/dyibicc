@@ -42,8 +42,12 @@ int dbp_add_line_mapping(DbpSourceFile* src,
 int dbp_finish(DbpContext* ctx);
 
 // This is stored in CodeView records, default is "dyn_basic_pdb writer 1.0.0.0" if not set.
-void dbp_set_compiler_information(DbpContext* ctx, const char* compiler_version_string,
-    unsigned short major, unsigned short minor, unsigned short build, unsigned short qfe);
+void dbp_set_compiler_information(DbpContext* ctx,
+                                  const char* compiler_version_string,
+                                  unsigned short major,
+                                  unsigned short minor,
+                                  unsigned short build,
+                                  unsigned short qfe);
 
 #ifdef __cplusplus
 }  // extern "C"
@@ -69,6 +73,7 @@ void dbp_set_compiler_information(DbpContext* ctx, const char* compiler_version_
 #pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
 #endif
 
+#include <Windows.h>
 #include <assert.h>
 #include <malloc.h>
 #include <stddef.h>
@@ -76,7 +81,6 @@ void dbp_set_compiler_information(DbpContext* ctx, const char* compiler_version_
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <Windows.h>
 
 typedef unsigned int u32;
 typedef signed int i32;
@@ -156,8 +160,12 @@ DbpContext* dbp_create(void* image_addr, size_t image_size, const char* output_p
   return ctx;
 }
 
-void dbp_set_compiler_information(DbpContext* ctx, const char* compiler_version_string,
-    unsigned short major, unsigned short minor, unsigned short build, unsigned short qfe) {
+void dbp_set_compiler_information(DbpContext* ctx,
+                                  const char* compiler_version_string,
+                                  unsigned short major,
+                                  unsigned short minor,
+                                  unsigned short build,
+                                  unsigned short qfe) {
   if (ctx->compiler_version_string)
     free(ctx->compiler_version_string);
   ctx->compiler_version_string = _strdup(compiler_version_string);
@@ -291,6 +299,13 @@ static void stream_write_block(DbpContext* ctx, StreamData* stream, const void* 
   assert(stream->data_length < BLOCK_SIZE && "overflowed page");
 }
 
+static void stream_ensure_init(DbpContext* ctx, StreamData* stream) {
+  // Hack for fixup capture if the block pointer hasn't been allocated yet
+  // before the macro wants to capture it.
+  unsigned char none;
+  stream_write_block(ctx, stream, &none, 0);
+}
+
 #define SW_BLOCK(x, len) stream_write_block(ctx, stream, x, len)
 #define SW_U32(x)                                   \
   do {                                              \
@@ -312,6 +327,23 @@ static void stream_write_block(DbpContext* ctx, StreamData* stream, const void* 
     while (stream->data_length % to != 0) { \
       SW_BLOCK("", 1);                      \
     }                                       \
+  } while (0)
+
+typedef char* SwFixup;
+#define SW_CAPTURE_FIXUP(strukt, field) \
+  (stream_ensure_init(ctx, stream), stream->cur_write + offsetof(strukt, field))
+
+#define SW_WRITE_FIXUP_FOR_LOCATION_U32(swfixup) \
+  do {                                           \
+    *(u32*)swfixup = stream->data_length;        \
+  } while (0)
+
+typedef u32 SwDelta;
+#define SW_CAPTURE_DELTA_START() (stream->data_length)
+
+#define SW_WRITE_DELTA_FIXUP(swfixup, delta)      \
+  do {                                            \
+    *(u32*)swfixup = stream->data_length - delta; \
   } while (0)
 
 static void write_superblock(DbpContext* ctx) {
@@ -497,7 +529,7 @@ static u32 calc_hash(char* pb, size_t cb) {
 
   // hash possible odd byte
   if (cb & 1) {
-    ulHash ^= (u32)*(pb++);
+    ulHash ^= (u32) * (pb++);
   }
 
   const u32 toLowerMask = 0x20202020;
@@ -614,7 +646,7 @@ static void nmtalike__grow(NmtAlikeHashTable* nmt) {
   // These growth factors have to match so that the buckets line up as expected
   // when serialized.
   if (nmt->hash_len * 3 / 4 < nmt->num_names) {
-    nmtalike__rehash(nmt, (u32)(nmt->hash_len * 3/2 + 1));
+    nmtalike__rehash(nmt, (u32)(nmt->hash_len * 3 / 2 + 1));
   }
 }
 
@@ -765,425 +797,169 @@ typedef struct DbiWriteData {
   u32 module_symbols_byte_size;
   u32 module_c13_byte_size;
   u32 num_source_files;
+
+  SwFixup fixup_mod_info_size;
+  SwFixup fixup_section_contribution_size;
+  SwFixup fixup_section_map_size;
+  SwFixup fixup_source_info_size;
+  SwFixup fixup_optional_dbg_header_size;
+  SwFixup fixup_ec_substream_size;
 } DbiWriteData;
 
-static int write_dbi_stream(DbpContext* ctx, StreamData* stream, DbiWriteData* dwd) {
-  u32 block_id = alloc_block(ctx);
-  PUSH_BACK(stream->blocks, block_id);
-
-  char* start = get_block_ptr(ctx, block_id);
-  char* cur = start;
-#if 1
-  DbiStreamHeader* dsh = (DbiStreamHeader*)cur;
-  dsh->version_signature = -1;
-  dsh->version_header = 19990903; /* V70 */
-  dsh->age = 1;
-  dsh->global_stream_index = (u16)dwd->gsi_data.global_symbol_stream;
-  dsh->build_number = 0x8eb;  // link.exe 14.11, "new format" for compatibility.
-  dsh->public_stream_index = (u16)dwd->gsi_data.public_symbol_stream;
-  dsh->pdb_dll_version = 0;
-  dsh->sym_record_stream = (u16)dwd->gsi_data.sym_record_stream;
-  dsh->pdb_dll_rbld = 0;
-
-  // All of these are filled in after being written later.
-  dsh->mod_info_size = 0;
-  dsh->section_contribution_size = 0;
-  dsh->section_map_size = 0;
-  dsh->source_info_size = 0;
-  dsh->optional_dbg_header_size = 0;
-  dsh->ec_substream_size = 0;
-
-  dsh->type_server_map_size = 0;   // empty
-  dsh->mfc_type_server_index = 0;  // empty
-  dsh->flags = 0;
-  dsh->machine = 0x8664;  // x64
-  dsh->padding = 0;
-
-  cur = (char*)(dsh + 1);
-
-#if 0
-  unsigned char mod_info[] = {
-  // ModInfo
-  0x00, 0x00, 0x00, 0x00, // Unused1
-  // SectionContribEntry
-  0x01, 0x00, // Section
-  0x00, 0x00, // Padding1
-  0x00, 0x00, 0x00, 0x00, // Offset
-  0x22, 0x00, 0x00, 0x00, // Size
-  0x20, 0x00, 0x50, 0x60, // Characteristics
-  0x00, 0x00, // ModuleIndex
-  0x00, 0x00, // Padding2
-  0x24, 0x58, 0xd2, 0x68, // DataCrc
-  0x00, 0x00, 0x00, 0x00, // RelocCrc
-  // end of SectionContribEntry
-  0x00, 0x00,  // Flags
-  0x0b, 0x00, // ModuleSymStream
-  0x48, 0x01, 0x00, 0x00, // SymByteSize
-  0x00, 0x00, 0x00, 0x00, // C11ByteSize
-  0x80, 0x00, 0x00, 0x00, // C13ByteSize
-  0x01, 0x00, // SourceFileCount
-  0x00, 0x00, // Padding
-  0x00, 0x00, 0x00, 0x00, // Unused2
-  0x00, 0x00, 0x00, 0x00, // SourceFileNameIndex
-  0x00, 0x00, 0x00, 0x00, // PdbFilePathNameIndex
-  0x43, 0x3a, 0x5c, 0x55, 0x73, 0x65, 0x72, 0x73, 0x5c, 0x73, 0x67, 0x72,
-  0x61, 0x68, 0x61, 0x6d, 0x5c, 0x41, 0x70, 0x70, 0x44, 0x61, 0x74, 0x61,
-  0x5c, 0x4c, 0x6f, 0x63, 0x61, 0x6c, 0x5c, 0x54, 0x65, 0x6d, 0x70, 0x5c,
-  0x78, 0x2d, 0x36, 0x61, 0x64, 0x32, 0x31, 0x35, 0x2e, 0x6f, 0x62, 0x6a,
-  0x00, // ModuleName
-  0x43, 0x3a, 0x5c, 0x55, 0x73, 0x65, 0x72, 0x73, 0x5c, 0x73, 0x67, 0x72,
-  0x61, 0x68, 0x61, 0x6d, 0x5c, 0x41, 0x70, 0x70, 0x44, 0x61, 0x74, 0x61,
-  0x5c, 0x4c, 0x6f, 0x63, 0x61, 0x6c, 0x5c, 0x54, 0x65, 0x6d, 0x70, 0x5c,
-  0x78, 0x2d, 0x36, 0x61, 0x64, 0x32, 0x31, 0x35, 0x2e, 0x6f, 0x62, 0x6a,
-  0x00, // ObjFileName
-
-  // 162 ModInfo bytes to here
-  0x00, 0x00, // Probably 4 align?
-
-  // TBD Should be another ModInfo, but doesn't make sense; Unused1 is set?
-  0x01, 0x00,
-  0x00, 0x00,
-  0xff, 0xff,
-  0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00,
-  0xff, 0xff, 0xff, 0xff,
-  0x00, 0x00,
-  0x00, 0x00,
-  0xff, 0xff,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x0c, 0x00,
-  0xe0, 0x01, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00,
-  0x01, 0x00, 0x00, 0x00,
-  0x2a, 0x20, 0x4c, 0x69, 0x6e, 0x6b, 0x65, 0x72, 0x20, 0x2a, 0x00, 0x00,
-  // "* Linker *\0\0" is about all that makes sense here.
+static void write_dbi_stream_header(DbpContext* ctx, StreamData* stream, DbiWriteData* dwd) {
+  DbiStreamHeader dsh = {
+      .version_signature = -1,
+      .version_header = 19990903, /* V70 */
+      .age = 1,
+      .global_stream_index = (u16)dwd->gsi_data.global_symbol_stream,
+      .build_number = 0x8eb, /* 14.11 "new format" */
+      .public_stream_index = (u16)dwd->gsi_data.public_symbol_stream,
+      .pdb_dll_version = 0,
+      .sym_record_stream = (u16)dwd->gsi_data.sym_record_stream,
+      .pdb_dll_rbld = 0,
+      .type_server_map_size = 0,
+      .mfc_type_server_index = 0,
+      .flags = 0,
+      .machine = 0x8664, /* x64 */
+      .padding = 0,
   };
-  memcpy(cur, mod_info, sizeof(mod_info));
-  dsh->ModInfoSize = sizeof(mod_info);
-#else
+
+  dwd->fixup_mod_info_size = SW_CAPTURE_FIXUP(DbiStreamHeader, mod_info_size);
+  dwd->fixup_section_contribution_size =
+      SW_CAPTURE_FIXUP(DbiStreamHeader, section_contribution_size);
+  dwd->fixup_section_map_size = SW_CAPTURE_FIXUP(DbiStreamHeader, section_map_size);
+  dwd->fixup_source_info_size = SW_CAPTURE_FIXUP(DbiStreamHeader, source_info_size);
+  dwd->fixup_optional_dbg_header_size = SW_CAPTURE_FIXUP(DbiStreamHeader, optional_dbg_header_size);
+  dwd->fixup_ec_substream_size = SW_CAPTURE_FIXUP(DbiStreamHeader, ec_substream_size);
+  SW_BLOCK(&dsh, sizeof(dsh));
+}
+
+static void write_dbi_stream_modinfo(DbpContext* ctx, StreamData* stream, DbiWriteData* dwd){
+  SwDelta block_start = SW_CAPTURE_DELTA_START();
+
   // Module Info Substream. We output a single module with a single section for
   // the whole jit blob.
-  ModInfo* mod = (ModInfo*)cur;
-  mod->unused1 = 0;
-
-  SectionContribEntry* sce = &mod->section_contr;
-  sce->section = 1;
-  sce->padding1[0] = 0;
-  sce->padding1[1] = 0;
-  sce->offset = 0;
-  sce->size = (i32)ctx->image_size;
-  sce->characteristics =
-      IMAGE_SCN_CNT_CODE | IMAGE_SCN_ALIGN_16BYTES | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ;
-  sce->module_index = 0;
-  sce->padding2[0] = 0;
-  sce->padding2[1] = 0;
-  sce->data_crc = 0;
-  sce->reloc_crc = 0;
-
-  mod->flags = 0;
-  mod->module_sym_stream = (u16)dwd->module_sym_stream;
-  mod->sym_byte_size = dwd->module_symbols_byte_size;
-  mod->c11_byte_size = 0;
-  mod->c13_byte_size = dwd->module_c13_byte_size;
-  mod->source_file_count = (u16)dwd->num_source_files;
-  mod->padding[0] = 0;
-  mod->padding[1] = 0;
-  mod->unused2 = 0;
-  mod->source_file_name_index = 0;
-  mod->pdb_file_path_name_index = 0;
-
-  char* names = (char*)(mod + 1);
-  memcpy(names, synthetic_obj_name, sizeof(synthetic_obj_name));
-  names += sizeof(synthetic_obj_name);
-  memcpy(names, synthetic_obj_name, sizeof(synthetic_obj_name));
-  names += sizeof(synthetic_obj_name);
-
-  dsh->mod_info_size = (i32)align_to((u32)(names - cur), 4);
-#endif
-  cur += dsh->mod_info_size;
-
-#if 1
-  unsigned char seccontrib[] = {
-      // Section Contribution Substream
-      0x2d,
-      0xba,
-      0x2e,
-      0xf1,  // Ver60
-
-      // Expecting 5 SectionContribEntry based on SectionContributionSize
-      // TBD: Why are there some here and some inside ModInfo?
-
-      // SectionContribEntry0
-      0x01,
-      0x00,  // Section
-      0x00,
-      0x00,  // Padding1
-      0x00,
-      0x00,
-      0x00,
-      0x00,  // Offset
-      0x22,
-      0x00,
-      0x00,
-      0x00,  // Size
-      0x20,
-      0x00,
-      0x50,
-      0x60,  // Characteristics
-      0x00,
-      0x00,  // ModuleIndex
-      0x00,
-      0x00,  // Padding2
-      0,
-      0,
-      0,
-      0,  // 0x24, 0x58, 0xd2, 0x68, // DataCrc
-      0x00,
-      0x00,
-      0x00,
-      0x00,  // RelocCrc
-
-      // SectionContribEntry1
-      0x02,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x1c,
-      0x00,
-      0x00,
-      0x00,  // Size
-      0x40,
-      0x00,
-      0x00,
-      0x40,
-      0x01,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-
-      // SectionContribEntry2
-      0x02,
-      0x00,
-      0x00,
-      0x00,
-      0x1c,
-      0x00,
-      0x00,
-      0x00,
-      0x39,
-      0x00,
-      0x00,
-      0x00,  // Size
-      0x40,
-      0x00,
-      0x00,
-      0x40,
-      0x01,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-
-      // SectionContribEntry3
-      0x02,
-      0x00,
-      0x00,
-      0x00,
-      0x58,
-      0x00,
-      0x00,
-      0x00,
-      0x08,
-      0x00,
-      0x00,
-      0x00,  // Size
-      0x40,
-      0x00,
-      0x30,
-      0x40,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x84,
-      0x6b,
-      0xb9,
-      0x1a,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-
-      // SectionContribEntry4
-      0x03,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x0c,
-      0x00,
-      0x00,
-      0x00,  // Size
-      0x40,
-      0x00,
-      0x30,
-      0x40,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0xd7,
-      0x88,
-      0x4b,
-      0xb7,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
+  ModInfo mod = {
+      .unused1 = 0,
+      .section_contr =
+          {
+              .section = 1,
+              .padding1 = {0, 0},
+              .offset = 0,
+              .size = (i32)ctx->image_size,
+              .characteristics = IMAGE_SCN_CNT_CODE | IMAGE_SCN_ALIGN_16BYTES |
+                                 IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ,
+              .module_index = 0,
+              .padding2 = {0, 0},
+              .data_crc = 0,
+              .reloc_crc = 0,
+          },
+      .flags = 0,
+      .module_sym_stream = (u16)dwd->module_sym_stream,
+      .sym_byte_size = dwd->module_symbols_byte_size,
+      .c11_byte_size = 0,
+      .c13_byte_size = dwd->module_c13_byte_size,
+      .source_file_count = (u16)dwd->num_source_files,
+      .padding = {0, 0},
+      .unused2 = 0,
+      .source_file_name_index = 0,
+      .pdb_file_path_name_index = 0,
   };
-  memcpy(cur, seccontrib, sizeof(seccontrib));
-  dsh->section_contribution_size = sizeof(seccontrib);
-#else
-  // Section Contribution Substream
-  u32* section_contrib = (u32*)cur;
-  *section_contrib = 0xeffe0000 + 19970605; /* Ver60 */
-  dsh->section_contribution_size = 4;
-  // SectionContribEntry* sce2 = (SectionContribEntry*)(section_contrib + 1);
-  // memcpy(sce2, sce, sizeof(SectionContribEntry));
-#endif
-  cur += dsh->section_contribution_size;
+  SW_BLOCK(&mod, sizeof(mod));
+  // Intentionally twice for two index fields.
+  SW_BLOCK(synthetic_obj_name, sizeof(synthetic_obj_name));
+  SW_BLOCK(synthetic_obj_name, sizeof(synthetic_obj_name));
+  SW_ALIGN(4);
+  SW_WRITE_DELTA_FIXUP(dwd->fixup_mod_info_size, block_start);
+}
 
-#if 0
-  // Section Map Substream
-  unsigned char smss[] = {
-  0x02, 0x00,  // Count
-  0x02, 0x00,  // LogCount
+static void write_dbi_stream_section_contribution(DbpContext* ctx,
+                                                  StreamData* stream,
+                                                  DbiWriteData* dwd) {
+  SwDelta block_start = SW_CAPTURE_DELTA_START();
 
-  0x0d, 0x01, 0x00, 0x00,
-  0x00, 0x00, 0x01, 0x00,
-  0xff, 0xff, 0xff, 0xff,
-  0x00, 0x00, 0x00, 0x00,
-  0x22, 0x00, 0x00, 0x00,
-
-  0x09, 0x01, 0x00, 0x00,
-  0x00, 0x00, 0x02, 0x00,
-  0xff, 0xff, 0xff, 0xff,
-  0x00, 0x00, 0x00, 0x00,
-  0x60, 0x00, 0x00, 0x00,
-
-#if 0
-  0x09, 0x01, 0x00, 0x00,
-  0x00, 0x00, 0x03, 0x00,
-  0xff, 0xff, 0xff, 0xff,
-  0x00, 0x00, 0x00, 0x00,
-  0x0c, 0x00, 0x00, 0x00,
-
-  0x08, 0x02, 0x00, 0x00,
-  0x00, 0x00, 0x04, 0x00,
-  0xff, 0xff, 0xff, 0xff,
-  0x00, 0x00, 0x00, 0x00,
-  0xff, 0xff, 0xff, 0xff,
-#endif
+  // We only write a single section, one big for .text.
+  SW_U32(0xf12eba2d);  // Ver60
+  SectionContribEntry text_section = {
+    .section = 1,
+    .padding1 = {0,0},
+    .offset = 0,
+    .size = (i32)ctx->image_size,
+    .characteristics = IMAGE_SCN_CNT_CODE | IMAGE_SCN_ALIGN_16BYTES | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ,
+    .module_index = 0,
+    .padding2 = {0,0},
+    .data_crc = 0,
+    .reloc_crc = 0,
   };
-  memcpy(cur, smss, sizeof(smss));
-  dsh->SectionMapSize = sizeof(smss);
-#else
-  // XXX THIS! IS THE MAIN THING THAT WAS MISSING TO GET LINES WORKING
-  // OTHERWISE ALL FUNCTIONS ARE MISSING RVAS.
+  SW_BLOCK(&text_section, sizeof(text_section));
+  SW_WRITE_DELTA_FIXUP(dwd->fixup_section_contribution_size, block_start);
+}
+
+static void write_dbi_stream_section_map(DbpContext* ctx, StreamData* stream, DbiWriteData* dwd) {
+  // This pretends to look sensible, but it doesn't make a lot of sense to me at
+  // the moment. A single SectionMapEntry for just .text that maps causes all
+  // functions to not have an RVA, and so line numbers don't get found. (Don't)
+  // ask me how many hours of trial-and-error that took to figure out!
   //
-  // In particular the second one which makes no sense because it's not supposed
-  // to be the text segment. llvm doesn't seem to have any more info on these
-  // other than they're required, and somehow duplicate coff sections elsewhere.
-  SectionMapHeader* smh = (SectionMapHeader*)cur;
-  smh->count = 2;
-  smh->log_count = 2;
-  SectionMapEntry* sme = (SectionMapEntry*)(smh + 1);
-  sme[0].flags = SMEF_Read | SMEF_Execute | SMEF_AddressIs32Bit | SMEF_IsSelector;
-  sme[0].ovl = 0;
-  sme[0].group = 0;
-  sme[0].frame = 1;
-  sme[0].section_name = 0xffff;
-  sme[0].class_name = 0xffff;
-  sme[0].offset = 0;
-  sme[0].section_length = 0x22;
-  sme[1].flags = SMEF_Read | SMEF_AddressIs32Bit;
-  sme[1].ovl = 0;
-  sme[1].group = 0;
-  sme[1].frame = 2;
-  sme[1].section_name = 0xffff;
-  sme[1].class_name = 0xffff;
-  sme[1].offset = 0;
-  sme[1].section_length = 0x22;
-  dsh->section_map_size = sizeof(SectionMapHeader) + sizeof(SectionMapEntry) * 2;
-#endif
+  // Making a second section seems to make it work. We make it .rdata and one
+  // page large, which matches the fake dll that we write later.
 
-  cur += dsh->section_map_size;
+  SwDelta block_start = SW_CAPTURE_DELTA_START();
 
-#if 0
-  unsigned char file_info_ss[] = {
-  // File Info Substream TBD
-  0x02, 0x00,  // NumModules
-  0x01, 0x00,  // NumSourceFiles
-  0x00, 0x00,  // ModIndices[0]
-  0x01, 0x00,  // ModIndices[1]
-  0x01, 0x00,  // ModFileCounts[0]
-  0x00, 0x00,  // ModFileCounts[1]
-  0x00, 0x00, 0x00, 0x00, // FileNameOffsets[0]
+  SectionMapHeader header = {.count = 2, .log_count = 2};
+  SW_BLOCK(&header, sizeof(header));
 
-  0x63, 0x3a, 0x5c, 0x73, 0x72, 0x63, 0x5c, 0x64, 0x79, 0x69, 0x62, 0x69,
-  0x63, 0x63, 0x5c, 0x73, 0x63, 0x72, 0x61, 0x74, 0x63, 0x68, 0x5c, 0x70,
-  0x64, 0x62, 0x5c, 0x78, 0x2e, 0x63, 0x00, // NamesBuffer[0][0]
-
-  0x00,  // align to 4?
+  SectionMapEntry text = {
+      .flags = SMEF_Read | SMEF_Execute | SMEF_AddressIs32Bit | SMEF_IsSelector,
+      .ovl = 0,               // ?
+      .group = 0,             // ?
+      .frame = 1,             // 1-based section number
+      .section_name = 0xfff,  // ?
+      .class_name = 0xffff,   // ?
+      .offset = 0,            // ?
+      .section_length = (u32)ctx->image_size,
   };
-  memcpy(cur, file_info_ss, sizeof(file_info_ss));
-  dsh->SourceInfoSize = sizeof(file_info_ss);
-#else
+  SW_BLOCK(&text, sizeof(text));
+
+  SectionMapEntry rdata = {
+      .flags = SMEF_Read | SMEF_AddressIs32Bit,
+      .ovl = 0,               // ?
+      .group = 0,             // ?
+      .frame = 2,             // 1-based section number
+      .section_name = 0xfff,  // ?
+      .class_name = 0xffff,   // ?
+      .offset = 0,            // ?
+      .section_length = 4096,
+  };
+  SW_BLOCK(&rdata, sizeof(rdata));
+
+  SW_WRITE_DELTA_FIXUP(dwd->fixup_section_map_size, block_start);
+}
+
+
+static void write_dbi_stream_file_info(DbpContext* ctx, StreamData* stream, DbiWriteData* dwd) {
+  SwDelta block_start = SW_CAPTURE_DELTA_START();
+
   // File Info Substream
-  FileInfoSubstreamHeader* fish = (FileInfoSubstreamHeader*)cur;
-  fish->num_modules = 1;
-  fish->num_source_files = 1;
-  u16* file_info = (u16*)(fish + 1);
-  *file_info++ = 0;  // mod_indices[0]
-  *file_info++ = 1;  // mod_file_counts[0]
-  u32* file_name_offsets = (u32*)file_info;
-  *file_name_offsets++ = 0;
-  char* filename_buf = (char*)file_name_offsets;
+  FileInfoSubstreamHeader fish = {
+      .num_modules = 1,        // This is always 1 for us.
+      .num_source_files = 0,  // This is unused.
+  };
+  SW_BLOCK(&fish, sizeof(fish));
+
+  SW_U16(0);  // [mod_indices], unused.
+  SW_U16(1);  // [num_source_files] HACK
+  SW_U32(0);  // offset to file 0  (file_name_offsets)
+  // names_buffer
   static const char source_name[] = "c:\\src\\dyibicc\\src\\dyn_basic_pdb_example.c";
-  memcpy(filename_buf, source_name, sizeof(source_name));
-  filename_buf += sizeof(source_name);
-  dsh->source_info_size = (i32)align_to((u32)(filename_buf - (char*)fish), 4);
-#endif
+  SW_BLOCK(source_name, sizeof(source_name));
 
-  cur += dsh->source_info_size;
+  SW_ALIGN(4);
+  SW_WRITE_DELTA_FIXUP(dwd->fixup_source_info_size, block_start);
+}
 
-  // No Type Server Map or MFC Type Server Map
+static void write_dbi_stream_ec_substream(DbpContext* ctx, StreamData* stream, DbiWriteData* dwd) {
+  SwDelta block_start = SW_CAPTURE_DELTA_START();
 
   // llvm-pdbutil tries to load a pdb name from the ECSubstream. Emit a single
   // nul byte, as we only refer to index 0. (This is an NMT if it needs to be
@@ -1198,49 +974,41 @@ static int write_dbi_stream(DbpContext* ctx, StreamData* stream, DbiWriteData* d
       0x00, 0x00, 0x00, 0x00,  // Number of names in hash table
                                // Doesn't include initial nul which is always in the table.
   };
-  memcpy(cur, empty_nmt, sizeof(empty_nmt));
-  dsh->ec_substream_size = sizeof(empty_nmt);
-  cur += dsh->ec_substream_size;
+  SW_BLOCK(&empty_nmt, sizeof(empty_nmt));
 
-  // TODO, use SW_
+  // I don't think this one's supposed to be aligned /shruggie.
+
+  SW_WRITE_DELTA_FIXUP(dwd->fixup_ec_substream_size, block_start);
+}
+
+static void write_dbi_stream_optional_dbg_header(DbpContext* ctx, StreamData* stream, DbiWriteData* dwd) {
+  SwDelta block_start = SW_CAPTURE_DELTA_START();
+
   // Index 5 points to the section header stream, which is theoretically
   // optional, but llvm-pdbutil doesn't like it if it's not there, so I'm
   // guessing that various microsoft things don't either. The stream it points
   // at is empty, but that seems to be sufficient.
-  unsigned char dbg_hdr[] = {// Optional Dbg Header Stream
-                             0xff,
-                             0xff,
-                             0xff,
-                             0xff,
-                             0xff,
-                             0xff,
-                             0xff,
-                             0xff,
-                             0xff,
-                             0xff,
-                             (unsigned char)dwd->section_header_stream,
-                             0,  // Section Header
-                             0xff,
-                             0xff,
-                             0xff,
-                             0xff,
-                             0xff,
-                             0xff,
-                             0xff,
-                             0xff,
-                             0xff,
-                             0xff};
-  memcpy(cur, dbg_hdr, sizeof(dbg_hdr));
-  dsh->optional_dbg_header_size = sizeof(dbg_hdr);
-  cur += dsh->optional_dbg_header_size;
+  for (int i = 0; i < 5; ++i)
+    SW_U16(0xffff);
+  SW_U16((u16)dwd->section_header_stream);
+  for (int i = 0; i < 5; ++i)
+    SW_U16(0xffff);
 
-  stream->data_length = (u32)(cur - start);
+  SW_WRITE_DELTA_FIXUP(dwd->fixup_optional_dbg_header_size, block_start);
+}
+
+static int write_dbi_stream(DbpContext* ctx, StreamData* stream, DbiWriteData* dwd) {
+  write_dbi_stream_header(ctx, stream, dwd);
+  write_dbi_stream_modinfo(ctx, stream, dwd);
+  write_dbi_stream_section_contribution(ctx, stream, dwd);
+  write_dbi_stream_section_map(ctx, stream, dwd);
+  write_dbi_stream_file_info(ctx, stream, dwd);
+  // No type server map.
+  // No MFC type server map.
+  write_dbi_stream_ec_substream(ctx, stream, dwd);
+  write_dbi_stream_optional_dbg_header(ctx, stream, dwd);
+
   return 1;
-#else
-  memcpy(start, str3_raw, str3_raw_len);
-  stream->data_length = str3_raw_len;
-  return 1;
-#endif
 }
 
 #define IPHR_HASH 4096
@@ -1439,14 +1207,6 @@ typedef struct CV_DebugSubsectionHeader {
   u32 kind;    // CV_DebugSubsectionKind enum
   u32 length;  // includes data after, but not this struct.
 } CV_DebugSubsectionHeader;
-
-typedef char* SwFixup;
-#define SW_CAPTURE_FIXUP(offset) (stream->cur_write + offset)
-
-#define SW_WRITE_FIXUP_FOR_LOCATION_U32(swfixup) \
-  do {                                           \
-    *(u32*)swfixup = stream->data_length;        \
-  } while (0)
 
 #define SW_CV_SYM_TRAILING_NAME(sym, name)                                                    \
   do {                                                                                        \
@@ -1793,7 +1553,7 @@ static ModuleData write_module_stream(DbpContext* ctx) {
       .seg = 1,
       .flags = {0},
   };
-  SwFixup end_fixup = SW_CAPTURE_FIXUP(offsetof(CV_S_GPROC32, end));
+  SwFixup end_fixup = SW_CAPTURE_FIXUP(CV_S_GPROC32, end);
   SW_CV_SYM_TRAILING_NAME(gproc32, "Func");
 
   CV_S_NODATA end = {.record_type = 0x0006};
