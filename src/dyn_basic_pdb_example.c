@@ -21,6 +21,9 @@ static unsigned char test_data[] = {
 // clang-format on
 
 #ifdef _DEBUG
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wreserved-macro-identifier"
+#endif
 #define _CRTDBG_MAP_ALLOC
 #include <crtdbg.h>
 #endif
@@ -28,14 +31,16 @@ static unsigned char test_data[] = {
 #define DYN_BASIC_PDB_IMPLEMENTATION
 #include "dyn_basic_pdb.h"
 
-#include <windows.h>
+#include <Windows.h>
 #include <stdio.h>
 
-#define CHECK(x)                                                          \
-  if (!(x)) {                                                             \
-    fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__, __LINE__, #x); \
-    abort();                                                              \
-  }
+#define CHECK(x)                                                            \
+  do {                                                                      \
+    if (!(x)) {                                                             \
+      fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__, __LINE__, #x); \
+      abort();                                                              \
+    }                                                                       \
+  } while (0)
 
 int main(int argc, char** argv) {
   // "JIT" some code. The source code is lines 5-7 in this file, and the

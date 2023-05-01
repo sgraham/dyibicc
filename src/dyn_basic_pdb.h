@@ -41,7 +41,7 @@ int dbp_add_line_mapping(DbpSourceFile* src,
                          unsigned int end_addr);
 int dbp_finish(DbpContext* ctx);
 
-// Stored in CodeView records, default is "dyn_basic_pdb writer 1.0.0.0".
+// This is stored in CodeView records, default is "dyn_basic_pdb writer 1.0.0.0" if not set.
 void dbp_set_compiler_information(DbpContext* ctx, const char* compiler_version_string,
     unsigned short major, unsigned short minor, unsigned short build, unsigned short qfe);
 
@@ -54,12 +54,20 @@ void dbp_set_compiler_information(DbpContext* ctx, const char* compiler_version_
 #ifdef DYN_BASIC_PDB_IMPLEMENTATION
 
 #define _CRT_SECURE_NO_WARNINGS
+#pragma warning(disable : 4201)  // non-standard extension: nameless struct/union
 #pragma warning(disable : 4668)  // 'X' is not defined as a preprocessor macro, replacing with '0'
                                  // for '#if/#elif'
 #pragma warning(disable : 4820)  // 'X' bytes padding added after data member 'Y'
 #pragma warning(disable : 5045)  // Compiler will insert Spectre mitigation for memory load if
                                  // /Qspectre switch specified
 #pragma comment(lib, "rpcrt4")
+
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wcast-align"
+#pragma clang diagnostic ignored "-Wdeclaration-after-statement"
+#pragma clang diagnostic ignored "-Wimplicit-fallthrough"
+#pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
+#endif
 
 #include <assert.h>
 #include <malloc.h>
@@ -68,12 +76,12 @@ void dbp_set_compiler_information(DbpContext* ctx, const char* compiler_version_
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <windows.h>
+#include <Windows.h>
 
 typedef unsigned int u32;
 typedef signed int i32;
 typedef unsigned short u16;
-typedef unsigned __int64 u64;
+typedef unsigned long long u64;
 
 typedef struct StreamData StreamData;
 typedef struct SuperBlock SuperBlock;
@@ -210,17 +218,21 @@ static void free_ctx(DbpContext* ctx) {
 
 static const char big_hdr_magic[0x1e] = "Microsoft C/C++ MSF 7.00\r\n\x1a\x44\x53";
 
-#define ENSURE(x, want)                                                             \
-  if (want != x) {                                                                  \
-    fprintf(stderr, "%s:%d: failed %s wasn't %s\n", __FILE__, __LINE__, #x, #want); \
-    return 0;                                                                       \
-  }
+#define ENSURE(x, want)                                                               \
+  do {                                                                                \
+    if (want != x) {                                                                  \
+      fprintf(stderr, "%s:%d: failed %s wasn't %s\n", __FILE__, __LINE__, #x, #want); \
+      return 0;                                                                       \
+    }                                                                                 \
+  } while (0)
 
-#define ENSURE_NE(x, bad)                                                       \
-  if (bad == x) {                                                               \
-    fprintf(stderr, "%s:%d: failed %s was %s\n", __FILE__, __LINE__, #x, #bad); \
-    return 0;                                                                   \
-  }
+#define ENSURE_NE(x, bad)                                                         \
+  do {                                                                            \
+    if (bad == x) {                                                               \
+      fprintf(stderr, "%s:%d: failed %s was %s\n", __FILE__, __LINE__, #x, #bad); \
+      return 0;                                                                   \
+    }                                                                             \
+  } while (0)
 
 struct SuperBlock {
   char file_magic[0x1e];
@@ -485,7 +497,7 @@ static u32 calc_hash(char* pb, size_t cb) {
 
   // hash possible odd byte
   if (cb & 1) {
-    ulHash ^= *(pb++);
+    ulHash ^= (u32)*(pb++);
   }
 
   const u32 toLowerMask = 0x20202020;
@@ -511,14 +523,14 @@ typedef struct NmtAlikeHashTable {
 
 #define NMT_INVALID (~0u)
 
-NmtAlikeHashTable* nmtalike_create(void) {
+static NmtAlikeHashTable* nmtalike_create(void) {
   NmtAlikeHashTable* ret = calloc(1, sizeof(NmtAlikeHashTable));
   PUSH_BACK(ret->strings, '\0');
   PUSH_BACK(ret->hash, NMT_INVALID);
   return ret;
 }
 
-static char* _nmtalike_string_for_name_index(NmtAlikeHashTable* nmt, u32 name_index) {
+static char* nmtalike__string_for_name_index(NmtAlikeHashTable* nmt, u32 name_index) {
   if (name_index >= nmt->strings_len)
     return NULL;
   return &nmt->strings[name_index];
@@ -527,7 +539,7 @@ static char* _nmtalike_string_for_name_index(NmtAlikeHashTable* nmt, u32 name_in
 // If |str| already exists, return 1 with *out_name_index set to its name_index.
 // Else, return 0 and *out_slot is where a new name_index should be stored for
 // |str|.
-static void _nmtalike_find(NmtAlikeHashTable* nmt, char* str, u32* out_name_index, u32* out_slot) {
+static void nmtalike__find(NmtAlikeHashTable* nmt, char* str, u32* out_name_index, u32* out_slot) {
   assert(nmt->strings_len > 0);
   assert(nmt->hash_len > 0);
 
@@ -539,7 +551,7 @@ static void _nmtalike_find(NmtAlikeHashTable* nmt, char* str, u32* out_name_inde
     if (name_index == NMT_INVALID)
       break;
 
-    if (strcmp(str, _nmtalike_string_for_name_index(nmt, name_index)) == 0)
+    if (strcmp(str, nmtalike__string_for_name_index(nmt, name_index)) == 0)
       break;
 
     ++slot;
@@ -552,7 +564,7 @@ static void _nmtalike_find(NmtAlikeHashTable* nmt, char* str, u32* out_name_inde
 }
 
 // Returns new name index.
-static u32 _nmtalike_append_to_string_buffer(NmtAlikeHashTable* nmt, char* str) {
+static u32 nmtalike__append_to_string_buffer(NmtAlikeHashTable* nmt, char* str) {
   size_t len = strlen(str) + 1;
 
   while (nmt->strings_cap < nmt->strings_len + len) {
@@ -566,7 +578,7 @@ static u32 _nmtalike_append_to_string_buffer(NmtAlikeHashTable* nmt, char* str) 
   return (u32)(start - nmt->strings);
 }
 
-static void _nmtalike_rehash(NmtAlikeHashTable* nmt, u32 new_count) {
+static void nmtalike__rehash(NmtAlikeHashTable* nmt, u32 new_count) {
   size_t new_hash_byte_len = sizeof(u32) * new_count;
   u32* new_hash = malloc(new_hash_byte_len);
   size_t new_hash_len = new_count;
@@ -577,7 +589,7 @@ static void _nmtalike_rehash(NmtAlikeHashTable* nmt, u32 new_count) {
   for (u32 i = 0; i < nmt->hash_len; ++i) {
     u32 name_index = nmt->hash[i];
     if (name_index != NMT_INVALID) {
-      char* str = _nmtalike_string_for_name_index(nmt, name_index);
+      char* str = nmtalike__string_for_name_index(nmt, name_index);
       u32 j = calc_hash(str, strlen(str)) % new_count;
       for (;;) {
         if (new_hash[j] == NMT_INVALID)
@@ -596,39 +608,27 @@ static void _nmtalike_rehash(NmtAlikeHashTable* nmt, u32 new_count) {
   nmt->hash_cap = new_hash_cap;
 }
 
-static void _nmtalike_grow(NmtAlikeHashTable* nmt) {
+static void nmtalike__grow(NmtAlikeHashTable* nmt) {
   ++nmt->num_names;
 
   // These growth factors have to match so that the buckets line up as expected
   // when serialized.
   if (nmt->hash_len * 3 / 4 < nmt->num_names) {
-    _nmtalike_rehash(nmt, (u32)(nmt->hash_len * 3/2 + 1));
+    nmtalike__rehash(nmt, (u32)(nmt->hash_len * 3/2 + 1));
   }
 }
 
 static u32 nmtalike_add_string(NmtAlikeHashTable* nmt, char* str) {
   u32 name_index = NMT_INVALID;
   u32 insert_location;
-  _nmtalike_find(nmt, str, &name_index, &insert_location);
+  nmtalike__find(nmt, str, &name_index, &insert_location);
   if (name_index != NMT_INVALID)
     return name_index;
 
-  name_index = _nmtalike_append_to_string_buffer(nmt, str);
+  name_index = nmtalike__append_to_string_buffer(nmt, str);
   nmt->hash[insert_location] = name_index;
-  _nmtalike_grow(nmt);
+  nmtalike__grow(nmt);
   return name_index;
-}
-
-static u32 nmtalike_name_index_for_string(NmtAlikeHashTable* nmt, char* str) {
-  (void)nmt;
-  (void)str;
-  return NMT_INVALID;
-}
-
-static char* nmtalike_string_for_name_index(NmtAlikeHashTable* nmt, u32 name_index) {
-  (void)nmt;
-  (void)name_index;
-  return NULL;
 }
 
 static int write_names_stream(DbpContext* ctx, StreamData* stream) {
@@ -874,8 +874,8 @@ static int write_dbi_stream(DbpContext* ctx, StreamData* stream, DbiWriteData* d
   sce->section = 1;
   sce->padding1[0] = 0;
   sce->padding1[1] = 0;
-  sce->offset = 0x1000;
-  sce->size = 22;  //(i32)ctx->image_size;
+  sce->offset = 0;
+  sce->size = (i32)ctx->image_size;
   sce->characteristics =
       IMAGE_SCN_CNT_CODE | IMAGE_SCN_ALIGN_16BYTES | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ;
   sce->module_index = 0;
@@ -902,7 +902,7 @@ static int write_dbi_stream(DbpContext* ctx, StreamData* stream, DbiWriteData* d
   memcpy(names, synthetic_obj_name, sizeof(synthetic_obj_name));
   names += sizeof(synthetic_obj_name);
 
-  dsh->mod_info_size = align_to((u32)(names - cur), 4);
+  dsh->mod_info_size = (i32)align_to((u32)(names - cur), 4);
 #endif
   cur += dsh->mod_info_size;
 
@@ -1178,7 +1178,7 @@ static int write_dbi_stream(DbpContext* ctx, StreamData* stream, DbiWriteData* d
   static const char source_name[] = "c:\\src\\dyibicc\\src\\dyn_basic_pdb_example.c";
   memcpy(filename_buf, source_name, sizeof(source_name));
   filename_buf += sizeof(source_name);
-  dsh->source_info_size = align_to((u32)(filename_buf - (char*)fish), 4);
+  dsh->source_info_size = (i32)align_to((u32)(filename_buf - (char*)fish), 4);
 #endif
 
   cur += dsh->source_info_size;
@@ -1350,14 +1350,19 @@ typedef struct CV_S_COMPILE3 {
 } CV_S_COMPILE3;
 
 typedef struct CV_S_PROCFLAGS {
-  unsigned char CV_PFLAG_NOFPO : 1;       // frame pointer present
-  unsigned char CV_PFLAG_INT : 1;         // interrupt return
-  unsigned char CV_PFLAG_FAR : 1;         // far return
-  unsigned char CV_PFLAG_NEVER : 1;       // function does not return
-  unsigned char CV_PFLAG_NOTREACHED : 1;  // label isn't fallen into
-  unsigned char CV_PFLAG_CUST_CALL : 1;   // custom calling convention
-  unsigned char CV_PFLAG_NOINLINE : 1;    // function marked as noinline
-  unsigned char CV_PFLAG_OPTDBGINFO : 1;  // function has debug information for optimized code
+  union {
+    unsigned char all;
+    struct {
+      unsigned char CV_PFLAG_NOFPO : 1;       // frame pointer present
+      unsigned char CV_PFLAG_INT : 1;         // interrupt return
+      unsigned char CV_PFLAG_FAR : 1;         // far return
+      unsigned char CV_PFLAG_NEVER : 1;       // function does not return
+      unsigned char CV_PFLAG_NOTREACHED : 1;  // label isn't fallen into
+      unsigned char CV_PFLAG_CUST_CALL : 1;   // custom calling convention
+      unsigned char CV_PFLAG_NOINLINE : 1;    // function marked as noinline
+      unsigned char CV_PFLAG_OPTDBGINFO : 1;  // function has debug information for optimized code
+    };
+  };
 } CV_S_PROCFLAGS;
 
 typedef struct CV_S_GPROC32 {
@@ -1478,7 +1483,7 @@ static void gsi_builder_add_public(DbpContext* ctx,
 
   CV_S_PUB32 pub = {
       .record_type = 0x110e,
-      .flags = flags,
+      .flags = (u32)flags,
       .offset_into_codeseg = offset_into_codeseg,
       .segment = 1  // segment is always 1 for us
   };
@@ -1504,7 +1509,7 @@ static void gsi_builder_add_procref(DbpContext* ctx,
 }
 
 static int is_ascii_string(char* s) {
-  for (char* p = s; *p; ++p) {
+  for (unsigned char* p = (unsigned char*)s; *p; ++p) {
     if (*p >= 0x80)
       return 0;
   }
@@ -1529,14 +1534,14 @@ static int gsi_record_cmp(char* s1, char* s2) {
 }
 
 // TODO: use a better sort impl
-static HashSym* _cur_hash_bucket_sort_syms = NULL;
+static HashSym* g_cur_hash_bucket_sort_syms = NULL;
 
 // See caseInsensitiveComparePchPchCchCch() in microsoft-pdb gsi.cpp.
 static int gsi_bucket_cmp(const void* a, const void* b) {
-  HRFile* hra = (HRFile*)a;
-  HRFile* hrb = (HRFile*)b;
-  HashSym* left = &_cur_hash_bucket_sort_syms[hra->off];
-  HashSym* right = &_cur_hash_bucket_sort_syms[hrb->off];
+  const HRFile* hra = (const HRFile*)a;
+  const HRFile* hrb = (const HRFile*)b;
+  HashSym* left = &g_cur_hash_bucket_sort_syms[hra->off];
+  HashSym* right = &g_cur_hash_bucket_sort_syms[hrb->off];
   assert(left->hash_bucket == right->hash_bucket);
   int cmp = gsi_record_cmp(left->name, right->name);
   if (cmp != 0) {
@@ -1581,7 +1586,7 @@ static void gsi_hash_builder_finish(GsiHashBuilder* hb) {
     hb->hash_records[hash_idx].cref = 1;
   }
 
-  _cur_hash_bucket_sort_syms = hb->sym;
+  g_cur_hash_bucket_sort_syms = hb->sym;
   // Sort each *bucket* (approximately) by the memcmp of the symbol's name. This
   // has to match microsoft-pdb, and it's bonkers. LLVM's implementation was
   // more helpful than microsoft-pdb's gsi.cpp for this one, and these hashes
@@ -1599,7 +1604,7 @@ static void gsi_hash_builder_finish(GsiHashBuilder* hb) {
       }
     }
   }
-  _cur_hash_bucket_sort_syms = NULL;
+  g_cur_hash_bucket_sort_syms = NULL;
 
   // Update the hash bitmap for each used bucket.
   for (u32 i = 0; i < sizeof(hb->hash_bitmap) / sizeof(hb->hash_bitmap[0]); ++i) {
@@ -1613,7 +1618,7 @@ static void gsi_hash_builder_finish(GsiHashBuilder* hb) {
 
       // Calculate what the offset of the first hash record int he chain would
       // be if it contained 32bit pointers: HROffsetCalc in microsoft-pdb gsi.h.
-      int size_of_hr_offset_calc = 12;
+      u32 size_of_hr_offset_calc = 12;
       u32 chain_start_off = bucket_starts[bucket_idx] * size_of_hr_offset_calc;
       PUSH_BACK(hb->hash_buckets, chain_start_off);
     }
@@ -1632,12 +1637,12 @@ static void gsi_hash_builder_write(DbpContext* ctx, GsiHashBuilder* hb, StreamDa
   SW_BLOCK(hb->hash_buckets, hb->hash_buckets_len * sizeof(u32));
 }
 
-static HashSym* _cur_addr_map_sort_syms = NULL;
+static HashSym* g_cur_addr_map_sort_syms = NULL;
 static int addr_map_cmp(const void* a, const void* b) {
-  u32* left_idx = (u32*)a;
-  u32* right_idx = (u32*)b;
-  HashSym* left = &_cur_addr_map_sort_syms[*left_idx];
-  HashSym* right = &_cur_addr_map_sort_syms[*right_idx];
+  const u32* left_idx = (const u32*)a;
+  const u32* right_idx = (const u32*)b;
+  HashSym* left = &g_cur_addr_map_sort_syms[*left_idx];
+  HashSym* right = &g_cur_addr_map_sort_syms[*right_idx];
   // Compare segment first, if we had one, but it's always 1.
   if (left->offset != right->offset)
     return left->offset < right->offset;
@@ -1669,9 +1674,9 @@ static void gsi_write_publics_stream(DbpContext* ctx, GsiHashBuilder* hb, Stream
   u32* addr_map = _alloca(sizeof(u32) * hb->sym_len);
   for (u32 i = 0; i < hb->sym_len; ++i)
     addr_map[i] = i;
-  _cur_addr_map_sort_syms = hb->sym;
+  g_cur_addr_map_sort_syms = hb->sym;
   qsort(addr_map, hb->sym_len, sizeof(u32), addr_map_cmp);
-  _cur_addr_map_sort_syms = NULL;
+  g_cur_addr_map_sort_syms = NULL;
 
   // Rewrite public symbol indices into symbol offsets.
   for (size_t i = 0; i < hb->sym_len; ++i) {
@@ -1786,7 +1791,7 @@ static ModuleData write_module_stream(DbpContext* ctx) {
       .type_index = 0x1001,  // hrm, first UDT, undefined but we're not writing types.
       .offset = 0,           /* address of proc */
       .seg = 1,
-      .flags = 0,
+      .flags = {0},
   };
   SwFixup end_fixup = SW_CAPTURE_FIXUP(offsetof(CV_S_GPROC32, end));
   SW_CV_SYM_TRAILING_NAME(gproc32, "Func");
@@ -1894,7 +1899,7 @@ static int write_directory(DbpContext* ctx) {
 
   // And finally, update the super block with the number of bytes in the
   // directory.
-  ctx->superblock->num_directory_bytes = (u32)((dir - start) * sizeof(u32));
+  ctx->superblock->num_directory_bytes = (u32)((u32)(dir - start) * sizeof(u32));
 
   // This can't easily use StreamData because it's the directory of streams. It
   // would take a larger pdb that we expect to be writing here to overflow the
@@ -1943,7 +1948,7 @@ static int write_stub_dll(DbpContext* ctx) {
     return 0;
   }
   DWORD timedate = (DWORD)time(NULL);
-  static char dos_stub_and_pe_magic[172] = {
+  static unsigned char dos_stub_and_pe_magic[172] = {
       0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0xff, 0xff, 0x00,
       0x00, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,
       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -2084,7 +2089,7 @@ static int write_stub_dll(DbpContext* ctx) {
     fwrite(&zero, sizeof(zero), 1, f);
   }
 
-  unsigned long long rdata_start = ftell(f);
+  long long rdata_start = ftell(f);
 
   // Now the .rdata data which points to the pdb.
   IMAGE_DEBUG_DIRECTORY debug_dir = {
@@ -2095,7 +2100,7 @@ static int write_stub_dll(DbpContext* ctx) {
       .Type = IMAGE_DEBUG_TYPE_CODEVIEW,
       .SizeOfData = rsds_len,
       .AddressOfRawData = 0x201c,
-      .PointerToRawData = (DWORD)(rdata_start + sizeof(IMAGE_DEBUG_DIRECTORY)),
+      .PointerToRawData = (DWORD)(rdata_start + (long)sizeof(IMAGE_DEBUG_DIRECTORY)),
   };
   fwrite(&debug_dir, sizeof(debug_dir), 1, f);
   fwrite(&rsds_header, sizeof(rsds_header), 1, f);
