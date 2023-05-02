@@ -334,7 +334,6 @@ struct StreamData {
 
   u32 data_length;
 
-  char* cur_block_ptr;
   char* cur_write;
 
   u32* blocks;
@@ -343,19 +342,21 @@ struct StreamData {
 };
 
 static void stream_write_block(DbpContext* ctx, StreamData* stream, const void* data, size_t len) {
-  if (!stream->cur_block_ptr) {
+  if (!stream->cur_write) {
     u32 block_id = alloc_block(ctx);
     PUSH_BACK(stream->blocks, block_id);
-    stream->cur_write = stream->cur_block_ptr = get_block_ptr(ctx, block_id);
+    stream->cur_write = get_block_ptr(ctx, block_id);
   }
 
-  memcpy(stream->cur_write, data, len);
-  stream->cur_write += len;
-
-  stream->data_length += (u32)len;
-
-  // TODO: XXX useful things
-  assert(stream->data_length < BLOCK_SIZE && "overflowed page");
+  u32 cur_block_fill = stream->data_length % BLOCK_SIZE;
+  u32 max_remaining_this_block = BLOCK_SIZE - cur_block_fill;
+  if (max_remaining_this_block > len) {
+    memcpy(stream->cur_write, data, len);
+    stream->cur_write += len;
+    stream->data_length += (u32)len;
+  } else {
+    assert(0 && "TODO");
+  }
 }
 
 static void stream_ensure_init(DbpContext* ctx, StreamData* stream) {
@@ -2006,16 +2007,16 @@ static int write_stub_dll(DbpContext* ctx, DbpExceptionTables* exception_tables)
     // .pdata header
     //
     IMAGE_SECTION_HEADER pdata = {
-      .Name = ".pdata\0",
-      .Misc = {.VirtualSize = (DWORD)pdata_length},
-      .VirtualAddress = pdata_virtual_start,
-      .SizeOfRawData = pdata_length_file_aligned, 
-      .PointerToRawData = 0x800,  // Aligned address in file.
-      .PointerToRelocations = 0,
-      .PointerToLinenumbers = 0,
-      .NumberOfRelocations = 0,
-      .NumberOfLinenumbers = 0,
-      .Characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ,
+        .Name = ".pdata\0",
+        .Misc = {.VirtualSize = (DWORD)pdata_length},
+        .VirtualAddress = pdata_virtual_start,
+        .SizeOfRawData = pdata_length_file_aligned,
+        .PointerToRawData = 0x800,  // Aligned address in file.
+        .PointerToRelocations = 0,
+        .PointerToLinenumbers = 0,
+        .NumberOfRelocations = 0,
+        .NumberOfLinenumbers = 0,
+        .Characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ,
     };
     fwrite(&pdata, sizeof(pdata), 1, f);
 
@@ -2023,16 +2024,16 @@ static int write_stub_dll(DbpContext* ctx, DbpExceptionTables* exception_tables)
     // .xdata header
     //
     IMAGE_SECTION_HEADER xdata = {
-      .Name = ".xdata\0",
-      .Misc = {.VirtualSize = (DWORD)xdata_length},
-      .VirtualAddress = xdata_virtual_start,
-      .SizeOfRawData = xdata_length_file_aligned, 
-      .PointerToRawData = 0xa00,  // Aligned address in file.
-      .PointerToRelocations = 0,
-      .PointerToLinenumbers = 0,
-      .NumberOfRelocations = 0,
-      .NumberOfLinenumbers = 0,
-      .Characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ,
+        .Name = ".xdata\0",
+        .Misc = {.VirtualSize = (DWORD)xdata_length},
+        .VirtualAddress = xdata_virtual_start,
+        .SizeOfRawData = xdata_length_file_aligned,
+        .PointerToRawData = 0xa00,  // Aligned address in file.
+        .PointerToRelocations = 0,
+        .PointerToLinenumbers = 0,
+        .NumberOfRelocations = 0,
+        .NumberOfLinenumbers = 0,
+        .Characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ,
     };
     fwrite(&xdata, sizeof(xdata), 1, f);
   } else {
