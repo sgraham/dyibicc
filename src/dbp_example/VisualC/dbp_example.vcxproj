@@ -137,6 +137,10 @@
   <ItemGroup>
     <ClInclude Include="..\..\dyn_basic_pdb.h" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="..\entry.py" />
+    <None Include="..\helper.py" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
