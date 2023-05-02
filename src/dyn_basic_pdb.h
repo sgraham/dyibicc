@@ -348,14 +348,19 @@ static void stream_write_block(DbpContext* ctx, StreamData* stream, const void* 
     stream->cur_write = get_block_ptr(ctx, block_id);
   }
 
-  u32 cur_block_fill = stream->data_length % BLOCK_SIZE;
-  u32 max_remaining_this_block = BLOCK_SIZE - cur_block_fill;
-  if (max_remaining_this_block > len) {
+  u32 cur_block_filled = stream->data_length % BLOCK_SIZE;
+  u32 max_remaining_this_block = BLOCK_SIZE - cur_block_filled;
+  if (max_remaining_this_block >= len) {
     memcpy(stream->cur_write, data, len);
     stream->cur_write += len;
     stream->data_length += (u32)len;
   } else {
-    assert(0 && "TODO");
+    memcpy(stream->cur_write, data, max_remaining_this_block);
+    stream->cur_write += max_remaining_this_block;
+    stream->data_length += max_remaining_this_block;
+    stream->cur_write = NULL;
+    stream_write_block(ctx, stream, (char*)data + max_remaining_this_block,
+                       len - max_remaining_this_block);
   }
 }
 
