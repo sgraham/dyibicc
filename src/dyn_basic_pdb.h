@@ -12,17 +12,16 @@
 //
 // This implementation only outputs function symbols and line mappings, not full
 // type information, though it could be extended to do so with a bunch more
-// futzing around. It also doesn't (can't) output the .pdata/.xdata that for a
-// JIT you typically register with RtlAddFunctionTable(). You will get incorrect
-// stacks in VS until you do that.
+// futzing around.
 //
 // Only one module is supported (equivalent to one .obj file), because in my jit
 // implementation, all code is generated into a single code segment.
 //
 // Normally, a .pdb is referenced by another PE (exe/dll) or .dmp, and that's
 // how VS locates and decides to load the PDB. Because there's no PE in the case
-// of a JIT, in addition to writing a viable pdb, dbp_finish() also does some
-// goofy hacking to encourage the VS IDE to find and load the generated .pdb.
+// of a JIT, in addition to writing a viable pdb, dbp_ready_to_execute() also
+// does some goofy hacking to encourage the VS IDE to find and load the
+// generated .pdb.
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,15 +30,37 @@ extern "C" {
 #include <stddef.h>
 
 typedef struct DbpContext DbpContext;
-typedef struct DbpSourceFile DbpSourceFile;
+typedef struct DbpFunctionSymbol DbpFunctionSymbol;
+typedef struct DbpExceptionTables DbpExceptionTables;
 
-DbpContext* dbp_create(void* image_addr, size_t image_size, const char* output_pdb_name);
-DbpSourceFile* dbp_add_source_file(DbpContext* ctx, const char* name);
-int dbp_add_line_mapping(DbpSourceFile* src,
-                         unsigned int line_number,
-                         unsigned int begin_addr,
-                         unsigned int end_addr);
-int dbp_finish(DbpContext* ctx);
+DbpContext* dbp_create(size_t image_size, const char* output_pdb_name);
+
+void* dbp_get_image_base(DbpContext* dbp);
+
+DbpFunctionSymbol* dbp_add_function_symbol(DbpContext* ctx,
+                                           const char* name,
+                                           const char* filename,
+                                           unsigned int address,
+                                           unsigned int length);
+
+void dbp_add_line_mapping(DbpContext* ctx,
+                          DbpFunctionSymbol* fs,
+                          unsigned int address,
+                          unsigned int line);
+
+// Called when all line information has been written to generate and load the
+// .pdb.
+//
+// exception_tables can be NULL, but stack traces and exceptions will not work
+// correctly (see RtlAddFunctionTable() on MSDN for more information). If
+// provided, .pdata and UNWIND_INFO will be included in the synthetic DLL, and
+// will be equivalent to calling RtlAddFunctionTable(). However, when the
+// addresses for a dynamically provided table with RtlAddFunctionTable() overlap
+// with the address space for a DLL, the static information in the DLL takes
+// precedence and the dynamic information is ignored.
+int dbp_ready_to_execute(DbpContext* ctx, DbpExceptionTables* exception_tables);
+
+void dbp_free(DbpContext* ctx);
 
 // This is stored in CodeView records, default is "dyn_basic_pdb writer 1.0.0.0" if not set.
 void dbp_set_compiler_information(DbpContext* ctx,
@@ -48,6 +69,26 @@ void dbp_set_compiler_information(DbpContext* ctx,
                                   unsigned short minor,
                                   unsigned short build,
                                   unsigned short qfe);
+
+
+// Same as winnt.h RUNTIME_FUNCTION, we're just want to avoid including
+// windows.h in the interface header.
+typedef struct DbpRUNTIME_FUNCTION {
+  unsigned int begin_address;
+  unsigned int end_address;
+  unsigned int unwind_data;
+} DbpRUNTIME_FUNCTION;
+
+// pdata entries will be written to a .pdata section in the dll, with the RVA of
+// .unwind_data fixed up to be relative to where unwind_info is stored.
+// unwind_data==0 should correspond to &unwind_info[0].
+struct DbpExceptionTables {
+  DbpRUNTIME_FUNCTION* pdata;
+  size_t num_pdata_entries;
+
+  unsigned char* unwind_info;
+  size_t unwind_info_byte_length;
+};
 
 #ifdef __cplusplus
 }  // extern "C"
@@ -89,16 +130,23 @@ typedef unsigned long long u64;
 
 typedef struct StreamData StreamData;
 typedef struct SuperBlock SuperBlock;
+typedef struct NmtAlikeHashTable NmtAlikeHashTable;
 
 struct DbpContext {
-  void* image_addr;
-  size_t image_size;
+  char* base_addr;    // This is the VirtualAlloc base
+  void* image_addr;   // and this is the address returned to the user,
+  size_t image_size;  // The user has this much accessible, and the allocation is 0x1000 larger.
   char* output_pdb_name;
   char* output_dll_name;
-  DbpSourceFile** source_files;
-  size_t source_files_len;
-  size_t source_files_cap;
+  HMODULE dll_module;
+
+  DbpFunctionSymbol** func_syms;
+  size_t func_syms_len;
+  size_t func_syms_cap;
+
   UUID unique_id;
+
+  NmtAlikeHashTable* names_nmt;
 
   char* compiler_version_string;
   u16 version_major;
@@ -120,8 +168,21 @@ struct DbpContext {
   u32 padding;
 };
 
-struct DbpSourceFile {
+typedef struct LineInfo {
+  unsigned int address;
+  unsigned int line;
+} LineInfo;
+
+struct DbpFunctionSymbol {
   char* name;
+  char* filename;
+  unsigned int address;             // Offset into image_addr where function is.
+  unsigned int length;              // Number of bytes long.
+  unsigned int module_info_offset;  // Location into modi where the full symbol info can be found.
+
+  LineInfo* lines;
+  size_t lines_len;
+  size_t lines_cap;
 };
 
 #define PUSH_BACK(vec, item)                            \
@@ -140,9 +201,13 @@ struct DbpSourceFile {
     vec[vec##_len++] = item;                            \
   } while (0)
 
-DbpContext* dbp_create(void* image_addr, size_t image_size, const char* output_pdb_name) {
+DbpContext* dbp_create(size_t image_size, const char* output_pdb_name) {
   DbpContext* ctx = calloc(1, sizeof(DbpContext));
-  ctx->image_addr = image_addr;
+  // Allocate with an extra page for the DLL header.
+  char* base_addr =
+      VirtualAlloc(NULL, image_size + 0x1000, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+  ctx->base_addr = base_addr;
+  ctx->image_addr = base_addr + 0x1000;
   ctx->image_size = image_size;
   char full_pdb_name[MAX_PATH];
   GetFullPathName(output_pdb_name, sizeof(full_pdb_name), full_pdb_name, NULL);
@@ -160,6 +225,24 @@ DbpContext* dbp_create(void* image_addr, size_t image_size, const char* output_p
   return ctx;
 }
 
+void* dbp_get_image_base(DbpContext* ctx) {
+  return ctx->image_addr;
+}
+
+DbpFunctionSymbol* dbp_add_function_symbol(DbpContext* ctx,
+                                           const char* name,
+                                           const char* filename,
+                                           unsigned int address,
+                                           unsigned int length) {
+  DbpFunctionSymbol* fs = calloc(1, sizeof(*fs));
+  fs->name = _strdup(name);
+  fs->filename = _strdup(filename);
+  fs->address = address;
+  fs->length = length;
+  PUSH_BACK(ctx->func_syms, fs);
+  return fs;
+}
+
 void dbp_set_compiler_information(DbpContext* ctx,
                                   const char* compiler_version_string,
                                   unsigned short major,
@@ -175,53 +258,14 @@ void dbp_set_compiler_information(DbpContext* ctx,
   ctx->version_qfe = qfe;
 }
 
-DbpSourceFile* dbp_add_source_file(DbpContext* ctx, const char* name) {
-  DbpSourceFile* ret = calloc(1, sizeof(DbpSourceFile));
-  ret->name = _strdup(name);
-  PUSH_BACK(ctx->source_files, ret);
-  return ret;
-}
-
-int dbp_add_line_mapping(DbpSourceFile* src,
-                         unsigned int line_number,
-                         unsigned int begin_addr,
-                         unsigned int end_addr) {
-  (void)src;
-  (void)line_number;
-  (void)begin_addr;
-  (void)end_addr;
-  return 1;
-}
-
-struct StreamData {
-  u32 stream_index;
-
-  u32 data_length;
-
-  char* cur_block_ptr;
-  char* cur_write;
-
-  u32* blocks;
-  size_t blocks_len;
-  size_t blocks_cap;
-};
-
-static void free_ctx(DbpContext* ctx) {
-  for (size_t i = 0; i < ctx->source_files_len; ++i) {
-    free(ctx->source_files[i]->name);
-    free(ctx->source_files[i]);
-  }
-  free(ctx->source_files);
-  free(ctx->output_pdb_name);
-  free(ctx->output_dll_name);
-
-  for (size_t i = 0; i < ctx->stream_data_len; ++i) {
-    free(ctx->stream_data[i]->blocks);
-    free(ctx->stream_data[i]);
-  }
-  free(ctx->stream_data);
-  free(ctx->compiler_version_string);
-  free(ctx);
+void dbp_add_line_mapping(DbpContext* ctx,
+                          DbpFunctionSymbol* sym,
+                          unsigned int address,
+                          unsigned int line) {
+  (void)ctx;
+  assert(address >= sym->address);
+  LineInfo line_info = {.address = address, .line = line};
+  PUSH_BACK(sym->lines, line_info);
 }
 
 static const char big_hdr_magic[0x1e] = "Microsoft C/C++ MSF 7.00\r\n\x1a\x44\x53";
@@ -253,6 +297,8 @@ struct SuperBlock {
   u32 block_map_addr;
 };
 
+#define STUB_RDATA_SIZE 4096
+
 #define BLOCK_SIZE 4096
 #define DEFAULT_NUM_BLOCKS 256
 #define PAGE_TO_WORD(pn) (pn >> 6)
@@ -283,6 +329,19 @@ static u32 alloc_block(DbpContext* ctx) {
   }
 }
 
+struct StreamData {
+  u32 stream_index;
+
+  u32 data_length;
+
+  char* cur_block_ptr;
+  char* cur_write;
+
+  u32* blocks;
+  size_t blocks_len;
+  size_t blocks_cap;
+};
+
 static void stream_write_block(DbpContext* ctx, StreamData* stream, const void* data, size_t len) {
   if (!stream->cur_block_ptr) {
     u32 block_id = alloc_block(ctx);
@@ -295,7 +354,7 @@ static void stream_write_block(DbpContext* ctx, StreamData* stream, const void* 
 
   stream->data_length += (u32)len;
 
-  // TODO: useful things
+  // TODO: XXX useful things
   assert(stream->data_length < BLOCK_SIZE && "overflowed page");
 }
 
@@ -542,23 +601,25 @@ static u32 calc_hash(char* pb, size_t cb) {
 // A hash table that emulates the microsoft-pdb nmt.h as required by the /names
 // stream.
 typedef struct NmtAlikeHashTable {
-  char* strings;
+  char* strings;        // This is a "\0bunch\0of\0strings\0" always starting with \0,
+                        // so that 0 is an invalid index.
   size_t strings_len;
   size_t strings_cap;
 
-  u32* hash;
+  u32* hash;            // hash[hashed_value % hash_len] = name_index, which is an index
+                        // into strings to get the actual value.
   size_t hash_len;
-  size_t hash_cap;
 
   u32 num_names;
 } NmtAlikeHashTable;
 
-#define NMT_INVALID (~0u)
+#define NMT_INVALID (0u)
 
 static NmtAlikeHashTable* nmtalike_create(void) {
   NmtAlikeHashTable* ret = calloc(1, sizeof(NmtAlikeHashTable));
   PUSH_BACK(ret->strings, '\0');
-  PUSH_BACK(ret->hash, NMT_INVALID);
+  ret->hash = calloc(1, sizeof(u32));
+  ret->hash_len = 1;
   return ret;
 }
 
@@ -614,9 +675,8 @@ static void nmtalike__rehash(NmtAlikeHashTable* nmt, u32 new_count) {
   size_t new_hash_byte_len = sizeof(u32) * new_count;
   u32* new_hash = malloc(new_hash_byte_len);
   size_t new_hash_len = new_count;
-  size_t new_hash_cap = new_count;
 
-  memset(new_hash, 0xff, new_hash_byte_len);
+  memset(new_hash, 0, new_hash_byte_len);
 
   for (u32 i = 0; i < nmt->hash_len; ++i) {
     u32 name_index = nmt->hash[i];
@@ -637,7 +697,6 @@ static void nmtalike__rehash(NmtAlikeHashTable* nmt, u32 new_count) {
   free(nmt->hash);
   nmt->hash = new_hash;
   nmt->hash_len = new_hash_len;
-  nmt->hash_cap = new_hash_cap;
 }
 
 static void nmtalike__grow(NmtAlikeHashTable* nmt) {
@@ -663,9 +722,41 @@ static u32 nmtalike_add_string(NmtAlikeHashTable* nmt, char* str) {
   return name_index;
 }
 
+static u32 nmtalike_name_index_for_string(NmtAlikeHashTable* nmt, char* str) {
+  u32 name_index = NMT_INVALID;
+  u32 slot_unused;
+  nmtalike__find(nmt, str, &name_index, &slot_unused);
+  return name_index; // either NMT_INVALID or the slot
+}
+
+typedef struct NmtAlikeEnum {
+  NmtAlikeHashTable* nmt;
+  u32 i;
+} NmtAlikeEnum;
+
+static NmtAlikeEnum nmtalike_enum_begin(NmtAlikeHashTable* nmt) {
+  return (NmtAlikeEnum){.nmt = nmt, .i = (u32)-1};
+}
+
+static int nmtalike_enum_next(NmtAlikeEnum* it) {
+  while (++it->i < it->nmt->hash_len) {
+    if (it->nmt->hash[it->i] != NMT_INVALID)
+      return 1;
+  }
+  return 0;
+}
+
+static void nmtalike_enum_get(NmtAlikeEnum* it, u32* name_index, char** str) {
+  *name_index = it->nmt->hash[it->i];
+  *str = nmtalike__string_for_name_index(it->nmt, *name_index);
+}
+
 static int write_names_stream(DbpContext* ctx, StreamData* stream) {
-  NmtAlikeHashTable* nmt = nmtalike_create();
-  nmtalike_add_string(nmt, "c:\\src\\dyibicc\\src\\dyn_basic_pdb_example.c");
+  NmtAlikeHashTable* nmt = ctx->names_nmt = nmtalike_create();
+
+  for (size_t i = 0; i < ctx->func_syms_len; ++i) {
+    nmtalike_add_string(nmt, ctx->func_syms[i]->filename);
+  }
 
   // "/names" is:
   //
@@ -686,10 +777,6 @@ static int write_names_stream(DbpContext* ctx, StreamData* stream) {
   SW_BLOCK(nmt->hash, nmt->hash_len * sizeof(u32));  // Hash buckets
 
   SW_U32(nmt->num_names);  // Number of names in the hash
-
-  free(nmt->strings);
-  free(nmt->hash);
-  free(nmt);
 
   return 1;
 }
@@ -834,7 +921,7 @@ static void write_dbi_stream_header(DbpContext* ctx, StreamData* stream, DbiWrit
   SW_BLOCK(&dsh, sizeof(dsh));
 }
 
-static void write_dbi_stream_modinfo(DbpContext* ctx, StreamData* stream, DbiWriteData* dwd){
+static void write_dbi_stream_modinfo(DbpContext* ctx, StreamData* stream, DbiWriteData* dwd) {
   SwDelta block_start = SW_CAPTURE_DELTA_START();
 
   // Module Info Substream. We output a single module with a single section for
@@ -881,15 +968,16 @@ static void write_dbi_stream_section_contribution(DbpContext* ctx,
   // We only write a single section, one big for .text.
   SW_U32(0xf12eba2d);  // Ver60
   SectionContribEntry text_section = {
-    .section = 1,
-    .padding1 = {0,0},
-    .offset = 0,
-    .size = (i32)ctx->image_size,
-    .characteristics = IMAGE_SCN_CNT_CODE | IMAGE_SCN_ALIGN_16BYTES | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ,
-    .module_index = 0,
-    .padding2 = {0,0},
-    .data_crc = 0,
-    .reloc_crc = 0,
+      .section = 1,
+      .padding1 = {0, 0},
+      .offset = 0,
+      .size = (i32)ctx->image_size,
+      .characteristics =
+          IMAGE_SCN_CNT_CODE | IMAGE_SCN_ALIGN_16BYTES | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ,
+      .module_index = 0,
+      .padding2 = {0, 0},
+      .data_crc = 0,
+      .reloc_crc = 0,
   };
   SW_BLOCK(&text_section, sizeof(text_section));
   SW_WRITE_DELTA_FIXUP(dwd->fixup_section_contribution_size, block_start);
@@ -916,7 +1004,7 @@ static void write_dbi_stream_section_map(DbpContext* ctx, StreamData* stream, Db
       .frame = 1,             // 1-based section number
       .section_name = 0xfff,  // ?
       .class_name = 0xffff,   // ?
-      .offset = 0,            // ?
+      .offset = 0,            // This seems to be added to the RVA, but defaults to 0x1000.
       .section_length = (u32)ctx->image_size,
   };
   SW_BLOCK(&text, sizeof(text));
@@ -928,31 +1016,38 @@ static void write_dbi_stream_section_map(DbpContext* ctx, StreamData* stream, Db
       .frame = 2,             // 1-based section number
       .section_name = 0xfff,  // ?
       .class_name = 0xffff,   // ?
-      .offset = 0,            // ?
-      .section_length = 4096,
+      .offset = 0,            // This seems to be added to the RVA.
+      .section_length = STUB_RDATA_SIZE,
   };
   SW_BLOCK(&rdata, sizeof(rdata));
 
   SW_WRITE_DELTA_FIXUP(dwd->fixup_section_map_size, block_start);
 }
 
-
 static void write_dbi_stream_file_info(DbpContext* ctx, StreamData* stream, DbiWriteData* dwd) {
   SwDelta block_start = SW_CAPTURE_DELTA_START();
 
   // File Info Substream
   FileInfoSubstreamHeader fish = {
-      .num_modules = 1,        // This is always 1 for us.
+      .num_modules = 1,       // This is always 1 for us.
       .num_source_files = 0,  // This is unused.
   };
   SW_BLOCK(&fish, sizeof(fish));
 
-  SW_U16(0);  // [mod_indices], unused.
-  SW_U16(1);  // [num_source_files] HACK
-  SW_U32(0);  // offset to file 0  (file_name_offsets)
-  // names_buffer
-  static const char source_name[] = "c:\\src\\dyibicc\\src\\dyn_basic_pdb_example.c";
-  SW_BLOCK(source_name, sizeof(source_name));
+  SW_U16(0);                               // [mod_indices], unused.
+  SW_U16((u16)ctx->names_nmt->num_names);  // [num_source_files]
+
+  // First, write array of offset to files.
+  NmtAlikeEnum it = nmtalike_enum_begin(ctx->names_nmt);
+  while (nmtalike_enum_next(&it)) {
+    u32 name_index;
+    char* str;
+    nmtalike_enum_get(&it, &name_index, &str);
+    SW_U32(name_index);
+  }
+
+  // Then the strings buffer.
+  SW_BLOCK(ctx->names_nmt->strings, ctx->names_nmt->strings_len);
 
   SW_ALIGN(4);
   SW_WRITE_DELTA_FIXUP(dwd->fixup_source_info_size, block_start);
@@ -981,7 +1076,9 @@ static void write_dbi_stream_ec_substream(DbpContext* ctx, StreamData* stream, D
   SW_WRITE_DELTA_FIXUP(dwd->fixup_ec_substream_size, block_start);
 }
 
-static void write_dbi_stream_optional_dbg_header(DbpContext* ctx, StreamData* stream, DbiWriteData* dwd) {
+static void write_dbi_stream_optional_dbg_header(DbpContext* ctx,
+                                                 StreamData* stream,
+                                                 DbiWriteData* dwd) {
   SwDelta block_start = SW_CAPTURE_DELTA_START();
 
   // Index 5 points to the section header stream, which is theoretically
@@ -1163,8 +1260,9 @@ typedef struct CV_LineFragmentHeader {
 } CV_LineFragmentHeader;
 
 typedef struct CV_LineBlockFragmentHeader {
-  u32 name_index;  // Offset of file_checksum entry in file checksums buffer. The checksum entry
-                   // then contains another offset into the string table of the actual name.
+  u32 checksum_block_offset;  // Offset of file_checksum entry in file checksums buffer. The
+                              // checksum entry then contains another offset into the string table
+                              // of the actual name.
   u32 num_lines;
   u32 block_size;
   // CV_LineNumberEntry lines[num_lines];
@@ -1480,9 +1578,14 @@ static GsiData build_gsi_data(DbpContext* ctx) {
   GsiBuilder* gsi = calloc(1, sizeof(GsiBuilder));
   gsi->sym_record_stream = add_stream(ctx);
 
-  gsi_builder_add_procref(ctx, gsi, 104, "Func");  // HACK 104 is based on module gen
+  for (size_t i = 0; i < ctx->func_syms_len; ++i) {
+    DbpFunctionSymbol* fs = ctx->func_syms[i];
 
-  gsi_builder_add_public(ctx, gsi, CVSPF_Function, 0x0, "Func");
+    assert(fs->module_info_offset > 0 && "didn't write modi yet?");
+    gsi_builder_add_procref(ctx, gsi, fs->module_info_offset, fs->name);
+
+    gsi_builder_add_public(ctx, gsi, CVSPF_Function, fs->address, fs->name);
+  }
 
   return gsi_builder_finish(ctx, gsi);
 }
@@ -1507,8 +1610,6 @@ typedef struct DebugLines {
 
   u32 reloc_offset;
   u32 code_size;
-
-  // DebugChecksums* checksums;
 } DebugLines;
 
 static ModuleData write_module_stream(DbpContext* ctx) {
@@ -1540,28 +1641,34 @@ static ModuleData write_module_stream(DbpContext* ctx) {
   };
   SW_CV_SYM_TRAILING_NAME(compile3, ctx->compiler_version_string);
 
-  CV_S_GPROC32 gproc32 = {
-      .record_type = 0x1110,
-      .parent = 0,
-      .end = ~0U,
-      .next = 0,
-      .len = 0x16,
-      .dbg_start = 0,
-      .dbg_end = 0x15,
-      .type_index = 0x1001,  // hrm, first UDT, undefined but we're not writing types.
-      .offset = 0,           /* address of proc */
-      .seg = 1,
-      .flags = {0},
-  };
-  SwFixup end_fixup = SW_CAPTURE_FIXUP(CV_S_GPROC32, end);
-  SW_CV_SYM_TRAILING_NAME(gproc32, "Func");
+  for (size_t i = 0; i < ctx->func_syms_len; ++i) {
+    DbpFunctionSymbol* fs = ctx->func_syms[i];
 
-  CV_S_NODATA end = {.record_type = 0x0006};
-  SW_WRITE_FIXUP_FOR_LOCATION_U32(end_fixup);
-  SW_CV_SYM(end);
+    fs->module_info_offset = stream->data_length;
 
-  // TODO: all funcs here, possibly data too, but we wouldn't have typeinfo so
-  // might fairly pointless
+    CV_S_GPROC32 gproc32 = {
+        .record_type = 0x1110,
+        .parent = 0,
+        .end = ~0U,
+        .next = 0,
+        .len = fs->length,
+        .dbg_start = fs->address,   // not sure about these fields
+        .dbg_end = fs->length - 1,  // not sure about these fields
+        .type_index = 0x1001,       // hrm, first UDT, undefined but we're not writing types.
+        .offset = fs->address,      /* address of proc */
+        .seg = 1,
+        .flags = {0},
+    };
+    SwFixup end_fixup = SW_CAPTURE_FIXUP(CV_S_GPROC32, end);
+    SW_CV_SYM_TRAILING_NAME(gproc32, fs->name);
+
+    CV_S_NODATA end = {.record_type = 0x0006};
+    SW_WRITE_FIXUP_FOR_LOCATION_U32(end_fixup);
+    SW_CV_SYM(end);
+  }
+
+  // TODO: could add all global data here too, but without types it's probably
+  // pretty pointless.
 
   module_data.symbols_byte_size = stream->data_length - symbol_start;
 
@@ -1570,55 +1677,87 @@ static ModuleData write_module_stream(DbpContext* ctx) {
   //
   u32 c13_start = stream->data_length;
 
+  // Need filename to offset-into-checksums block map. Record the name_index for
+  // each string here, and find the index of name_index in this array. Then the
+  // location where it's found in this array is the offset (times a constant
+  // sizeof).
+  u32* name_index_to_checksum_offset = _alloca(sizeof(u32) * ctx->names_nmt->num_names);
+
+  // Checksums
   {
-    u32 len = sizeof(CV_LineFragmentHeader) + sizeof(CV_LineBlockFragmentHeader) +
-              3 * sizeof(CV_LineNumberEntry);
-    CV_DebugSubsectionHeader lines_header = {.kind = CV_DSF_Lines, .length = len};
-    SW_BLOCK(&lines_header, sizeof(lines_header));
+    // Write a block of checksums, except we actually write "None" checksums, so
+    // it's just a table of indices pointed to by name_index above, that in turn
+    // points to the offset into the /names NMT for the actual file name.
+    size_t len = align_to((u32)sizeof(CV_FileChecksumEntryHeader), 4) * ctx->names_nmt->num_names;
+    CV_DebugSubsectionHeader checksums_subsection_header = {.kind = CV_DSF_FileChecksums,
+                                                            .length = align_to((u32)len, 4)};
+    SW_BLOCK(&checksums_subsection_header, sizeof(checksums_subsection_header));
 
-    CV_LineFragmentHeader header = {.code_size = 0x16,
-                                    .flags = CF_LF_None,
-                                    .reloc_segment = 1,
-                                    .reloc_offset = 0 /* func start */};
-    SW_BLOCK(&header, sizeof(header));
+    // The layout of this section has to match how name_index_to_checksum_offset
+    // is used above.
+    NmtAlikeEnum it = nmtalike_enum_begin(ctx->names_nmt);
+    size_t i = 0;
+    while (nmtalike_enum_next(&it)) {
+      u32 name_index;
+      char* str;
+      nmtalike_enum_get(&it, &name_index, &str);
 
-    CV_LineBlockFragmentHeader block_header;
-    block_header.num_lines = 3;
-    block_header.block_size = sizeof(CV_LineBlockFragmentHeader);
-    block_header.block_size += block_header.num_lines * sizeof(CV_LineNumberEntry);
-    block_header.name_index = 0;  ///*block->*/checksum_buffer_offset;
-    SW_BLOCK(&block_header, sizeof(block_header));
+      name_index_to_checksum_offset[i++] = name_index;
 
-    CV_LineNumberEntry line_entry = {
-        .offset = 0, .line_num_start = 5, .delta_line_end = 0, .is_statement = 1};
-    SW_BLOCK(&line_entry, sizeof(line_entry));
-
-    line_entry.offset = 4;
-    line_entry.line_num_start = 6;
-    SW_BLOCK(&line_entry, sizeof(line_entry));
-
-    line_entry.offset = 0xb;
-    line_entry.line_num_start = 7;
-    SW_BLOCK(&line_entry, sizeof(line_entry));
-
-    SW_ALIGN(4);
+      CV_FileChecksumEntryHeader header = {
+          .filename_offset = name_index, .checksum_size = 0, .checksum_kind = CV_FCSK_None};
+      SW_BLOCK(&header, sizeof(header));
+      SW_ALIGN(4);
+    }
   }
 
+  // Lines
   {
-    u32 len = sizeof(CV_FileChecksumEntryHeader);
-    CV_DebugSubsectionHeader checksums_header = {.kind = CV_DSF_FileChecksums, .length = len};
-    SW_BLOCK(&checksums_header, sizeof(checksums_header));
+    size_t len = sizeof(CV_LineFragmentHeader);
+    for (size_t i = 0; i < ctx->func_syms_len; ++i) {
+      DbpFunctionSymbol* fs = ctx->func_syms[i];
+      len += sizeof(CV_LineBlockFragmentHeader);
+      len += fs->lines_len * sizeof(CV_LineNumberEntry);
+    }
 
-    CV_FileChecksumEntryHeader header = {
-        .filename_offset = 1, .checksum_size = 0, .checksum_kind = CV_FCSK_None};
+    CV_DebugSubsectionHeader lines_subsection_header = {.kind = CV_DSF_Lines,
+                                                        .length = (u32)len};
+    SW_BLOCK(&lines_subsection_header, sizeof(lines_subsection_header));
+
+    CV_LineFragmentHeader header = {.code_size = (u32)ctx->image_size,
+                                    .flags = CF_LF_None,
+                                    .reloc_segment = 1,
+                                    .reloc_offset = 0};
     SW_BLOCK(&header, sizeof(header));
-    // unsigned char checksum[16] = {
-    // 0xab, 0xbc, 0xcd, 0xde, 0xef, 0xf0, 0x01, 0x12,
-    // 0x23, 0x34, 0x45, 0x56, 0x67, 0x78, 0x89, 0x9a,
-    //};
-    // SW_BLOCK(checksum, sizeof(checksum));
 
-    SW_ALIGN(4);
+    for (size_t i = 0; i < ctx->func_syms_len; ++i) {
+      DbpFunctionSymbol* fs = ctx->func_syms[i];
+
+      CV_LineBlockFragmentHeader block_header;
+      block_header.num_lines = (u32)fs->lines_len;
+      block_header.block_size = sizeof(CV_LineBlockFragmentHeader);
+      block_header.block_size += block_header.num_lines * sizeof(CV_LineNumberEntry);
+      u32 name_index = nmtalike_name_index_for_string(ctx->names_nmt, fs->filename);
+      u32 offset = ~0u;
+      for (size_t j = 0; j < ctx->names_nmt->num_names; ++j) {
+        if (name_index_to_checksum_offset[j] == name_index) {
+          offset = (u32)(align_to((u32)sizeof(CV_FileChecksumEntryHeader), 4) * j);
+          break;
+        }
+      }
+      assert(offset != ~0u && "didn't find filename");
+      block_header.checksum_block_offset = offset;
+      SW_BLOCK(&block_header, sizeof(block_header));
+
+      for (size_t j = 0; j < fs->lines_len; ++j) {
+        CV_LineNumberEntry line_entry = {.offset = fs->lines[j].address,
+                                         .line_num_start = fs->lines[j].line,
+                                         .delta_line_end = 0,
+                                         .is_statement = 1};
+        SW_BLOCK(&line_entry, sizeof(line_entry));
+      }
+    }
+
   }
 
   module_data.c13_byte_size = stream->data_length - c13_start;
@@ -1701,7 +1840,15 @@ typedef struct RsdsDataHeader {
   // unsigned char name[]
 } RsdsDataHeader;
 
-static int write_stub_dll(DbpContext* ctx) {
+static void file_fill_to_next_page(FILE* f, unsigned char with) {
+  long long align_count = ftell(f);
+  while (align_count % 0x200 != 0) {
+    fwrite(&with, sizeof(with), 1, f);
+    ++align_count;
+  }
+}
+
+static int write_stub_dll(DbpContext* ctx, DbpExceptionTables* exception_tables) {
   FILE* f;
   if (fopen_s(&f, ctx->output_dll_name, "wb") != 0) {
     fprintf(stderr, "couldn't open %s\n", ctx->output_dll_name);
@@ -1726,7 +1873,7 @@ static int write_stub_dll(DbpContext* ctx) {
   fwrite(dos_stub_and_pe_magic, sizeof(dos_stub_and_pe_magic), 1, f);
   IMAGE_FILE_HEADER image_file_header = {
       .Machine = IMAGE_FILE_MACHINE_AMD64,
-      .NumberOfSections = 2,
+      .NumberOfSections = 2 + (exception_tables ? 2 : 0),
       .TimeDateStamp = timedate,
       .PointerToSymbolTable = 0,
       .NumberOfSymbols = 0,
@@ -1734,17 +1881,30 @@ static int write_stub_dll(DbpContext* ctx) {
       .Characteristics = IMAGE_FILE_RELOCS_STRIPPED | IMAGE_FILE_EXECUTABLE_IMAGE |
                          IMAGE_FILE_LARGE_ADDRESS_AWARE | IMAGE_FILE_DLL,
   };
+
+  DWORD pdata_length = (DWORD)(exception_tables->num_pdata_entries * sizeof(DbpRUNTIME_FUNCTION));
+  DWORD pdata_length_page_aligned = align_to(pdata_length, 0x1000);
+  DWORD pdata_length_file_aligned = align_to(pdata_length, 0x200);
+
+  DWORD xdata_length = (DWORD)exception_tables->unwind_info_byte_length;
+  DWORD xdata_length_page_aligned = align_to(xdata_length, 0x1000);
+  DWORD xdata_length_file_aligned = align_to(xdata_length, 0x200);
+
+  DWORD code_start = 0x1000;
+  DWORD rdata_virtual_start = (DWORD)(code_start + ctx->image_size);
+  DWORD pdata_virtual_start = rdata_virtual_start + STUB_RDATA_SIZE;
+  DWORD xdata_virtual_start = pdata_virtual_start + pdata_length_page_aligned;
   fwrite(&image_file_header, sizeof(image_file_header), 1, f);
   IMAGE_OPTIONAL_HEADER64 opt_header = {
       .Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC,
-      .MajorLinkerVersion = 14,
-      .MinorLinkerVersion = 0x22,
-      .SizeOfCode = 0x200,  //(DWORD)ctx->image_size,
+      .MajorLinkerVersion = 14,  // Matches DBI stream.
+      .MinorLinkerVersion = 11,
+      .SizeOfCode = 0x200,
       .SizeOfInitializedData = 0x200,
       .SizeOfUninitializedData = 0,
-      .AddressOfEntryPoint = 0x1000,
+      .AddressOfEntryPoint = 0,
       .BaseOfCode = 0x1000,
-      .ImageBase = (ULONGLONG)ctx->image_addr,
+      .ImageBase = (ULONGLONG)ctx->base_addr,
       .SectionAlignment = 0x1000,
       .FileAlignment = 0x200,
       .MajorOperatingSystemVersion = 6,
@@ -1754,8 +1914,11 @@ static int write_stub_dll(DbpContext* ctx) {
       .MajorSubsystemVersion = 6,
       .MinorSubsystemVersion = 0,
       .Win32VersionValue = 0,
-      .SizeOfImage = 0x3000,   // TODO
-      .SizeOfHeaders = 0x200,  // ??
+      // The documentation makes this seem like the size of the file, but I
+      // think it's actually the virtual space occupied to the end of the
+      // sections when loaded.
+      .SizeOfImage = xdata_virtual_start + xdata_length_page_aligned, // xdata is the last section.
+      .SizeOfHeaders = 0x400,  // Address of where the section data starts.
       .CheckSum = 0,
       .Subsystem = IMAGE_SUBSYSTEM_WINDOWS_GUI,
       .DllCharacteristics =
@@ -1771,10 +1934,10 @@ static int write_stub_dll(DbpContext* ctx) {
               {0, 0},
               {0, 0},
               {0, 0},
+              {pdata_virtual_start, (DWORD)pdata_length},
               {0, 0},
               {0, 0},
-              {0, 0},
-              {0x2000, sizeof(IMAGE_DEBUG_DIRECTORY)},
+              {rdata_virtual_start, sizeof(IMAGE_DEBUG_DIRECTORY)},
               {0, 0},
               {0, 0},
               {0, 0},
@@ -1788,13 +1951,15 @@ static int write_stub_dll(DbpContext* ctx) {
   };
   fwrite(&opt_header, sizeof(opt_header), 1, f);
 
+  //
+  // .text header
+  //
   IMAGE_SECTION_HEADER text = {
       .Name = ".text\0\0",
-      .Misc = {.VirtualSize = 3},  //.VirtualSize = (DWORD)ctx->image_size},
-      .VirtualAddress = 0x1000,
-      .SizeOfRawData = 0x200,     // 3,//(DWORD)ctx->image_size,
-      .PointerToRawData = 0x200,  // This is the aligned address that just happens to be right after
-                                  // the rdata header.
+      .Misc = {.VirtualSize = (DWORD)ctx->image_size},
+      .VirtualAddress = code_start,
+      .SizeOfRawData = 0x200,     // This is the size of the block of .text in the dll.
+      .PointerToRawData = 0x400,  // Aligned address in file.
       .PointerToRelocations = 0,
       .PointerToLinenumbers = 0,
       .NumberOfRelocations = 0,
@@ -1803,6 +1968,9 @@ static int write_stub_dll(DbpContext* ctx) {
   };
   fwrite(&text, sizeof(text), 1, f);
 
+  //
+  // .rdata header
+  //
   RsdsDataHeader rsds_header = {
       .magic =
           {
@@ -1819,10 +1987,10 @@ static int write_stub_dll(DbpContext* ctx) {
 
   IMAGE_SECTION_HEADER rdata = {
       .Name = ".rdata\0",
-      .Misc = {.VirtualSize = sizeof(IMAGE_DEBUG_DIRECTORY) + rsds_len},
-      .VirtualAddress = 0x2000,
-      .SizeOfRawData = 0x200,     // sizeof(IMAGE_DEBUG_DIRECTORY) + rsds_len,
-      .PointerToRawData = 0x400,  //(DWORD)(0x200 + ctx->image_size),
+      .Misc = {.VirtualSize = (DWORD)(rsds_len + sizeof(IMAGE_DEBUG_DIRECTORY))},
+      .VirtualAddress = rdata_virtual_start,
+      .SizeOfRawData = 0x200,
+      .PointerToRawData = 0x600,
       .PointerToRelocations = 0,
       .PointerToLinenumbers = 0,
       .NumberOfRelocations = 0,
@@ -1831,25 +1999,56 @@ static int write_stub_dll(DbpContext* ctx) {
   };
   fwrite(&rdata, sizeof(rdata), 1, f);
 
-  assert(ftell(f) == 0x200);
+  //
+  // .pdata header
+  //
+  IMAGE_SECTION_HEADER pdata = {
+      .Name = ".pdata\0",
+      .Misc = {.VirtualSize = (DWORD)pdata_length},
+      .VirtualAddress = pdata_virtual_start,
+      .SizeOfRawData = pdata_length_file_aligned, 
+      .PointerToRawData = 0x800,  // Aligned address in file.
+      .PointerToRelocations = 0,
+      .PointerToLinenumbers = 0,
+      .NumberOfRelocations = 0,
+      .NumberOfLinenumbers = 0,
+      .Characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ,
+  };
+  fwrite(&pdata, sizeof(pdata), 1, f);
 
-  unsigned char code[] = {0x33, 0xc0, 0xc3};
-  fwrite(code, sizeof(code), 1, f);
-#if 0
-  // Now at 0x200 to write block of code. We don't any code here, but fill with
-  // int3s to make sure we know if we execute it.
+  //
+  // .xdata header
+  //
+  IMAGE_SECTION_HEADER xdata = {
+      .Name = ".xdata\0",
+      .Misc = {.VirtualSize = (DWORD)xdata_length},
+      .VirtualAddress = xdata_virtual_start,
+      .SizeOfRawData = xdata_length_file_aligned, 
+      .PointerToRawData = 0xa00,  // Aligned address in file.
+      .PointerToRelocations = 0,
+      .PointerToLinenumbers = 0,
+      .NumberOfRelocations = 0,
+      .NumberOfLinenumbers = 0,
+      .Characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ,
+  };
+  fwrite(&xdata, sizeof(xdata), 1, f);
+
+  file_fill_to_next_page(f, 0);
+  assert(ftell(f) == 0x400);
+
+  //
+  // contents of .text
+  //
+
   unsigned char int3 = 0xcc;
-  for (size_t i = 0; i < ctx->image_size; ++i) {
-    fwrite(&int3, sizeof(int3), 1, f);
-  }
-#endif
+  fwrite(&int3, sizeof(int3), 1, f);
+  file_fill_to_next_page(f, int3);
+  assert(ftell(f) == 0x600);
 
-  unsigned char zero = 0;
-  while (ftell(f) != 0x400) {
-    fwrite(&zero, sizeof(zero), 1, f);
-  }
-
-  long long rdata_start = ftell(f);
+  //
+  // contents of .rdata
+  //
+  long long rdata_file_start = ftell(f);
 
   // Now the .rdata data which points to the pdb.
   IMAGE_DEBUG_DIRECTORY debug_dir = {
@@ -1859,41 +2058,65 @@ static int write_stub_dll(DbpContext* ctx) {
       .MinorVersion = 0,
       .Type = IMAGE_DEBUG_TYPE_CODEVIEW,
       .SizeOfData = rsds_len,
-      .AddressOfRawData = 0x201c,
-      .PointerToRawData = (DWORD)(rdata_start + (long)sizeof(IMAGE_DEBUG_DIRECTORY)),
+      .AddressOfRawData = rdata_virtual_start + 0x1c,
+      .PointerToRawData = (DWORD)(rdata_file_start + (long)sizeof(IMAGE_DEBUG_DIRECTORY)),
   };
   fwrite(&debug_dir, sizeof(debug_dir), 1, f);
   fwrite(&rsds_header, sizeof(rsds_header), 1, f);
   fwrite(ctx->output_pdb_name, 1, name_len + 1, f);
 
-  while (ftell(f) != 0x600) {
-    fwrite(&zero, sizeof(zero), 1, f);
+  file_fill_to_next_page(f, 0);
+  assert(ftell(f) == 0x800);
+
+  //
+  // contents of .pdata
+  //
+  for (size_t i = 0; i < exception_tables->num_pdata_entries; ++i) {
+    exception_tables->pdata[i].begin_address += code_start;  // Fixup to .text RVA.
+    exception_tables->pdata[i].end_address += code_start;    // Fixup to .text RVA.
+    exception_tables->pdata[i].unwind_data += xdata_virtual_start;  // Fixup to .xdata RVA.
   }
+  fwrite(exception_tables->pdata, sizeof(DbpRUNTIME_FUNCTION), exception_tables->num_pdata_entries,
+         f);
+  file_fill_to_next_page(f, 0);
+
+  //
+  // contents of .xdata
+  //
+  fwrite(exception_tables->unwind_info, 1, exception_tables->unwind_info_byte_length, f);
+  file_fill_to_next_page(f, 0);
 
   fclose(f);
 
   return 1;
 }
 
-static int force_symbol_load(DbpContext* ctx) {
+static int force_symbol_load(DbpContext* ctx, DbpExceptionTables* exception_tables) {
   // Write stub dll with target address/size and fixed base address.
-  ENSURE(write_stub_dll(ctx), 1);
+  ENSURE(write_stub_dll(ctx, exception_tables), 1);
 
   // Save current code block and then VirtualFree() it.
+  void* tmp = malloc(ctx->image_size);
+  memcpy(tmp, ctx->image_addr, ctx->image_size);
+  VirtualFree(ctx->base_addr, 0, MEM_RELEASE);
 
-  VirtualFree(ctx->image_addr, 0, MEM_RELEASE);
   // There's a race here with other threads, but... I think that's the least of
   // our problems.
-  LoadLibraryEx(ctx->output_dll_name, NULL, DONT_RESOLVE_DLL_REFERENCES);
+  ctx->dll_module = LoadLibraryEx(ctx->output_dll_name, NULL, DONT_RESOLVE_DLL_REFERENCES);
 
   // Make DLL writable and slam jitted code back into same location.
+  DWORD old_protect;
+  ENSURE(VirtualProtect(ctx->image_addr, ctx->image_size, PAGE_READWRITE, &old_protect), 1);
 
-  // Make code EXECUTE_READ before returning.
+  memcpy(ctx->image_addr, tmp, ctx->image_size);
+  free(tmp);
+
+  ENSURE(VirtualProtect(ctx->image_addr, ctx->image_size, PAGE_EXECUTE_READ, &old_protect), 1);
 
   return 1;
 }
 
-int dbp_finish(DbpContext* ctx) {
+int dbp_ready_to_execute(DbpContext* ctx, DbpExceptionTables* exception_tables) {
   if (!create_file_map(ctx))
     return 0;
 
@@ -1907,21 +2130,27 @@ int dbp_finish(DbpContext* ctx) {
 
   // Stream 2: TPI Stream.
   StreamData* stream2 = add_stream(ctx);
+  ENSURE(1, write_empty_tpi_ipi_stream(ctx, stream2));
 
   // Stream 3: DBI Stream.
   StreamData* stream3 = add_stream(ctx);
 
   // Stream 4: IPI Stream.
   StreamData* stream4 = add_stream(ctx);
-
-  GsiData gsi_data = build_gsi_data(ctx);
-
-  ModuleData module_data = write_module_stream(ctx);
+  ENSURE(write_empty_tpi_ipi_stream(ctx, stream4), 1);
 
   // "/names": named, so stream index doesn't matter.
   StreamData* names_stream = add_stream(ctx);
+  ENSURE(write_names_stream(ctx, names_stream), 1);
 
-  ENSURE(1, write_empty_tpi_ipi_stream(ctx, stream2));
+  // Names must be written before module, because the line info refers to the
+  // source files names (by offset into /names).
+  ModuleData module_data = write_module_stream(ctx);
+
+  // And the module stream must be written before the GSI stream because the
+  // global procrefs contain the offset into the module data to locate the
+  // actual function symbol.
+  GsiData gsi_data = build_gsi_data(ctx);
 
   // Section Headers; empty. Referred to by DBI in 'optional' dbg headers, and
   // llvm-pdbutil wants it to exist, but handles an empty stream reasonably.
@@ -1936,8 +2165,6 @@ int dbp_finish(DbpContext* ctx) {
       .num_source_files = 1,
   };
   ENSURE(write_dbi_stream(ctx, stream3, &dwd), 1);
-  ENSURE(write_empty_tpi_ipi_stream(ctx, stream4), 1);
-  ENSURE(write_names_stream(ctx, names_stream), 1);
   ENSURE(write_pdb_info_stream(ctx, stream1, names_stream->stream_index), 1);
 
   ENSURE(write_directory(ctx), 1);
@@ -1946,10 +2173,36 @@ int dbp_finish(DbpContext* ctx) {
   ENSURE(UnmapViewOfFile(ctx->data), 1);
   CloseHandle(ctx->file);
 
-  ENSURE(force_symbol_load(ctx), 1);
+  ENSURE(force_symbol_load(ctx, exception_tables), 1);
 
-  free_ctx(ctx);
   return 1;
+}
+
+void dbp_free(DbpContext* ctx) {
+  FreeLibrary(ctx->dll_module);
+
+  for (size_t i = 0; i < ctx->func_syms_len; ++i) {
+    free(ctx->func_syms[i]->name);
+    free(ctx->func_syms[i]->filename);
+    free(ctx->func_syms[i]->lines);
+    free(ctx->func_syms[i]);
+  }
+  free(ctx->func_syms);
+  free(ctx->output_pdb_name);
+  free(ctx->output_dll_name);
+
+  for (size_t i = 0; i < ctx->stream_data_len; ++i) {
+    free(ctx->stream_data[i]->blocks);
+    free(ctx->stream_data[i]);
+  }
+  free(ctx->stream_data);
+  free(ctx->compiler_version_string);
+
+  free(ctx->names_nmt->strings);
+  free(ctx->names_nmt->hash);
+  free(ctx->names_nmt);
+
+  free(ctx);
 }
 
 #endif
