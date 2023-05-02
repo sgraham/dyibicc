@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.4.33213.308
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dbp_example", "dbp_example.vcxproj", "{3A975551-7F50-4156-814E-1C1AB255466B}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3A975551-7F50-4156-814E-1C1AB255466B}.Debug|x64.ActiveCfg = Debug|x64
+		{3A975551-7F50-4156-814E-1C1AB255466B}.Debug|x64.Build.0 = Debug|x64
+		{3A975551-7F50-4156-814E-1C1AB255466B}.Debug|x86.ActiveCfg = Debug|Win32
+		{3A975551-7F50-4156-814E-1C1AB255466B}.Debug|x86.Build.0 = Debug|Win32
+		{3A975551-7F50-4156-814E-1C1AB255466B}.Release|x64.ActiveCfg = Release|x64
+		{3A975551-7F50-4156-814E-1C1AB255466B}.Release|x64.Build.0 = Release|x64
+		{3A975551-7F50-4156-814E-1C1AB255466B}.Release|x86.ActiveCfg = Release|Win32
+		{3A975551-7F50-4156-814E-1C1AB255466B}.Release|x86.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {92C7EB31-0B39-47E8-8990-8FC906C1D60B}
+	EndGlobalSection
+EndGlobal
