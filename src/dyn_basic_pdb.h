@@ -1882,11 +1882,13 @@ static int write_stub_dll(DbpContext* ctx, DbpExceptionTables* exception_tables)
                          IMAGE_FILE_LARGE_ADDRESS_AWARE | IMAGE_FILE_DLL,
   };
 
-  DWORD pdata_length = (DWORD)(exception_tables->num_pdata_entries * sizeof(DbpRUNTIME_FUNCTION));
+  DWORD pdata_length =
+      exception_tables ? (DWORD)(exception_tables->num_pdata_entries * sizeof(DbpRUNTIME_FUNCTION))
+                       : 0;
   DWORD pdata_length_page_aligned = align_to(pdata_length, 0x1000);
   DWORD pdata_length_file_aligned = align_to(pdata_length, 0x200);
 
-  DWORD xdata_length = (DWORD)exception_tables->unwind_info_byte_length;
+  DWORD xdata_length = exception_tables ? (DWORD)exception_tables->unwind_info_byte_length : 0;
   DWORD xdata_length_page_aligned = align_to(xdata_length, 0x1000);
   DWORD xdata_length_file_aligned = align_to(xdata_length, 0x200);
 
@@ -1934,7 +1936,7 @@ static int write_stub_dll(DbpContext* ctx, DbpExceptionTables* exception_tables)
               {0, 0},
               {0, 0},
               {0, 0},
-              {pdata_virtual_start, (DWORD)pdata_length},
+              {exception_tables ? pdata_virtual_start : 0, (DWORD)pdata_length},
               {0, 0},
               {0, 0},
               {rdata_virtual_start, sizeof(IMAGE_DEBUG_DIRECTORY)},
@@ -1999,10 +2001,11 @@ static int write_stub_dll(DbpContext* ctx, DbpExceptionTables* exception_tables)
   };
   fwrite(&rdata, sizeof(rdata), 1, f);
 
-  //
-  // .pdata header
-  //
-  IMAGE_SECTION_HEADER pdata = {
+  if (exception_tables) {
+    //
+    // .pdata header
+    //
+    IMAGE_SECTION_HEADER pdata = {
       .Name = ".pdata\0",
       .Misc = {.VirtualSize = (DWORD)pdata_length},
       .VirtualAddress = pdata_virtual_start,
@@ -2013,13 +2016,13 @@ static int write_stub_dll(DbpContext* ctx, DbpExceptionTables* exception_tables)
       .NumberOfRelocations = 0,
       .NumberOfLinenumbers = 0,
       .Characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ,
-  };
-  fwrite(&pdata, sizeof(pdata), 1, f);
+    };
+    fwrite(&pdata, sizeof(pdata), 1, f);
 
-  //
-  // .xdata header
-  //
-  IMAGE_SECTION_HEADER xdata = {
+    //
+    // .xdata header
+    //
+    IMAGE_SECTION_HEADER xdata = {
       .Name = ".xdata\0",
       .Misc = {.VirtualSize = (DWORD)xdata_length},
       .VirtualAddress = xdata_virtual_start,
@@ -2030,8 +2033,12 @@ static int write_stub_dll(DbpContext* ctx, DbpExceptionTables* exception_tables)
       .NumberOfRelocations = 0,
       .NumberOfLinenumbers = 0,
       .Characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ,
-  };
-  fwrite(&xdata, sizeof(xdata), 1, f);
+    };
+    fwrite(&xdata, sizeof(xdata), 1, f);
+  } else {
+    unsigned char zero = 0;
+    fwrite(&zero, 1, 1, f);
+  }
 
   file_fill_to_next_page(f, 0);
   assert(ftell(f) == 0x400);
@@ -2068,23 +2075,25 @@ static int write_stub_dll(DbpContext* ctx, DbpExceptionTables* exception_tables)
   file_fill_to_next_page(f, 0);
   assert(ftell(f) == 0x800);
 
-  //
-  // contents of .pdata
-  //
-  for (size_t i = 0; i < exception_tables->num_pdata_entries; ++i) {
-    exception_tables->pdata[i].begin_address += code_start;  // Fixup to .text RVA.
-    exception_tables->pdata[i].end_address += code_start;    // Fixup to .text RVA.
-    exception_tables->pdata[i].unwind_data += xdata_virtual_start;  // Fixup to .xdata RVA.
-  }
-  fwrite(exception_tables->pdata, sizeof(DbpRUNTIME_FUNCTION), exception_tables->num_pdata_entries,
-         f);
-  file_fill_to_next_page(f, 0);
+  if (exception_tables) {
+    //
+    // contents of .pdata
+    //
+    for (size_t i = 0; i < exception_tables->num_pdata_entries; ++i) {
+      exception_tables->pdata[i].begin_address += code_start;  // Fixup to .text RVA.
+      exception_tables->pdata[i].end_address += code_start;    // Fixup to .text RVA.
+      exception_tables->pdata[i].unwind_data += xdata_virtual_start;  // Fixup to .xdata RVA.
+    }
+    fwrite(exception_tables->pdata, sizeof(DbpRUNTIME_FUNCTION), exception_tables->num_pdata_entries,
+        f);
+    file_fill_to_next_page(f, 0);
 
-  //
-  // contents of .xdata
-  //
-  fwrite(exception_tables->unwind_info, 1, exception_tables->unwind_info_byte_length, f);
-  file_fill_to_next_page(f, 0);
+    //
+    // contents of .xdata
+    //
+    fwrite(exception_tables->unwind_info, 1, exception_tables->unwind_info_byte_length, f);
+    file_fill_to_next_page(f, 0);
+  }
 
   fclose(f);
 
