@@ -25,7 +25,7 @@ static unsigned char test_data[] = {
   /* 0x002c: */ 0x48, 0x83, 0xc4, 0x38,        // add         rsp,38h
   /* 0x0030: */ 0xc3,                          // ret
 
-  /* --- padding /
+  /* --- padding */
   /* 0x0031  */ 0xcc, // int 3
   /* 0x0032  */ 0xcc, // int 3
   /* 0x0033  */ 0xcc, // int 3
@@ -86,7 +86,7 @@ int main(int argc, char** argv) {
   DbpContext* ctx = dbp_create(image_size, argc < 2 ? "dbp.pdb" : argv[1]);
 
   // "JIT" some code. The source code is found in entry.py and helper.py, and
-  // the compiled binary code is above |test_data|.
+  // the compiled binary code is above in |test_data|.
   char* image_addr = dbp_get_image_base(ctx);
   CHECK(image_addr);
   memcpy(image_addr, test_data, sizeof(test_data));
@@ -118,7 +118,9 @@ int main(int argc, char** argv) {
   // and source line mappings, so that's all the information we have to add.
 
   // Completes the generation of the pdb, and tricks VS into loading it. The
-  // code is also VirtualProtect()d to PAGE_EXECUTE_READ.
+  // code is also VirtualProtect()d to PAGE_EXECUTE_READ. (You should see a DLL
+  // in the "Modules" window with "Symbols loaded" after stepping over this
+  // call.)
   CHECK(dbp_ready_to_execute(ctx, &exception_tables));
 
   // Try: Set a breakpoint here in VS, and step into the following calls

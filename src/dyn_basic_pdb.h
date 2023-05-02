@@ -8,14 +8,14 @@
 //
 // then include and use dyn_basic_pdb.h in other files as usual.
 //
-// See dyn_basic_pdb_example.c for sample usage.
+// See dbp_example/dyn_basic_pdb_example.c for sample usage.
 //
 // This implementation only outputs function symbols and line mappings, not full
 // type information, though it could be extended to do so with a bunch more
 // futzing around.
 //
-// Only one module is supported (equivalent to one .obj file), because in my jit
-// implementation, all code is generated into a single code segment.
+// Only one module is supported (equivalent to one .obj file), because in my
+// jit's implementation, all code is generated into a single code segment.
 //
 // Normally, a .pdb is referenced by another PE (exe/dll) or .dmp, and that's
 // how VS locates and decides to load the PDB. Because there's no PE in the case
@@ -33,16 +33,30 @@ typedef struct DbpContext DbpContext;
 typedef struct DbpFunctionSymbol DbpFunctionSymbol;
 typedef struct DbpExceptionTables DbpExceptionTables;
 
+// Allocates |image_size| bytes for JITing code into. |image_size| must be an
+// even multiple of PAGE_SIZE (== 4096). |output_pdb_name| names the .pdb that
+// will be generated, and the stub dll is based on the pdb name. The base
+// address for generating code into can be retrieved by calling
+// dbp_get_image_base().
 DbpContext* dbp_create(size_t image_size, const char* output_pdb_name);
 
+// Gets the base of the image, length is |image_size| as passed to dbp_create().
 void* dbp_get_image_base(DbpContext* dbp);
 
+// Create a global symbol |name| with the given |filename|. Visual Studio tends
+// to work better if |filename| is an absolute path, but it's not required, and
+// |filename| is used as-is. |address| should be relative to the base returned
+// by dbp_get_image_base(). |length| is in bytes.
 DbpFunctionSymbol* dbp_add_function_symbol(DbpContext* ctx,
                                            const char* name,
                                            const char* filename,
                                            unsigned int address,
                                            unsigned int length);
 
+// Add a single debug line mapping to a function. |address| is the first of the
+// instructions for the line of code, and should be relative to the base address
+// as retrieved by dbp_get_image_base(). |line| is the one-based file line
+// number in the source code.
 void dbp_add_line_mapping(DbpContext* ctx,
                           DbpFunctionSymbol* fs,
                           unsigned int address,
@@ -60,6 +74,7 @@ void dbp_add_line_mapping(DbpContext* ctx,
 // precedence and the dynamic information is ignored.
 int dbp_ready_to_execute(DbpContext* ctx, DbpExceptionTables* exception_tables);
 
+// Free |ctx| and all associated memory, including the stub dll and image.
 void dbp_free(DbpContext* ctx);
 
 // This is stored in CodeView records, default is "dyn_basic_pdb writer 1.0.0.0" if not set.
@@ -71,8 +86,8 @@ void dbp_set_compiler_information(DbpContext* ctx,
                                   unsigned short qfe);
 
 
-// Same as winnt.h RUNTIME_FUNCTION, we're just want to avoid including
-// windows.h in the interface header.
+// Same as winnt.h RUNTIME_FUNCTION, we just want to avoid including windows.h
+// in the interface header.
 typedef struct DbpRUNTIME_FUNCTION {
   unsigned int begin_address;
   unsigned int end_address;
@@ -359,7 +374,7 @@ static void stream_write_block(DbpContext* ctx, StreamData* stream, const void* 
     stream->cur_write += max_remaining_this_block;
     stream->data_length += max_remaining_this_block;
     stream->cur_write = NULL;
-    stream_write_block(ctx, stream, (char*)data + max_remaining_this_block,
+    stream_write_block(ctx, stream, (const char*)data + max_remaining_this_block,
                        len - max_remaining_this_block);
   }
 }
