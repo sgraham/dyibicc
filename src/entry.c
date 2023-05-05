@@ -69,13 +69,6 @@ static void parse_args(int argc,
 }
 
 int main(int argc, char** argv) {
-#if X64WIN
-  // All dyo files are open during link, so we hack this (the maximum)
-  // to support some tests with a lot of files. dyo files should
-  // probably go away later.
-  _setmaxstdio(8192);
-#endif
-
   alloc_init(AL_Link);
 
   StringArray include_paths = {0};
