@@ -2423,14 +2423,18 @@ static Node* new_add(Node* lhs, Node* rhs, Token* tok) {
   }
 
   // VLA + num
-  if (lhs->ty->base->kind == TY_VLA) {
+  if (lhs->ty->base && lhs->ty->base->kind == TY_VLA) {
     rhs = new_binary(ND_MUL, rhs, new_var_node(lhs->ty->base->vla_size, tok), tok);
     return new_binary(ND_ADD, lhs, rhs, tok);
   }
 
   // ptr + num
-  rhs = new_binary(ND_MUL, rhs, new_long(lhs->ty->base->size, tok), tok);
-  return new_binary(ND_ADD, lhs, rhs, tok);
+  if (lhs->ty->base && is_integer(rhs->ty)) {
+    rhs = new_binary(ND_MUL, rhs, new_long(lhs->ty->base->size, tok), tok);
+    return new_binary(ND_ADD, lhs, rhs, tok);
+  }
+
+  error_tok(tok, "invalid operands");
 }
 
 // Like `+`, `-` is overloaded for the pointer type.
@@ -2447,7 +2451,7 @@ static Node* new_sub(Node* lhs, Node* rhs, Token* tok) {
     return new_binary(ND_SUB, lhs, rhs, tok);
 
   // VLA + num
-  if (lhs->ty->base->kind == TY_VLA) {
+  if (lhs->ty->base && lhs->ty->base->kind == TY_VLA) {
     rhs = new_binary(ND_MUL, rhs, new_var_node(lhs->ty->base->vla_size, tok), tok);
     add_type(rhs);
     Node* node = new_binary(ND_SUB, lhs, rhs, tok);

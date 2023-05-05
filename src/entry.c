@@ -1,7 +1,7 @@
 #include "dyibicc.h"
 
 static void usage(int status) {
-  printf("dyibicc [-E] [-e symbolname] [-I <path>] <file0> [<file1>...]\n");
+  printf("dyibicc [-e symbolname] [-I <path>] <file0> [<file1>...]\n");
   exit(status);
 }
 
@@ -58,14 +58,18 @@ static void parse_args(int argc,
     if (!strcmp(argv[i], "--help"))
       usage(0);
 
-    if (argv[i][0] == '-' && argv[i][1] != '\0')
-      error("unknown argument: %s", argv[i]);
+    if (argv[i][0] == '-' && argv[i][1] != '\0') {
+      printf("unknown argument: %s\n", argv[i]);
+      usage(1);
+    }
 
     strarray_push(input_paths, argv[i], AL_Link);
   }
 
-  if (input_paths->len == 0)
-    error("no input files");
+  if (input_paths->len == 0) {
+    printf("no input files\n");
+    usage(1);
+  }
 }
 
 int main(int argc, char** argv) {
