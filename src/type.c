@@ -227,8 +227,16 @@ IMPLSTATIC void add_type(Node* node) {
         error_tok(node->lhs->tok, "value of type %.*s can't be assigned to a pointer",
                   node->rhs->ty->name->len, node->rhs->ty->name->loc);
       }
-      if (node->lhs->ty->kind != TY_STRUCT)
+      if (node->lhs->ty->kind != TY_STRUCT) {
         node->rhs = new_cast(node->rhs, node->lhs->ty);
+      } else {
+        if (node->rhs->ty->kind != TY_STRUCT) {
+          error_tok(node->lhs->tok, "cannot assign to struct");
+        }
+        if (node->lhs->ty->members != node->rhs->ty->members) {
+          error_tok(node->lhs->tok, "cannot assign incompatible structs");
+        }
+      }
       node->ty = node->lhs->ty;
       return;
     case ND_EQ:
