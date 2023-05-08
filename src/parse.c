@@ -241,6 +241,10 @@ static Initializer* new_initializer(Type* ty, bool is_flexible) {
       return init;
     }
 
+    if (ty->array_len < 0) {
+      error_tok(ty->name, "array has incomplete element type");
+    }
+
     init->children = bumpcalloc(ty->array_len, sizeof(Initializer*), AL_Compile);
     for (int i = 0; i < ty->array_len; i++)
       init->children[i] = new_initializer(ty->base, false);

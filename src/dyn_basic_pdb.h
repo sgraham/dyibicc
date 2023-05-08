@@ -85,7 +85,6 @@ void dbp_set_compiler_information(DbpContext* ctx,
                                   unsigned short build,
                                   unsigned short qfe);
 
-
 // Same as winnt.h RUNTIME_FUNCTION, we just want to avoid including windows.h
 // in the interface header.
 typedef struct DbpRUNTIME_FUNCTION {
@@ -622,13 +621,13 @@ static u32 calc_hash(char* pb, size_t cb) {
 // A hash table that emulates the microsoft-pdb nmt.h as required by the /names
 // stream.
 typedef struct NmtAlikeHashTable {
-  char* strings;        // This is a "\0bunch\0of\0strings\0" always starting with \0,
-                        // so that 0 is an invalid index.
+  char* strings;  // This is a "\0bunch\0of\0strings\0" always starting with \0,
+                  // so that 0 is an invalid index.
   size_t strings_len;
   size_t strings_cap;
 
-  u32* hash;            // hash[hashed_value % hash_len] = name_index, which is an index
-                        // into strings to get the actual value.
+  u32* hash;  // hash[hashed_value % hash_len] = name_index, which is an index
+              // into strings to get the actual value.
   size_t hash_len;
 
   u32 num_names;
@@ -747,7 +746,7 @@ static u32 nmtalike_name_index_for_string(NmtAlikeHashTable* nmt, char* str) {
   u32 name_index = NMT_INVALID;
   u32 slot_unused;
   nmtalike__find(nmt, str, &name_index, &slot_unused);
-  return name_index; // either NMT_INVALID or the slot
+  return name_index;  // either NMT_INVALID or the slot
 }
 
 typedef struct NmtAlikeEnum {
@@ -1741,8 +1740,7 @@ static ModuleData write_module_stream(DbpContext* ctx) {
       len += fs->lines_len * sizeof(CV_LineNumberEntry);
     }
 
-    CV_DebugSubsectionHeader lines_subsection_header = {.kind = CV_DSF_Lines,
-                                                        .length = (u32)len};
+    CV_DebugSubsectionHeader lines_subsection_header = {.kind = CV_DSF_Lines, .length = (u32)len};
     SW_BLOCK(&lines_subsection_header, sizeof(lines_subsection_header));
 
     CV_LineFragmentHeader header = {.code_size = (u32)ctx->image_size,
@@ -1778,7 +1776,6 @@ static ModuleData write_module_stream(DbpContext* ctx) {
         SW_BLOCK(&line_entry, sizeof(line_entry));
       }
     }
-
   }
 
   module_data.c13_byte_size = stream->data_length - c13_start;
@@ -1940,7 +1937,7 @@ static int write_stub_dll(DbpContext* ctx, DbpExceptionTables* exception_tables)
       // The documentation makes this seem like the size of the file, but I
       // think it's actually the virtual space occupied to the end of the
       // sections when loaded.
-      .SizeOfImage = xdata_virtual_start + xdata_length_page_aligned, // xdata is the last section.
+      .SizeOfImage = xdata_virtual_start + xdata_length_page_aligned,  // xdata is the last section.
       .SizeOfHeaders = 0x400,  // Address of where the section data starts.
       .CheckSum = 0,
       .Subsystem = IMAGE_SUBSYSTEM_WINDOWS_GUI,
@@ -2101,12 +2098,12 @@ static int write_stub_dll(DbpContext* ctx, DbpExceptionTables* exception_tables)
     // contents of .pdata
     //
     for (size_t i = 0; i < exception_tables->num_pdata_entries; ++i) {
-      exception_tables->pdata[i].begin_address += code_start;  // Fixup to .text RVA.
-      exception_tables->pdata[i].end_address += code_start;    // Fixup to .text RVA.
+      exception_tables->pdata[i].begin_address += code_start;         // Fixup to .text RVA.
+      exception_tables->pdata[i].end_address += code_start;           // Fixup to .text RVA.
       exception_tables->pdata[i].unwind_data += xdata_virtual_start;  // Fixup to .xdata RVA.
     }
-    fwrite(exception_tables->pdata, sizeof(DbpRUNTIME_FUNCTION), exception_tables->num_pdata_entries,
-        f);
+    fwrite(exception_tables->pdata, sizeof(DbpRUNTIME_FUNCTION),
+           exception_tables->num_pdata_entries, f);
     file_fill_to_next_page(f, 0);
 
     //

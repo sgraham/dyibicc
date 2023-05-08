@@ -19,7 +19,7 @@ static bool read_file(const char* path, char** contents, size_t* size) {
   return true;
 }
 
-int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
+int LLVMFuzzerTestOneInput(const uint8_t* Data, size_t Size) {
   const char* no_include_paths[] = {NULL};
   const char* one_input_path[] = {"fuzz.c", NULL};
   DyibiccEnviromentData env_data = {
@@ -34,7 +34,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 
   DyibiccContext* ctx = dyibicc_set_environment(&env_data);
 
-  char* data_copy = malloc(Size+1);
+  char* data_copy = malloc(Size + 1);
   memcpy(data_copy, Data, Size);
   data_copy[Size] = 0;
   dyibicc_update(ctx, "fuzz.c", data_copy);
