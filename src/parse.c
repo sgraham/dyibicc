@@ -231,7 +231,7 @@ static VarScope* push_scope(char* name) {
   return sc;
 }
 
-static Initializer* new_initializer(Type* ty, bool is_flexible) {
+static Initializer* new_initializer(Type* ty, bool is_flexible, Token* err_tok) {
   Initializer* init = bumpcalloc(1, sizeof(Initializer), AL_Compile);
   init->ty = ty;
 
@@ -242,12 +242,12 @@ static Initializer* new_initializer(Type* ty, bool is_flexible) {
     }
 
     if (ty->array_len < 0) {
-      error_tok(ty->name, "array has incomplete element type");
+      error_tok(err_tok, "array has incomplete element type");
     }
 
     init->children = bumpcalloc(ty->array_len, sizeof(Initializer*), AL_Compile);
     for (int i = 0; i < ty->array_len; i++)
-      init->children[i] = new_initializer(ty->base, false);
+      init->children[i] = new_initializer(ty->base, false, err_tok);
     return init;
   }
 
@@ -266,7 +266,7 @@ static Initializer* new_initializer(Type* ty, bool is_flexible) {
         child->is_flexible = true;
         init->children[mem->idx] = child;
       } else {
-        init->children[mem->idx] = new_initializer(mem->ty, false);
+        init->children[mem->idx] = new_initializer(mem->ty, false, err_tok);
       }
     }
     return init;
@@ -938,7 +938,7 @@ static Token* skip_excess_element(Token* tok) {
 // string-initializer = string-literal
 static void string_initializer(Token** rest, Token* tok, Initializer* init) {
   if (init->is_flexible)
-    *init = *new_initializer(array_of(init->ty->base, tok->ty->array_len), false);
+    *init = *new_initializer(array_of(init->ty->base, tok->ty->array_len), false, tok);
 
   int len = MIN(init->ty->array_len, tok->ty->array_len);
 
@@ -1084,7 +1084,7 @@ static void designation(Token** rest, Token* tok, Initializer* init) {
 // of initializer elements.
 static int count_array_init_elements(Token* tok, Type* ty) {
   bool first = true;
-  Initializer* dummy = new_initializer(ty->base, true);
+  Initializer* dummy = new_initializer(ty->base, true, tok);
 
   int i = 0, max = 0;
 
@@ -1115,14 +1115,14 @@ static void array_initializer1(Token** rest, Token* tok, Initializer* init) {
 
   if (init->is_flexible) {
     int len = count_array_init_elements(tok, init->ty);
-    *init = *new_initializer(array_of(init->ty->base, len), false);
+    *init = *new_initializer(array_of(init->ty->base, len), false, tok);
   }
 
   bool first = true;
 
   if (init->is_flexible) {
     int len = count_array_init_elements(tok, init->ty);
-    *init = *new_initializer(array_of(init->ty->base, len), false);
+    *init = *new_initializer(array_of(init->ty->base, len), false, tok);
   }
 
   for (int i = 0; !consume_end(rest, tok); i++) {
@@ -1153,7 +1153,7 @@ static void array_initializer1(Token** rest, Token* tok, Initializer* init) {
 static void array_initializer2(Token** rest, Token* tok, Initializer* init, int i) {
   if (init->is_flexible) {
     int len = count_array_init_elements(tok, init->ty);
-    *init = *new_initializer(array_of(init->ty->base, len), false);
+    *init = *new_initializer(array_of(init->ty->base, len), false, tok);
   }
 
   for (; i < init->ty->array_len && !is_end(tok); i++) {
@@ -1320,7 +1320,7 @@ static Type* copy_struct_type(Type* ty) {
 }
 
 static Initializer* initializer(Token** rest, Token* tok, Type* ty, Type** new_ty) {
-  Initializer* init = new_initializer(ty, true);
+  Initializer* init = new_initializer(ty, true, tok);
   initializer2(rest, tok, init);
 
   if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION) && ty->is_flexible) {
