@@ -618,17 +618,20 @@ static Type* func_params(Token** rest, Token* tok, Type* ty) {
     ty2 = declarator(&tok, tok, ty2);
 
     Token* name = ty2->name;
+    Token* name_pos = ty2->name_pos;
 
     if (ty2->kind == TY_ARRAY) {
       // "array of T" is converted to "pointer to T" only in the parameter
       // context. For example, *argv[] is converted to **argv by this.
       ty2 = pointer_to(ty2->base);
       ty2->name = name;
+      ty2->name_pos = name_pos;
     } else if (ty2->kind == TY_FUNC) {
       // Likewise, a function is converted to a pointer to a function
       // only in the parameter context.
       ty2 = pointer_to(ty2);
       ty2->name = name;
+      ty2->name_pos = name_pos;
     }
 
     cur = cur->next = copy_type(ty2);
@@ -1904,16 +1907,24 @@ static int64_t eval2(Node* node, char*** label, int** pclabel) {
       return eval2(node->lhs, label, pclabel) - eval(node->rhs);
     case ND_MUL:
       return eval(node->lhs) * eval(node->rhs);
-    case ND_DIV:
+    case ND_DIV: {
       if (node->ty->is_unsigned)
         return (uint64_t)eval(node->lhs) / eval(node->rhs);
-      return eval(node->lhs) / eval(node->rhs);
+      int64_t divisor = eval(node->rhs);
+      if (divisor == 0)
+        error_tok(node->tok, "division by zero");
+      return eval(node->lhs) / divisor;
+    }
     case ND_NEG:
       return -eval(node->lhs);
-    case ND_MOD:
+    case ND_MOD: {
+      int64_t divisor = eval(node->rhs);
+      if (divisor == 0)
+        error_tok(node->tok, "division by zero");
       if (node->ty->is_unsigned)
-        return (uint64_t)eval(node->lhs) % eval(node->rhs);
-      return eval(node->lhs) % eval(node->rhs);
+        return (uint64_t)eval(node->lhs) % divisor;
+      return eval(node->lhs) % divisor;
+    }
     case ND_BITAND:
       return eval(node->lhs) & eval(node->rhs);
     case ND_BITOR:
