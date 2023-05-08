@@ -24,9 +24,15 @@ def main():
     else:
         res = subprocess.run([ccbin] + cmds['run'].split(' '), cwd=root)
 
-    if res.returncode != cmds['ret']:
-        print('got return code %d, but expected %d' % (res.returncode, cmds['ret']))
+    if cmds['ret'] == 'NOCRASH':
+        if res.returncode >= 0 and res.returncode <= 255:
+            return 0
+        # Something out of range indicates crash, e.g Windows returns -1073741819 on GPF.
         return 2
+    else:
+        if res.returncode != cmds['ret']:
+            print('got return code %d, but expected %d' % (res.returncode, cmds['ret']))
+            return 2
 
 
 if __name__ == '__main__':

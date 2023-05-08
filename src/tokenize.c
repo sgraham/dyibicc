@@ -479,7 +479,7 @@ Token* tokenize(File* file) {
     // Skip line comments.
     if (p[0] == '/' && p[1] == '/') {
       p += 2;
-      while (*p != '\n')
+      while (*p && *p != '\n')
         p++;
       C(has_space) = true;
       continue;

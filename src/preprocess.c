@@ -223,7 +223,7 @@ static Token* copy_line(Token** rest, Token* tok) {
   Token head = {0};
   Token* cur = &head;
 
-  for (; !tok->at_bol; tok = tok->next)
+  for (; tok->kind != TK_EOF && !tok->at_bol; tok = tok->next)
     cur = cur->next = copy_token(tok);
 
   cur->next = new_eof(tok);

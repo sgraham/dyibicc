@@ -35,8 +35,6 @@ IMPLSTATIC int encode_utf8(char* buf, uint32_t c) {
 // identical to ASCII. Non-ASCII characters are encoded using more
 // than one byte.
 IMPLSTATIC uint32_t decode_utf8(char** new_pos, char* p) {
-#if 0
-
   if ((unsigned char)*p < 128) {
     *new_pos = p + 1;
     return *p;
@@ -67,57 +65,6 @@ IMPLSTATIC uint32_t decode_utf8(char** new_pos, char* p) {
 
   *new_pos = p + len;
   return c;
-
-#else
-  // From http://bjoern.hoehrmann.de/utf-8/decoder/dfa/#variations
-
-  // This is maybe only a tiny amout faster (under /Ox /GL), likely because most
-  // code is ASCII so we hit the < 128 early out in the plain code.
-
-#define UTF8_ACCEPT 0
-#define UTF8_REJECT 12
-
-  // clang-format off
-  static const uint8_t utf8d[] = {
-    // The first part of the table maps bytes to character classes that
-    // to reduce the size of the transition table and create bitmasks.
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,  9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,
-    7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
-    8,8,2,2,2,2,2,2,2,2,2,2,2,2,2,2,  2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
-    10,3,3,3,3,3,3,3,3,3,3,3,3,4,3,3, 11,6,6,6,5,8,8,8,8,8,8,8,8,8,8,8,
-
-    // The second part is a transition table that maps a combination
-    // of a state of the automaton and a character class to a state.
-    0,12,24,36,60,96,84,12,12,12,48,72, 12,12,12,12,12,12,12,12,12,12,12,12,
-    12, 0,12,12,12,12,12, 0,12, 0,12,12, 12,24,12,12,12,12,12,24,12,24,12,12,
-    12,12,12,12,12,12,12,24,12,12,12,12, 12,24,12,12,12,12,12,12,12,24,12,12,
-    12,12,12,12,12,12,12,36,12,36,12,12, 12,36,12,12,12,12,12,36,12,36,12,12,
-    12,36,12,12,12,12,12,12,12,12,12,12,
-  };
-  // clang-format on
-
-  uint32_t state = 0;
-  uint32_t codep = 0;
-  char* start = p;
-
-  while (*p) {
-    uint8_t byte = *p++;
-    uint32_t type = utf8d[byte];
-    codep = (state != UTF8_ACCEPT) ? (byte & 0x3fu) | (codep << 6) : (0xff >> type) & (byte);
-    state = utf8d[256 + state + type];
-    if (!state)
-      break;
-  }
-  if (!*p && state != UTF8_ACCEPT) {
-    error_at(start, "invalid UTF-8 sequence");
-  }
-  *new_pos = p;
-  return codep;
-#endif
 }
 
 static bool in_range(uint32_t* range, uint32_t c) {

@@ -14,6 +14,7 @@ FILELIST = [
     'type.c',
     'alloc.c',
     'entry.c',
+    'fuzz_entry.c',
     'hashmap.c',
     'link.c',
     'main.c',
@@ -50,6 +51,12 @@ CONFIGS = {
         },
     },
     'l': {
+        'f': {
+            'COMPILE': 'clang -fsanitize=fuzzer -std=c11 -MMD -MT $out -MF $out.d -g -O0 -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -DNDEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -I$root -c $in -o $out',
+            'LINK': 'clang -fsanitize=fuzzer -o $out $in -pthread -lm -ldl -g',
+            'ML': 'clang -o $out $in -lm',
+            'TESTCEXE': 'clang -fsanitize=fuzzer -Iembed -Wall -Wextra -Werror -ldl -lm -o $out $in',
+        },
         'd': {
             'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -O0 -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -DNDEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -I$root -c $in -o $out',
             'LINK': 'clang -o $out $in -pthread -lm -ldl -g',
@@ -109,7 +116,15 @@ def get_upd_tests():
     return tests
 
 
-def generate(platform, config, settings, cmdlines, tests, upd_tests):
+def get_fuzz_tests():
+    tests = []
+    for test in glob.glob(os.path.join('test', 'fuzzcases', '*')):
+        test = test.replace('\\', '/')
+        tests.append(test)
+    return tests
+
+
+def generate(platform, config, settings, cmdlines, tests, upd_tests, fuzz_tests):
     root_dir = os.path.join('out', platform + config)
     if not os.path.isdir(root_dir):
         os.makedirs(root_dir)
@@ -162,6 +177,8 @@ def generate(platform, config, settings, cmdlines, tests, upd_tests):
         objs.append(obj)
 
         for src in FILELIST:
+            if config == 'f' and src == 'entry.c': continue
+            if config != 'f' and src == 'fuzz_entry.c': continue
             obj = os.path.splitext(src)[0] + obj_ext
             objs.append(obj)
             f.write('build %s: cc $root/%s\n' % (obj, src))
@@ -216,6 +233,14 @@ def generate(platform, config, settings, cmdlines, tests, upd_tests):
             f.write('  data = %s\n' % str(cmds_to_pass, encoding='utf-8'))
             alltests.append(testf)
 
+        for testf in fuzz_tests:
+            f.write('build %s: testrun $root/../%s | %s\n' % (
+                testf, testf, dyibiccexe))
+            cmds = {'run': testf, 'ret': 'NOCRASH', 'txt': ''}
+            cmds_to_pass = base64.b64encode(bytes(json.dumps(cmds), encoding='utf-8'))
+            f.write('  data = %s\n' % str(cmds_to_pass, encoding='utf-8'))
+            alltests.append(testf)
+
         for testpy in upd_tests:
             tmpc = os.path.basename(testpy) + '.runner.c'
             tmpexe = os.path.basename(testpy) + '.runner' + exe_ext
@@ -245,13 +270,14 @@ def main():
     os.chdir(ROOT_DIR)  # Necessary when regenerating manifest from ninja
     tests = get_tests()
     upd_tests = get_upd_tests()
+    fuzz_tests = get_fuzz_tests()
     for platform, pdata in CONFIGS.items():
         if (sys.platform == 'win32' and platform == 'w') or \
                 (sys.platform == 'linux' and platform == 'l'):
             for config, cmdlines in pdata.items():
                 if config == '__':
                     continue
-                generate(platform, config, pdata['__'], cmdlines, tests, upd_tests)
+                generate(platform, config, pdata['__'], cmdlines, tests, upd_tests, fuzz_tests)
 
 
 if __name__ == '__main__':
