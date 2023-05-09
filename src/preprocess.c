@@ -905,6 +905,9 @@ static Token* preprocess2(Token* tok) {
     if (equal(tok, "ifdef")) {
       bool defined = find_macro(tok->next);
       push_cond_incl(tok, defined);
+      if (tok->next->kind == TK_EOF) {
+        error_tok(tok, "unterminated #ifdef");
+      }
       tok = skip_line(tok->next->next);
       if (!defined)
         tok = skip_cond_incl(tok);
@@ -914,6 +917,9 @@ static Token* preprocess2(Token* tok) {
     if (equal(tok, "ifndef")) {
       bool defined = find_macro(tok->next);
       push_cond_incl(tok, !defined);
+      if (tok->next->kind == TK_EOF) {
+        error_tok(tok, "unterminated #ifndef");
+      }
       tok = skip_line(tok->next->next);
       if (defined)
         tok = skip_cond_incl(tok);
