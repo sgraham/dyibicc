@@ -996,12 +996,12 @@ static void string_initializer(Token** rest, Token* tok, Initializer* init) {
 // The above initializer sets x.c to 5.
 static void array_designator(Token** rest, Token* tok, Type* ty, int* begin, int* end) {
   *begin = (int)const_expr(&tok, tok->next);
-  if (*begin >= ty->array_len)
+  if (*begin >= ty->array_len || *begin < 0)
     error_tok(tok, "array designator index exceeds array bounds");
 
   if (equal(tok, "...")) {
     *end = (int)const_expr(&tok, tok->next);
-    if (*end >= ty->array_len)
+    if (*end >= ty->array_len || *end < 0)
       error_tok(tok, "array designator index exceeds array bounds");
     if (*end < *begin)
       error_tok(tok, "array designator range [%d, %d] is empty", *begin, *end);
@@ -1913,11 +1913,11 @@ static int64_t eval2(Node* node, char*** label, int** pclabel) {
     case ND_MUL:
       return eval(node->lhs) * eval(node->rhs);
     case ND_DIV: {
-      if (node->ty->is_unsigned)
-        return (uint64_t)eval(node->lhs) / eval(node->rhs);
       int64_t divisor = eval(node->rhs);
       if (divisor == 0)
         error_tok(node->tok, "division by zero");
+      if (node->ty->is_unsigned)
+        return (uint64_t)eval(node->lhs) / divisor;
       return eval(node->lhs) / divisor;
     }
     case ND_NEG:
@@ -2016,7 +2016,7 @@ static int64_t eval2(Node* node, char*** label, int** pclabel) {
 static int64_t eval_rval(Node* node, char*** label, int** pclabel) {
   switch (node->kind) {
     case ND_VAR:
-      if (node->var->is_local)
+      if (node->var->is_local || !label)
         error_tok(node->tok, "not a compile-time constant");
       *label = &node->var->name;
       return 0;
@@ -2302,7 +2302,7 @@ static Node* logor(Token** rest, Token* tok) {
 
 // logand = bitor ("&&" bitor)*
 static Node* logand(Token** rest, Token* tok) {
-  Node* node = bitor (&tok, tok);
+  Node* node = bitor(&tok, tok);
   while (equal(tok, "&&")) {
     Token* start = tok;
     node = new_binary(ND_LOGAND, node, bitor (&tok, tok->next), start);
@@ -3669,6 +3669,8 @@ static Token* global_variable(Token* tok, Type* basety, VarAttr* attr) {
       tok = skip(tok, ",");
     first = false;
 
+    Token* start = tok;
+
     Type* ty = declarator(&tok, tok, basety);
     if (!ty->name)
       error_tok(ty->name_pos, "variable name omitted");
@@ -3684,6 +3686,9 @@ static Token* global_variable(Token* tok, Type* basety, VarAttr* attr) {
       gvar_initializer(&tok, tok->next, var);
     else if (!attr->is_extern && !attr->is_tls)
       var->is_tentative = true;
+
+    if (!attr->is_extern && var->ty->kind == TY_ARRAY && var->ty->array_len < 0)
+      error_tok(start, "incomplete type for array");
   }
   return tok;
 }

@@ -118,9 +118,9 @@ IMPLSTATIC Type* func_type(Type* return_ty) {
 }
 
 IMPLSTATIC Type* array_of(Type* base, int len, Token* err_tok) {
-  if ((int64_t)base->size * len > INT_MAX) {
+  int64_t arr_size = (int64_t)base->size * len;
+  if (arr_size > INT_MAX)
     error_tok(err_tok, "array too large");
-  }
   Type* ty = new_type(TY_ARRAY, base->size * len, base->align);
   ty->base = base;
   ty->array_len = len;
