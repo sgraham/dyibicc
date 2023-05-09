@@ -430,7 +430,7 @@ struct Node {
 };
 
 IMPLSTATIC Node* new_cast(Node* expr, Type* ty);
-IMPLSTATIC int64_t const_expr(Token** rest, Token* tok);
+IMPLSTATIC int64_t pp_const_expr(Token** rest, Token* tok);
 IMPLSTATIC Obj* parse(Token* tok);
 
 //
@@ -544,7 +544,7 @@ IMPLSTATIC bool is_compatible(Type* t1, Type* t2);
 IMPLSTATIC Type* copy_type(Type* ty);
 IMPLSTATIC Type* pointer_to(Type* base);
 IMPLSTATIC Type* func_type(Type* return_ty);
-IMPLSTATIC Type* array_of(Type* base, int size);
+IMPLSTATIC Type* array_of(Type* base, int size, Token* err_tok);
 IMPLSTATIC Type* vla_of(Type* base, Node* expr);
 IMPLSTATIC Type* enum_type(void);
 IMPLSTATIC Type* struct_type(void);
@@ -710,6 +710,7 @@ typedef struct CompilerState {
   Obj* parse__builtin_alloca;
   int parse__unique_name_id;
   HashMap parse__typename_map;
+  bool parse__evaluating_pp_const;
 
   // codegen.in.c
   int codegen__depth;

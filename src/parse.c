@@ -94,6 +94,7 @@ static Node* expr(Token** rest, Token* tok);
 static int64_t eval(Node* node);
 static int64_t eval2(Node* node, char*** label, int** pclabel);
 static int64_t eval_rval(Node* node, char*** label, int** pclabel);
+static int64_t const_expr(Token** rest, Token* tok);
 static bool is_const_expr(Node* node);
 static Node* assign(Token** rest, Token* tok);
 static Node* logor(Token** rest, Token* tok);
@@ -658,7 +659,7 @@ static Type* array_dimensions(Token** rest, Token* tok, Type* ty) {
 
   if (equal(tok, "]")) {
     ty = type_suffix(rest, tok->next, ty);
-    return array_of(ty, -1);
+    return array_of(ty, -1, tok);
   }
 
   Node* expr = conditional(&tok, tok);
@@ -667,7 +668,7 @@ static Type* array_dimensions(Token** rest, Token* tok, Type* ty) {
 
   if (ty->kind == TY_VLA || !is_const_expr(expr))
     return vla_of(ty, expr);
-  return array_of(ty, (int)eval(expr));
+  return array_of(ty, (int)eval(expr), tok);
 }
 
 // type-suffix = "(" func-params
@@ -938,7 +939,7 @@ static Token* skip_excess_element(Token* tok) {
 // string-initializer = string-literal
 static void string_initializer(Token** rest, Token* tok, Initializer* init) {
   if (init->is_flexible)
-    *init = *new_initializer(array_of(init->ty->base, tok->ty->array_len), false, tok);
+    *init = *new_initializer(array_of(init->ty->base, tok->ty->array_len, tok), false, tok);
 
   int len = MIN(init->ty->array_len, tok->ty->array_len);
 
@@ -1115,14 +1116,14 @@ static void array_initializer1(Token** rest, Token* tok, Initializer* init) {
 
   if (init->is_flexible) {
     int len = count_array_init_elements(tok, init->ty);
-    *init = *new_initializer(array_of(init->ty->base, len), false, tok);
+    *init = *new_initializer(array_of(init->ty->base, len, tok), false, tok);
   }
 
   bool first = true;
 
   if (init->is_flexible) {
     int len = count_array_init_elements(tok, init->ty);
-    *init = *new_initializer(array_of(init->ty->base, len), false, tok);
+    *init = *new_initializer(array_of(init->ty->base, len, tok), false, tok);
   }
 
   for (int i = 0; !consume_end(rest, tok); i++) {
@@ -1153,7 +1154,7 @@ static void array_initializer1(Token** rest, Token* tok, Initializer* init) {
 static void array_initializer2(Token** rest, Token* tok, Initializer* init, int i) {
   if (init->is_flexible) {
     int len = count_array_init_elements(tok, init->ty);
-    *init = *new_initializer(array_of(init->ty->base, len), false, tok);
+    *init = *new_initializer(array_of(init->ty->base, len, tok), false, tok);
   }
 
   for (; i < init->ty->array_len && !is_end(tok); i++) {
@@ -1986,6 +1987,8 @@ static int64_t eval2(Node* node, char*** label, int** pclabel) {
     case ND_ADDR:
       return eval_rval(node->lhs, label, pclabel);
     case ND_LABEL_VAL:
+      if (!pclabel)
+        error_tok(node->tok, "not a compile-time constant");
       *pclabel = &node->pc_label;
       return 0;
     case ND_MEMBER:
@@ -2067,6 +2070,13 @@ static bool is_const_expr(Node* node) {
 
 IMPLSTATIC int64_t const_expr(Token** rest, Token* tok) {
   Node* node = conditional(rest, tok);
+  return eval(node);
+}
+
+IMPLSTATIC int64_t pp_const_expr(Token** rest, Token* tok) {
+  C(evaluating_pp_const) = true;
+  Node* node = conditional(rest, tok);
+  C(evaluating_pp_const) = false;
   return eval(node);
 }
 
@@ -2666,7 +2676,7 @@ static void struct_members(Token** rest, Token* tok, Type* ty) {
   // called a "flexible array member". It should behave as if
   // if were a zero-sized array.
   if (cur != &head && cur->ty->kind == TY_ARRAY && cur->ty->array_len < 0) {
-    cur->ty = array_of(cur->ty->base, 0);
+    cur->ty = array_of(cur->ty->base, 0, tok);
     ty->is_flexible = true;
   }
 
@@ -3476,6 +3486,9 @@ static Node* primary(Token** rest, Token* tok) {
   }
 
   if (tok->kind == TK_STR) {
+    if (C(evaluating_pp_const)) {
+      error_tok(tok, "invalid token in preprocessor expression");
+    }
     Obj* var = new_string_literal(tok->str, tok->ty);
     *rest = tok->next;
     return new_var_node(var, tok);
@@ -3625,7 +3638,7 @@ static Token* function(Token* tok, Type* basety, VarAttr* attr) {
 
 #if !X64WIN
   if (ty->is_variadic)
-    fn->va_area = new_lvar("__va_area__", array_of(ty_char, 136));
+    fn->va_area = new_lvar("__va_area__", array_of(ty_char, 136, NULL));
 #endif
   fn->alloca_bottom = new_lvar("__alloca_size__", pointer_to(ty_char));
 
@@ -3635,11 +3648,11 @@ static Token* function(Token* tok, Type* basety, VarAttr* attr) {
   // automatically defined as a local variable containing the
   // current function name.
   push_scope("__func__")->var =
-      new_string_literal(fn->name, array_of(ty_char, (int)strlen(fn->name) + 1));
+      new_string_literal(fn->name, array_of(ty_char, (int)strlen(fn->name) + 1, NULL));
 
   // [GNU] __FUNCTION__ is yet another name of __func__.
   push_scope("__FUNCTION__")->var =
-      new_string_literal(fn->name, array_of(ty_char, (int)strlen(fn->name) + 1));
+      new_string_literal(fn->name, array_of(ty_char, (int)strlen(fn->name) + 1, NULL));
 
   fn->body = compound_stmt(&tok, tok);
   fn->locals = C(locals);

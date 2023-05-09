@@ -1,7 +1,7 @@
 #include "dyibicc.h"
 
 static void usage(int status) {
-  printf("dyibicc [-e symbolname] [-I <path>] <file0> [<file1>...]\n");
+  printf("dyibicc [-e symbolname] [-I <path>] [-c] <file0> [<file1>...]\n");
   exit(status);
 }
 
@@ -37,6 +37,7 @@ static bool read_file(const char* path, char** contents, size_t* size) {
 static void parse_args(int argc,
                        char** argv,
                        char** entry_point_override,
+                       bool* compile_only,
                        StringArray* include_paths,
                        StringArray* input_paths) {
   for (int i = 1; i < argc; i++)
@@ -52,6 +53,11 @@ static void parse_args(int argc,
 
     if (!strncmp(argv[i], "-e", 2)) {
       *entry_point_override = argv[i] + 2;
+      continue;
+    }
+
+    if (!strncmp(argv[i], "-c", 2)) {
+      *compile_only = true;
       continue;
     }
 
@@ -78,7 +84,8 @@ int main(int argc, char** argv) {
   StringArray include_paths = {0};
   StringArray input_paths = {0};
   char* entry_point_override = "main";
-  parse_args(argc, argv, &entry_point_override, &include_paths, &input_paths);
+  bool compile_only = false;
+  parse_args(argc, argv, &entry_point_override, &compile_only, &include_paths, &input_paths);
   strarray_push(&include_paths, NULL, AL_Link);
   strarray_push(&input_paths, NULL, AL_Link);
 
@@ -101,9 +108,14 @@ int main(int argc, char** argv) {
   if (dyibicc_update(ctx, NULL, NULL)) {
     void* entry_point = dyibicc_find_export(ctx, entry_point_override);
     if (entry_point) {
-      int myargc = 1;
-      char* myargv[] = {"prog", NULL};
-      result = ((int (*)(int, char**))entry_point)(myargc, myargv);
+      if (compile_only) {
+        // Only doing a syntax check, just return 0 without running if we made it this far.
+        result = 0;
+      } else {
+        int myargc = 1;
+        char* myargv[] = {"prog", NULL};
+        result = ((int (*)(int, char**))entry_point)(myargc, myargv);
+      }
     } else {
       printf("no entry point found\n");
       result = 254;

@@ -294,7 +294,7 @@ static long eval_const_expr(Token** rest, Token* tok) {
   convert_pp_tokens(expr);
 
   Token* rest2;
-  long val = (long)const_expr(&rest2, expr);
+  long val = (long)pp_const_expr(&rest2, expr);
   if (rest2->kind != TK_EOF)
     error_tok(rest2, "extra token");
   return val;
@@ -1222,7 +1222,7 @@ static void join_adjacent_string_literals(Token* tok) {
     }
 
     *tok1 = *copy_token(tok1);
-    tok1->ty = array_of(tok1->ty->base, len);
+    tok1->ty = array_of(tok1->ty->base, len, tok1);
     tok1->str = buf;
     tok1->next = tok2;
     tok1 = tok2;
