@@ -264,6 +264,8 @@ IMPLSTATIC void add_type(Node* node) {
       return;
     case ND_VAR:
     case ND_VLA_PTR:
+      if (!node->var)
+        error_tok(node->tok, "non-constant value");
       node->ty = node->var->ty;
       return;
     case ND_COND:

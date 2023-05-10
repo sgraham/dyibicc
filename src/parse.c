@@ -668,7 +668,11 @@ static Type* array_dimensions(Token** rest, Token* tok, Type* ty) {
 
   if (ty->kind == TY_VLA || !is_const_expr(expr))
     return vla_of(ty, expr);
-  return array_of(ty, (int)eval(expr), tok);
+  int dim = (int)eval(expr);
+  if (dim < 0) {
+    error_tok(expr->tok, "array declared with negative bounds");
+  }
+  return array_of(ty, dim, tok);
 }
 
 // type-suffix = "(" func-params
@@ -2302,7 +2306,7 @@ static Node* logor(Token** rest, Token* tok) {
 
 // logand = bitor ("&&" bitor)*
 static Node* logand(Token** rest, Token* tok) {
-  Node* node = bitor(&tok, tok);
+  Node* node = bitor (&tok, tok);
   while (equal(tok, "&&")) {
     Token* start = tok;
     node = new_binary(ND_LOGAND, node, bitor (&tok, tok->next), start);
@@ -2610,12 +2614,18 @@ static Node* unary(Token** rest, Token* tok) {
     return new_unary(ND_BITNOT, cast(rest, tok->next), tok);
 
   // Read ++i as i+=1
-  if (equal(tok, "++"))
+  if (equal(tok, "++")) {
+    if (C(evaluating_pp_const))
+      error_tok(tok, "invalid preprocessor token");
     return to_assign(new_add(unary(rest, tok->next), new_num(1, tok), tok));
+  }
 
   // Read --i as i-=1
-  if (equal(tok, "--"))
+  if (equal(tok, "--")) {
+    if (C(evaluating_pp_const))
+      error_tok(tok, "invalid preprocessor token");
     return to_assign(new_sub(unary(rest, tok->next), new_num(1, tok), tok));
+  }
 
   // [GNU] labels-as-values
   if (equal(tok, "&&")) {
@@ -3687,7 +3697,7 @@ static Token* global_variable(Token* tok, Type* basety, VarAttr* attr) {
     else if (!attr->is_extern && !attr->is_tls)
       var->is_tentative = true;
 
-    if (!attr->is_extern && var->ty->kind == TY_ARRAY && var->ty->array_len < 0)
+    if (!attr->is_extern && var->ty->kind == TY_ARRAY && var->ty->size < 0)
       error_tok(start, "incomplete type for array");
   }
   return tok;
