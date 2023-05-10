@@ -1055,8 +1055,12 @@ static void designation(Token** rest, Token* tok, Initializer* init) {
     array_designator(&tok, tok, init->ty, &begin, &end);
 
     Token* tok2 = NULL;
-    for (int i = begin; i <= end; i++)
+    for (int i = begin; i <= end; i++) {
+      if (!init->children) {
+        error_tok(tok, "incomplete array element type");
+      }
       designation(&tok2, tok, init->children[i]);
+    }
     array_initializer2(rest, tok2, init, begin + 1);
     return;
   }
@@ -2957,12 +2961,16 @@ static Node* postfix(Token** rest, Token* tok) {
     }
 
     if (equal(tok, "++")) {
+      if (C(evaluating_pp_const))
+        error_tok(tok, "invalid token in preprocessor expression");
       node = new_inc_dec(node, tok, 1);
       tok = tok->next;
       continue;
     }
 
     if (equal(tok, "--")) {
+      if (C(evaluating_pp_const))
+        error_tok(tok, "invalid token in preprocessor expression");
       node = new_inc_dec(node, tok, -1);
       tok = tok->next;
       continue;
