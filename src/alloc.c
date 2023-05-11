@@ -2,6 +2,7 @@
 
 #if X64WIN
 #include <windows.h>
+#include "dyn_basic_pdb.h"
 #else
 #include <sys/mman.h>
 #endif

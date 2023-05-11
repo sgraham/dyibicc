@@ -1,7 +1,7 @@
 #include "dyibicc.h"
 
 static void usage(int status) {
-  printf("dyibicc [-e symbolname] [-I <path>] [-c] <file0> [<file1>...]\n");
+  printf("dyibicc [-e symbolname] [-I <path>] [-c] [-g] <file0> [<file1>...]\n");
   exit(status);
 }
 
@@ -38,6 +38,7 @@ static void parse_args(int argc,
                        char** argv,
                        char** entry_point_override,
                        bool* compile_only,
+                       bool* debug_symbols,
                        StringArray* include_paths,
                        StringArray* input_paths) {
   for (int i = 1; i < argc; i++)
@@ -58,6 +59,11 @@ static void parse_args(int argc,
 
     if (!strncmp(argv[i], "-c", 2)) {
       *compile_only = true;
+      continue;
+    }
+
+    if (!strncmp(argv[i], "-g", 2)) {
+      *debug_symbols = true;
       continue;
     }
 
@@ -85,7 +91,9 @@ int main(int argc, char** argv) {
   StringArray input_paths = {0};
   char* entry_point_override = "main";
   bool compile_only = false;
-  parse_args(argc, argv, &entry_point_override, &compile_only, &include_paths, &input_paths);
+  bool debug_symbols = false;
+  parse_args(argc, argv, &entry_point_override, &compile_only, &debug_symbols, &include_paths,
+             &input_paths);
   strarray_push(&include_paths, NULL, AL_Link);
   strarray_push(&input_paths, NULL, AL_Link);
 
@@ -97,6 +105,7 @@ int main(int argc, char** argv) {
       .get_function_address = NULL,
       .output_function = NULL,
       .use_ansi_codes = isatty(fileno(stdout)),
+      .generate_debug_symbols = debug_symbols,
   };
 
   DyibiccContext* ctx = dyibicc_set_environment(&env_data);

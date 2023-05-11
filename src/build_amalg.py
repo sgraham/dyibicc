@@ -51,6 +51,8 @@ def include_file(f, src):
                 continue
             if line.startswith('#include "dynasm/dasm_x86.h"'):
                 continue
+            if line.startswith('#include "dyn_basic_pdb.h"'):
+                continue
             if line.startswith('#include "../include/all/reflect.h"'):
                 continue
             if line.startswith('#pragma once'):

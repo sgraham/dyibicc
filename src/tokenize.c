@@ -725,6 +725,8 @@ Token* tokenize_filecontents(char* path, char* p) {
   convert_universal_chars(p);
 
   File* file = new_file(path, p);
+  file->file_no = C(all_tokenized_files).len;
+  fileptrarray_push(&C(all_tokenized_files), file, AL_Compile);
   return tokenize(file);
 }
 

@@ -99,6 +99,42 @@ IMPLSTATIC void strintarray_push(StringIntArray* arr, StringInt item, AllocLifet
   arr->data[arr->len++] = item;
 }
 
+IMPLSTATIC void fileptrarray_push(FilePtrArray* arr, File* item, AllocLifetime lifetime) {
+  if (!arr->data) {
+    arr->data = bumpcalloc(8, sizeof(File*), lifetime);
+    arr->capacity = 8;
+  }
+
+  if (arr->capacity == arr->len) {
+    arr->data = bumplamerealloc(arr->data, sizeof(File*) * arr->capacity,
+                                sizeof(File*) * arr->capacity * 2, lifetime);
+    arr->capacity *= 2;
+    for (int i = arr->len; i < arr->capacity; i++)
+      arr->data[i] = NULL;
+  }
+
+  arr->data[arr->len++] = item;
+}
+
+#if X64WIN
+IMPLSTATIC void intintintarray_push(IntIntIntArray* arr, IntIntInt item, AllocLifetime lifetime) {
+  if (!arr->data) {
+    arr->data = bumpcalloc(8, sizeof(IntIntInt), lifetime);
+    arr->capacity = 8;
+  }
+
+  if (arr->capacity == arr->len) {
+    arr->data = bumplamerealloc(arr->data, sizeof(IntIntInt) * arr->capacity,
+                                sizeof(IntIntInt) * arr->capacity * 2, lifetime);
+    arr->capacity *= 2;
+    for (int i = arr->len; i < arr->capacity; i++)
+      arr->data[i] = (IntIntInt){-1, -1, -1};
+  }
+
+  arr->data[arr->len++] = item;
+}
+#endif
+
 // Returns the contents of a given file. Doesn't support '-' for reading from
 // stdin.
 IMPLSTATIC char* read_file_wrap_user(char* path, AllocLifetime lifetime) {
@@ -228,6 +264,11 @@ IMPLSTATIC void error_internal(char* file, int line, char* msg) {
 
 #if X64WIN
 IMPLSTATIC void register_function_table_data(UserContext* ctx, int func_count, char* base_addr) {
+  if (ctx->generate_debug_symbols) {
+    // We don't use RtlAddFunctionTable/RtlDeleteFunctionTable if using a pdb
+    // dll, as the tables are already in the .pdata/.xdata section.
+    return;
+  }
   if (!RtlAddFunctionTable((RUNTIME_FUNCTION*)ctx->function_table_data, func_count,
                            (DWORD64)base_addr)) {
     error("failed to RtlAddFunctionTable");
@@ -236,11 +277,28 @@ IMPLSTATIC void register_function_table_data(UserContext* ctx, int func_count, c
 
 IMPLSTATIC void unregister_and_free_function_table_data(UserContext* ctx) {
   if (ctx->function_table_data) {
-    if (!RtlDeleteFunctionTable((RUNTIME_FUNCTION*)ctx->function_table_data)) {
-      error("failed to RtlDeleteFunctionTable");
+    // We don't use RtlAddFunctionTable/RtlDeleteFunctionTable if using a pdb
+    // dll, as the tables are already in the .pdata/.xdata section.
+    if (!ctx->generate_debug_symbols) {
+      if (!RtlDeleteFunctionTable((RUNTIME_FUNCTION*)ctx->function_table_data)) {
+        error("failed to RtlDeleteFunctionTable");
+      }
     }
     free(ctx->function_table_data);
     ctx->function_table_data = NULL;
   }
 }
+
+IMPLSTATIC char* get_temp_pdb_filename(AllocLifetime lifetime) {
+  char name_template[1024] = "dyibicc-XXXXXX";
+  if (_mktemp_s(name_template, strlen(name_template) + 1) < 0) {
+    error("failed to _mktemp_s");
+  }
+  strcat(name_template, ".pdb");
+  return bumpstrdup(name_template, lifetime);
+}
+
+#define DYN_BASIC_PDB_IMPLEMENTATION
+#include "dyn_basic_pdb.h"
+
 #endif

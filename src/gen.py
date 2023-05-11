@@ -190,9 +190,13 @@ def generate(platform, config, settings, cmdlines, tests, upd_tests, fuzz_tests)
                 '$root/dynasm/dasm_proto.h',
                 '$root/dynasm/dasm_x86.h',
         ]
-        f.write('build embed/libdyibicc.c embed/libdyibicc.h embed/LICENSE: amalg %s %s | %s %s $root/build_amalg.py\n' %
+        EXTRAS_FOR_AMALG_LATE = [
+                '$root/dyn_basic_pdb.h',
+        ]
+        f.write('build embed/libdyibicc.c embed/libdyibicc.h embed/LICENSE: amalg %s %s %s | %s %s $root/build_amalg.py\n' %
                 (' '.join(EXTRAS_FOR_AMALG),
                  ' '.join('$root/' + x for x in FILELIST if 'entry.c' not in x),
+                 ' '.join(EXTRAS_FOR_AMALG_LATE),
                  dynasmed_w,
                  dynasmed_l))
 

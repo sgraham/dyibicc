@@ -261,6 +261,7 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
     data->output_function = default_output_fn;
   }
   data->use_ansi_codes = env_data->use_ansi_codes;
+  data->generate_debug_symbols = env_data->generate_debug_symbols;
 
   char* d = (char*)(&data[1]);
 

@@ -82,6 +82,8 @@ typedef struct Hideset Hideset;
 typedef struct Token Token;
 typedef struct HashMap HashMap;
 typedef struct UserContext UserContext;
+typedef struct DbpContext DbpContext;
+typedef struct DbpFunctionSymbol DbpFunctionSymbol;
 
 //
 // alloc.c
@@ -116,6 +118,8 @@ IMPLSTATIC void free_executable_memory(void* p, size_t size);
 // util.c
 //
 
+typedef struct File File;
+
 typedef struct {
   char** data;
   int capacity;
@@ -133,22 +137,23 @@ typedef struct StringIntArray {
   int len;
 } StringIntArray;
 
-typedef struct ByteArray {
-  char* data;
+typedef struct FilePtrArray {
+  File** data;
   int capacity;
   int len;
-} ByteArray;
+} FilePtrArray;
 
-typedef struct IntInt {
+typedef struct IntIntInt {
   int a;
   int b;
-} IntInt;
+  int c;
+} IntIntInt;
 
-typedef struct IntIntArray {
-  IntInt* data;
+typedef struct IntIntIntArray {
+  IntIntInt* data;
   int capacity;
   int len;
-} IntIntArray;
+} IntIntIntArray;
 
 IMPLSTATIC char* bumpstrndup(const char* s, size_t n, AllocLifetime lifetime);
 IMPLSTATIC char* bumpstrdup(const char* s, AllocLifetime lifetime);
@@ -158,6 +163,10 @@ IMPLSTATIC int64_t align_to_s(int64_t n, int64_t align);
 IMPLSTATIC unsigned int get_page_size(void);
 IMPLSTATIC void strarray_push(StringArray* arr, char* s, AllocLifetime lifetime);
 IMPLSTATIC void strintarray_push(StringIntArray* arr, StringInt item, AllocLifetime lifetime);
+IMPLSTATIC void fileptrarray_push(FilePtrArray* arr, File* item, AllocLifetime lifetime);
+#if X64WIN
+IMPLSTATIC void intintintarray_push(IntIntIntArray* arr, IntIntInt item, AllocLifetime lifetime);
+#endif
 IMPLSTATIC char* format(AllocLifetime lifetime, char* fmt, ...)
     __attribute__((format(printf, 2, 3)));
 IMPLSTATIC char* read_file_wrap_user(char* path, AllocLifetime lifetime);
@@ -171,6 +180,7 @@ IMPLSTATIC void warn_tok(Token* tok, char* fmt, ...) __attribute__((format(print
 #if X64WIN
 IMPLSTATIC void register_function_table_data(UserContext* ctx, int func_count, char* base_addr);
 IMPLSTATIC void unregister_and_free_function_table_data(UserContext* ctx);
+IMPLSTATIC char* get_temp_pdb_filename(AllocLifetime lifetime);
 #endif
 
 //
@@ -188,14 +198,15 @@ typedef enum {
   TK_EOF,      // End-of-file markers
 } TokenKind;
 
-typedef struct {
+struct File {
   char* name;
   char* contents;
+  int file_no;  // Index into tokenize__all_tokenized_files.
 
   // For #line directive
   char* display_name;
   int line_delta;
-} File;
+};
 
 // Token type
 typedef struct Token Token;
@@ -270,6 +281,9 @@ struct Obj {
   int dasm_return_label;
   int dasm_end_of_function_label;
   int dasm_unwind_info_label;
+#if X64WIN
+  IntIntIntArray file_line_label_data;
+#endif
 
   // Global variable
   bool is_tentative;
@@ -654,6 +668,7 @@ struct UserContext {
   DyibiccFunctionLookupFn get_function_address;
   DyibiccOutputFn output_function;
   bool use_ansi_codes;
+  bool generate_debug_symbols;
 
   size_t num_include_paths;
   char** include_paths;
@@ -673,6 +688,7 @@ struct UserContext {
 
 #if X64WIN
   char* function_table_data;
+  DbpContext* dbp_ctx;
 #endif
 };
 
@@ -684,6 +700,7 @@ typedef struct CompilerState {
   bool tokenize__at_bol;         // True if the current position is at the beginning of a line
   bool tokenize__has_space;      // True if the current position follows a space character
   HashMap tokenize__keyword_map;
+  FilePtrArray tokenize__all_tokenized_files;
 
   // preprocess.c
   HashMap preprocess__macros;
@@ -719,7 +736,6 @@ typedef struct CompilerState {
   Obj* codegen__current_fn;
   int codegen__numlabels;
   StringIntArray codegen__fixups;
-  IntIntArray codegen__pending_code_pclabels;
 
   // main.c
   char* main__base_file;

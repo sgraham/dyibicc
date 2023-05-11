@@ -15,6 +15,8 @@
 #pragma warning(pop)
 #endif
 
+#include "dyn_basic_pdb.h"
+
 ///| .arch x64
 ///| .section code, pdata
 ///| .actionlist dynasm_actions
@@ -68,6 +70,24 @@ static int dasmargreg[] = {REG_DI, REG_SI, REG_DX, REG_CX, REG_R8, REG_R9};
 
 static void gen_expr(Node* node);
 static void gen_stmt(Node* node);
+
+#if X64WIN
+static void record_line_syminfo(int file_no, int line_no, int pclabel) {
+  // If file and line haven't changed, then we're working through parts of a
+  // single statement; just ignore.
+  int cur_len = C(current_fn)->file_line_label_data.len;
+  if (cur_len > 0 && C(current_fn)->file_line_label_data.data[cur_len - 1].a == file_no &&
+      C(current_fn)->file_line_label_data.data[cur_len - 1].b == line_no) {
+    return;
+  }
+
+  ///|=>pclabel:
+  intintintarray_push(&C(current_fn)->file_line_label_data, (IntIntInt){file_no, line_no, pclabel},
+                      AL_Compile);
+  // printf("%s:%d:label %d\n", compiler_state.tokenize__all_tokenized_files.data[file_no]->name,
+  // line_no, pclabel);
+}
+#endif
 
 IMPLSTATIC int codegen_pclabel(void) {
   int ret = C(numlabels);
@@ -1867,6 +1887,12 @@ static void gen_expr(Node* node) {
 }
 
 static void gen_stmt(Node* node) {
+#if X64WIN
+  if (user_context->generate_debug_symbols) {
+    record_line_syminfo(node->tok->file->file_no, node->tok->line_no, codegen_pclabel());
+  }
+#endif
+
   switch (node->kind) {
     case ND_IF: {
       int lelse = codegen_pclabel();
@@ -2362,6 +2388,11 @@ static void emit_text(Obj* prog) {
 
     C(current_fn) = fn;
 
+#if X64WIN
+    record_line_syminfo(fn->ty->name->file->file_no, fn->ty->name->line_no,
+                        codegen_pclabel());
+#endif
+
     // outaf("---- %s\n", fn->name);
 
     // Prologue
@@ -2653,7 +2684,10 @@ typedef struct RuntimeFunction {
   unsigned long UnwindData;
 } RuntimeFunction;
 
-static void create_and_register_exception_function_table(Obj* prog, char* base_addr) {
+static void emit_symbols_and_exception_function_table(Obj* prog,
+                                                      char* base_addr,
+                                                      int pdata_start_offset,
+                                                      int pdata_end_offset) {
   int func_count = 0;
   for (Obj* fn = prog; fn; fn = fn->next) {
     if (!fn->is_function || !fn->is_definition || !fn->is_live)
@@ -2667,7 +2701,6 @@ static void create_and_register_exception_function_table(Obj* prog, char* base_a
   unregister_and_free_function_table_data(user_context);
   char* function_table_data = malloc(alloc_size);
   user_context->function_table_data = function_table_data;
-
   char* pfuncs = function_table_data;
 
   for (Obj* fn = prog; fn; fn = fn->next) {
@@ -2680,6 +2713,33 @@ static void create_and_register_exception_function_table(Obj* prog, char* base_a
     rf->EndAddress = dasm_getpclabel(&C(dynasm), fn->dasm_end_of_function_label);
     rf->UnwindData = dasm_getpclabel(&C(dynasm), fn->dasm_unwind_info_label);
     pfuncs += sizeof(RuntimeFunction);
+
+    if (user_context->generate_debug_symbols) {
+      DbpFunctionSymbol* dbp_func_sym =
+          dbp_add_function_symbol(user_context->dbp_ctx, fn->name, fn->ty->name->filename,
+                                  dasm_getpclabel(&C(dynasm), fn->dasm_entry_label),
+                                  dasm_getpclabel(&C(dynasm), fn->dasm_end_of_function_label));
+      for (int i = 0; i < fn->file_line_label_data.len; ++i) {
+        // TODO: ignoring file index, might not be needed unless something got
+        // inlined (which doesn't happen). Maybe there's a macro case that could
+        // cause it already though?
+        int offset = dasm_getpclabel(&C(dynasm), fn->file_line_label_data.data[i].c);
+        dbp_add_line_mapping(user_context->dbp_ctx, dbp_func_sym, offset,
+                             fn->file_line_label_data.data[i].b);
+      }
+    }
+  }
+
+  if (user_context->generate_debug_symbols) {
+    char* unwind_base = base_addr + pdata_start_offset;
+    size_t unwind_len = pdata_end_offset - pdata_start_offset;
+    DbpExceptionTables exception_tables = {
+      .pdata = (DbpRUNTIME_FUNCTION*)user_context->function_table_data,
+      .num_pdata_entries = func_count,
+      .unwind_info = (unsigned char*)unwind_base,
+      .unwind_info_byte_length = unwind_len,
+    };
+    dbp_ready_to_execute(user_context->dbp_ctx, &exception_tables);
   }
 
   register_function_table_data(user_context, func_count, base_addr);
@@ -2687,9 +2747,14 @@ static void create_and_register_exception_function_table(Obj* prog, char* base_a
 
 #else  // !X64WIN
 
-static void create_and_register_exception_function_table(Obj* prog, char* base_addr) {
+static void emit_symbols_and_exception_function_table(Obj* prog,
+                                                      char* base_addr,
+                                                      int pdata_start_offset,
+                                                      int pdata_end_offset) {
   (void)prog;
   (void)base_addr;
+  (void)pdata_start_offset;
+  (void)pdata_end_offset;
 }
 
 #endif
@@ -2709,8 +2774,19 @@ IMPLSTATIC void codegen(Obj* prog, size_t file_index) {
 
   dasm_setup(&C(dynasm), dynasm_actions);
 
+  ///| .pdata
+  int start_of_pdata = codegen_pclabel();
+  ///|.align 4
+  ///|=>start_of_pdata:
+  ///| .code
+
   assign_lvar_offsets(prog);
   emit_text(prog);
+
+  ///| .pdata
+  int end_of_pdata = codegen_pclabel();
+  ///|=>end_of_pdata:
+  ///| .code
 
   size_t code_size;
   dasm_link(&C(dynasm), &code_size);
@@ -2725,7 +2801,16 @@ IMPLSTATIC void codegen(Obj* prog, size_t file_index) {
   unsigned int page_sized = (unsigned int)align_to_u(code_size, get_page_size());
 
   fld->codeseg_size = page_sized;
+#if X64WIN
+  if (user_context->generate_debug_symbols) {
+    user_context->dbp_ctx = dbp_create(fld->codeseg_size, get_temp_pdb_filename(AL_Compile));
+    fld->codeseg_base_address = dbp_get_image_base(user_context->dbp_ctx);
+  } else {
+    fld->codeseg_base_address = allocate_writable_memory(page_sized);
+  }
+#else
   fld->codeseg_base_address = allocate_writable_memory(page_sized);
+#endif
   // outaf("code_size: %zu, page_sized: %zu\n", code_size, page_sized);
 
   fill_out_text_exports(prog, fld->codeseg_base_address);
@@ -2742,7 +2827,9 @@ IMPLSTATIC void codegen(Obj* prog, size_t file_index) {
     ABORT("dasm_checkstep failed");
   }
 
-  create_and_register_exception_function_table(prog, fld->codeseg_base_address);
+  emit_symbols_and_exception_function_table(prog, fld->codeseg_base_address,
+                                            dasm_getpclabel(&C(dynasm), start_of_pdata),
+                                            dasm_getpclabel(&C(dynasm), end_of_pdata));
 
   codegen_free();
 }

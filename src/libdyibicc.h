@@ -51,7 +51,11 @@ typedef struct DyibiccEnviromentData {
 
   // Are simple ANSI colours supported by |output_function|.
   bool use_ansi_codes;
-  bool padding[7];  // Avoid C4820 padding warning on MSVC /Wall.
+
+  // Should debug symbols (pdb) be generated. Only implemented on Windows.
+  bool generate_debug_symbols;
+
+  bool padding[6];  // Avoid C4820 padding warning on MSVC /Wall.
 } DyibiccEnviromentData;
 
 typedef struct DyibiccContext DyibiccContext;

@@ -1548,6 +1548,8 @@ static void gsi_write_publics_stream(DbpContext* ctx, GsiHashBuilder* hb, Stream
   size_t after_hash_len = stream->data_length;
   assert(after_hash_len - before_hash_len == size_of_hash &&
          "hash size calc doesn't match gsi_hash_builder_write");
+  (void)before_hash_len;
+  (void)after_hash_len;
 
   u32* addr_map = _alloca(sizeof(u32) * hb->sym_len);
   for (u32 i = 0; i < hb->sym_len; ++i)
