@@ -368,6 +368,9 @@ static void stream_write_block(DbpContext* ctx, StreamData* stream, const void* 
     memcpy(stream->cur_write, data, len);
     stream->cur_write += len;
     stream->data_length += (u32)len;
+    if (max_remaining_this_block == len) {
+      stream->cur_write = NULL;
+    }
   } else {
     memcpy(stream->cur_write, data, max_remaining_this_block);
     stream->cur_write += max_remaining_this_block;

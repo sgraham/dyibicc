@@ -2389,8 +2389,7 @@ static void emit_text(Obj* prog) {
     C(current_fn) = fn;
 
 #if X64WIN
-    record_line_syminfo(fn->ty->name->file->file_no, fn->ty->name->line_no,
-                        codegen_pclabel());
+    record_line_syminfo(fn->ty->name->file->file_no, fn->ty->name->line_no, codegen_pclabel());
 #endif
 
     // outaf("---- %s\n", fn->name);
@@ -2734,10 +2733,10 @@ static void emit_symbols_and_exception_function_table(Obj* prog,
     char* unwind_base = base_addr + pdata_start_offset;
     size_t unwind_len = pdata_end_offset - pdata_start_offset;
     DbpExceptionTables exception_tables = {
-      .pdata = (DbpRUNTIME_FUNCTION*)user_context->function_table_data,
-      .num_pdata_entries = func_count,
-      .unwind_info = (unsigned char*)unwind_base,
-      .unwind_info_byte_length = unwind_len,
+        .pdata = (DbpRUNTIME_FUNCTION*)user_context->function_table_data,
+        .num_pdata_entries = func_count,
+        .unwind_info = (unsigned char*)unwind_base,
+        .unwind_info_byte_length = unwind_len,
     };
     dbp_ready_to_execute(user_context->dbp_ctx, &exception_tables);
   }
