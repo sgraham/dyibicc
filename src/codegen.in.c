@@ -1527,7 +1527,7 @@ static void gen_expr(Node* node) {
       ///| lea rax, [=>node->pc_label]
       return;
     case ND_REFLECT_TYPE_PTR:
-      ///| mov64 rax, node->rty;
+      ///| mov64 rax, node->reflect_ty;
       return;
     case ND_CAS:
     case ND_LOCKCE: {

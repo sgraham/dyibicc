@@ -211,7 +211,7 @@ static Node* new_vla_ptr(Obj* var, Token* tok) {
 
 static Node* new_reflect_type_ptr(_ReflectType* rty, Token* tok) {
   Node* node = new_node(ND_REFLECT_TYPE_PTR, tok);
-  node->rty = (uintptr_t)rty;
+  node->reflect_ty = (uintptr_t)rty;
   return node;
 }
 

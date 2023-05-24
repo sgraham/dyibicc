@@ -440,7 +440,7 @@ struct Node {
   int64_t val;
   long double fval;
 
-  uintptr_t rty;
+  uintptr_t reflect_ty;
 };
 
 IMPLSTATIC Node* new_cast(Node* expr, Type* ty);
