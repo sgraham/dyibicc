@@ -1218,7 +1218,8 @@ static void gen_expr(Node* node) {
           node->rhs->ty->kind != TY_FLOAT && node->rhs->ty->kind != TY_DOUBLE &&
           node->rhs->ty->kind != TY_LDOUBLE && node->rhs->val >= INT_MIN &&
           node->rhs->val <= INT_MAX) {
-        ///| mov dword [rbp+node->lhs->var->offset], node->rhs->val
+        ///| mov rax, node->rhs->val
+        ///| mov dword [rbp+node->lhs->var->offset], eax
       } else {
         gen_addr(node->lhs);
         push();
