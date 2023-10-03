@@ -231,7 +231,11 @@ IMPLSTATIC void add_type(Node* node) {
                   node->rhs->ty->name->len, node->rhs->ty->name->loc);
       }
       if (node->lhs->ty->kind != TY_STRUCT) {
-        node->rhs = new_cast(node->rhs, node->lhs->ty);
+        if (node->lhs->ty->kind != node->rhs->ty->kind) {
+          node->rhs = new_cast(node->rhs, node->lhs->ty);
+        } else {
+          add_type(node->rhs);
+        }
       } else {
         if (node->rhs->ty->kind != TY_STRUCT) {
           error_tok(node->lhs->tok, "cannot assign to struct");
