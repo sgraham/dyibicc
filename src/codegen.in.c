@@ -1208,33 +1208,47 @@ static void gen_expr(Node* node) {
       gen_addr(node->lhs);
       return;
     case ND_ASSIGN:
-      gen_addr(node->lhs);
-      push();
-      gen_expr(node->rhs);
+      // Special case "int into a local". Normally this would compile to:
+      //   lea rax,[rbp+node->lhs->offset]
+      //   push rax
+      //   mov rax, node->rhs->val
+      //   pop rcx
+      //   mov [rcx], eax
+      if (node->lhs->kind == ND_VAR && node->lhs->var->is_local && node->rhs->kind == ND_NUM &&
+          node->rhs->ty->kind != TY_FLOAT && node->rhs->ty->kind != TY_DOUBLE &&
+          node->rhs->ty->kind != TY_LDOUBLE && node->rhs->val >= INT_MIN &&
+          node->rhs->val <= INT_MAX) {
+        ///| mov rax, node->rhs->val
+        ///| mov dword [rbp+node->lhs->var->offset], eax
+      } else {
+        gen_addr(node->lhs);
+        push();
+        gen_expr(node->rhs);
 
-      if (node->lhs->kind == ND_MEMBER && node->lhs->member->is_bitfield) {
-        ///| mov r8, rax
+        if (node->lhs->kind == ND_MEMBER && node->lhs->member->is_bitfield) {
+          ///| mov r8, rax
 
-        // If the lhs is a bitfield, we need to read the current value
-        // from memory and merge it with a new value.
-        Member* mem = node->lhs->member;
-        ///| mov RUTIL, rax
-        ///| and RUTIL, (1L << mem->bit_width) - 1
-        ///| shl RUTIL, mem->bit_offset
+          // If the lhs is a bitfield, we need to read the current value
+          // from memory and merge it with a new value.
+          Member* mem = node->lhs->member;
+          ///| mov RUTIL, rax
+          ///| and RUTIL, (1L << mem->bit_width) - 1
+          ///| shl RUTIL, mem->bit_offset
 
-        ///| mov rax, [rsp]
-        load(mem->ty);
+          ///| mov rax, [rsp]
+          load(mem->ty);
 
-        long mask = ((1L << mem->bit_width) - 1) << mem->bit_offset;
-        ///| mov r9, ~mask
-        ///| and rax, r9
-        ///| or rax, RUTIL
+          long mask = ((1L << mem->bit_width) - 1) << mem->bit_offset;
+          ///| mov r9, ~mask
+          ///| and rax, r9
+          ///| or rax, RUTIL
+          store(node->ty);
+          ///| mov rax, r8
+          return;
+        }
+
         store(node->ty);
-        ///| mov rax, r8
-        return;
       }
-
-      store(node->ty);
       return;
     case ND_STMT_EXPR:
       for (Node* n = node->body; n; n = n->next)
@@ -2819,6 +2833,13 @@ IMPLSTATIC void codegen(Obj* prog, size_t file_index) {
   fill_out_fixups(fld);
 
   dasm_encode(&C(dynasm), fld->codeseg_base_address);
+
+#if 0
+  FILE* f = fopen("code.raw", "wb");
+  fwrite(fld->codeseg_base_address, code_size, 1, f);
+  fclose(f);
+  system("ndisasm -b64 code.raw");
+#endif
 
   int check_result = dasm_checkstep(&C(dynasm), 0);
   if (check_result != DASM_S_OK) {
