@@ -7,8 +7,12 @@ on:
     branches: [ $default-branch ]
 
 jobs:
-  test:
-    runs-on: [ ubuntu-latest, windows-latest ]
+
+jobs:
+  tests:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
 
     steps:
     - uses: actions/checkout@v4
