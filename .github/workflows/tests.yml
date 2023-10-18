@@ -8,11 +8,15 @@ on:
 
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        style: [d, r, a]
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-python@v4
       with:
         python-version: '3.12'
-    - run: ./m d test
+    - run: ./m ${{style}} test
