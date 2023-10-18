@@ -1,3 +1,4 @@
+import os
 import sys
 
 _MAIN_TEMPLATE = r'''
@@ -153,6 +154,7 @@ def expect(rv):
     import inspect
     previous_frame = inspect.currentframe().f_back
     (filename, line_number, _, _, _) = inspect.getframeinfo(previous_frame)
+    filename = os.path.split(filename)[1]
     global _steps
     _steps.append(_CALL_ENTRY_TEMPLATE % {
         'desired_result': rv,
