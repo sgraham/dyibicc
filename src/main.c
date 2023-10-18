@@ -204,17 +204,28 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
   strarray_push(&sys_inc_paths, format(AL_Temp, "%s/win", env_data->dyibicc_include_dir), AL_Temp);
   strarray_push(&sys_inc_paths, format(AL_Temp, "%s/all", env_data->dyibicc_include_dir), AL_Temp);
 
+#define GET_ENV_VAR(x) \
+  char* env_##x = getenv(#x); \
+  if (!env_##x) { \
+    ABORT("environment variable " #x " unset"); \
+  }
+
+  GET_ENV_VAR(WindowsSdkDir);
+  GET_ENV_VAR(WindowsSdkLibVersion);
+  GET_ENV_VAR(VcToolsInstallDir);
+#undef GET_ENV_VAR
+
   strarray_push(&sys_inc_paths,
-                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\ucrt", AL_Temp);
-  strarray_push(&sys_inc_paths,
-                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\um", AL_Temp);
-  strarray_push(&sys_inc_paths,
-                "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\shared",
+                format(AL_Temp, "%sInclude\\%sucrt", env_WindowsSdkDir, env_WindowsSdkLibVersion),
                 AL_Temp);
   strarray_push(&sys_inc_paths,
-                "C:\\Program Files\\Microsoft Visual "
-                "Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.34.31933\\include",
+                format(AL_Temp, "%sInclude\\%sum", env_WindowsSdkDir, env_WindowsSdkLibVersion),
                 AL_Temp);
+  strarray_push(&sys_inc_paths,
+                format(AL_Temp, "%sInclude\\%sshared", env_WindowsSdkDir, env_WindowsSdkLibVersion),
+                AL_Temp);
+  strarray_push(&sys_inc_paths, format(AL_Temp, "%sinclude", env_VcToolsInstallDir), AL_Temp);
+
 #else
   strarray_push(&sys_inc_paths, format(AL_Temp, "%s/linux", env_data->dyibicc_include_dir),
                 AL_Temp);
