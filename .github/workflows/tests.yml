@@ -19,4 +19,8 @@ jobs:
     - uses: actions/setup-python@v4
       with:
         python-version: '3.12'
+    - uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: amd64
+        vsvsersion: 2022
     - run: ./m ${{matrix.style}} test
