@@ -43,6 +43,13 @@ static bool default_load_file_fn(const char* path, char** contents, size_t* size
 }
 
 DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
+  // Set this up with a temporary value early, mostly so we can ABORT() below
+  // with output if necessary.
+  UserContext tmp_user_context = {0};
+  tmp_user_context.output_function = default_output_fn;
+  tmp_user_context.load_file_contents = default_load_file_fn;
+  user_context = &tmp_user_context;
+
   alloc_init(AL_Temp);
 
   // Clone env_data into allocated ctx
