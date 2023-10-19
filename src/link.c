@@ -15,10 +15,6 @@
 
 #define L(x) linker_state.link__##x
 
-#include "khash.h"
-
-KHASH_SET_INIT_INT64(voidp)
-
 #if X64WIN
 static void Unimplemented(void) {
   ABORT("unimplemented function");
@@ -342,11 +338,6 @@ static void* symbol_lookup(char* name) {
 }
 
 IMPLSTATIC bool link_all_files(void) {
-  // This is a hack to avoid disabling -Wunused-function, since these are in
-  // khash.h and aren't instantiated.
-  (void)__ac_X31_hash_string;
-  (void)__ac_Wang_hash;
-
   UserContext* uc = user_context;
 
   if (uc->num_files == 0)

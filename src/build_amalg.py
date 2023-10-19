@@ -45,8 +45,6 @@ def include_file(f, src):
         for line in i.readlines():
             if line.startswith('#include "dyibicc.h"'):
                 continue
-            if line.startswith('#include "khash.h"'):
-                continue
             if line.startswith('#include "dynasm/dasm_proto.h"'):
                 continue
             if line.startswith('#include "dynasm/dasm_x86.h"'):

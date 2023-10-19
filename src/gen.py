@@ -186,7 +186,6 @@ def generate(platform, config, settings, cmdlines, tests, upd_tests, fuzz_tests)
         EXTRAS_FOR_AMALG = [
                 '$root/dyibicc.h',
                 '$root/../include/all/reflect.h',
-                '$root/khash.h',
                 '$root/dynasm/dasm_proto.h',
                 '$root/dynasm/dasm_x86.h',
         ]
