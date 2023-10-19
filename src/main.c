@@ -66,9 +66,9 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
   strarray_push(&sys_inc_paths, format(AL_Temp, "%s/win", env_data->dyibicc_include_dir), AL_Temp);
   strarray_push(&sys_inc_paths, format(AL_Temp, "%s/all", env_data->dyibicc_include_dir), AL_Temp);
 
-#define GET_ENV_VAR(x) \
-  char* env_##x = getenv(#x); \
-  if (!env_##x) { \
+#define GET_ENV_VAR(x)                          \
+  char* env_##x = getenv(#x);                   \
+  if (!env_##x) {                               \
     ABORT("environment variable " #x " unset"); \
   }
 
