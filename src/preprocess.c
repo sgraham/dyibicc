@@ -41,6 +41,7 @@ struct MacroArg {
 };
 
 typedef Token* macro_handler_fn(Token*);
+typedef void macro_side_effect_handler_fn(Token*);
 
 typedef struct Macro Macro;
 struct Macro {
@@ -50,6 +51,7 @@ struct Macro {
   char* va_args_name;
   Token* body;
   macro_handler_fn* handler;
+  macro_side_effect_handler_fn* side_effect_handler;
 };
 
 // `#if` can be nested, so we use a stack to manage nested `#if`s.
@@ -358,7 +360,7 @@ static MacroParam* read_macro_params(Token** rest, Token* tok, char** va_args_na
   return head.next;
 }
 
-static void read_macro_definition(Token** rest, Token* tok) {
+static Macro* read_macro_definition(Token** rest, Token* tok) {
   if (tok->kind != TK_IDENT)
     error_tok(tok, "macro name must be an identifier");
   char* name = bumpstrndup(tok->loc, tok->len, AL_Compile);
@@ -372,9 +374,10 @@ static void read_macro_definition(Token** rest, Token* tok) {
     Macro* m = add_macro(name, false, copy_line(rest, tok));
     m->params = params;
     m->va_args_name = va_args_name;
+    return m;
   } else {
     // Object-like macro
-    add_macro(name, true, copy_line(rest, tok));
+    return add_macro(name, true, copy_line(rest, tok));
   }
 }
 
@@ -638,6 +641,13 @@ static bool expand_macro(Token** rest, Token* tok) {
     *rest = m->handler(tok);
     (*rest)->next = tok->next;
     return true;
+  }
+
+  // Like |handler|, but regular expansion is done afterwards. This handler can
+  // only usefully used for side-effects (bookkeeping) inside the compiler.
+  // Used for container setup/instantiation.
+  if (m->side_effect_handler) {
+    m->side_effect_handler(tok);
   }
 
   // Object-like macro application
@@ -1009,6 +1019,13 @@ IMPLSTATIC void define_function_macro(char* buf) {
   read_macro_definition(&rest, tok);
 }
 
+IMPLSTATIC void define_container(char* buf, macro_side_effect_handler_fn* fn) {
+  Token* tok = tokenize(new_file("<built-in>", buf));
+  Token* rest = tok;
+  Macro* m = read_macro_definition(&rest, tok);
+  m->side_effect_handler = fn;
+}
+
 static Macro* add_builtin(char* name, macro_handler_fn* fn) {
   Macro* m = add_macro(name, true, NULL);
   m->handler = fn;
@@ -1055,6 +1072,15 @@ static char* format_time(struct tm* tm) {
   (void)tm;
   return "\"01:23:45\"";
 }
+
+static void container_vec_setup(Token* tmpl) {
+  printf("VEC CONTAINER: '%.*s'\n", tmpl->next->next->len, tmpl->next->next->loc);
+}
+
+static void container_map_setup(Token* tmpl) {
+  printf("MAP CONTAINER: '%.*s -> %.*s'\n", tmpl->next->next->len, tmpl->next->next->loc, tmpl->next->next->next->next->len, tmpl->next->next->next->next->loc);
+}
+
 
 IMPLSTATIC void init_macros(void) {
   // Define predefined macros
@@ -1138,6 +1164,9 @@ IMPLSTATIC void init_macros(void) {
   add_builtin("__COUNTER__", counter_macro);
   add_builtin("__TIMESTAMP__", timestamp_macro);
   add_builtin("__BASE_FILE__", base_file_macro);
+
+  define_container("_Vec(T) _Vec__##T\n", container_vec_setup);
+  define_container("_Map(T, U) _Map__##T##__##U\n", container_map_setup);
 
   time_t now = time(NULL);
   struct tm* tm = localtime(&now);
