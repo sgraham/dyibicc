@@ -2700,7 +2700,7 @@ static void struct_members(Token** rest, Token* tok, Type* ty) {
 
 // attribute = ("__attribute__" "(" "(" "packed" ")" ")")*
 //           = ("__attribute__" "(" "(" "aligned" "(" N ")" ")" ")")*
-//           = ("__attribute__" "(" "(" "stencil" "(" prefix ")" ")" ")")*
+//           = ("__attribute__" "(" "(" "methodcall" "(" prefix ")" ")" ")")*
 static Token* attribute_list(Token* tok, Type* ty) {
   while (consume(&tok, tok, "__attribute__")) {
     tok = skip(tok, "(");
@@ -2718,9 +2718,9 @@ static Token* attribute_list(Token* tok, Type* ty) {
         continue;
       }
 
-      if (consume(&tok, tok, "stencil")) {
+      if (consume(&tok, tok, "methodcall")) {
         tok = skip(tok, "(");
-        ty->stencil_prefix = tok;
+        ty->methodcall_prefix = tok;
         tok = skip(tok->next, ")");
         continue;
       }
@@ -2901,26 +2901,26 @@ static Node* struct_ref(Node* node, Token* tok) {
   return node;
 }
 
-static Node* stencil_ref(Token** rest, Token* tok, Node* node) {
+static Node* methodcall_ref(Token** rest, Token* tok, Node* node) {
   add_type(node);
   if (node->ty->kind == TY_PTR) {
     node = new_unary(ND_DEREF, node, tok);
-    return stencil_ref(rest, tok, node);
+    return methodcall_ref(rest, tok, node);
   }
 
   add_type(node);
   if (node->ty->kind != TY_STRUCT && node->ty->kind != TY_UNION)
     error_tok(node->tok, "neither a struct nor a union");
-  if (!node->ty->stencil_prefix)
-    error_tok(node->tok, "not an __attribute__((stencil(prefix))) type");
+  if (!node->ty->methodcall_prefix)
+    error_tok(node->tok, "not an __attribute__((methodcall(prefix))) type");
 
   // TODO: preprocess() is a hack to use #line to make error line correct
-  // (though not column). But it means that stencil_prefix and tok are getting
+  // (though not column). But it means that methodcall_prefix and tok are getting
   // sent through the preprocessor again which might be undesirable.
   Token* built_prefix = preprocess(tokenize(new_file(
       tok->file->name,
-      format(AL_Compile, "#line %d\n%.*s%.*s", tok->line_no - 1, node->ty->stencil_prefix->len,
-             node->ty->stencil_prefix->loc, tok->len, tok->loc))));
+      format(AL_Compile, "#line %d\n%.*s%.*s", tok->line_no - 1, node->ty->methodcall_prefix->len,
+             node->ty->methodcall_prefix->loc, tok->len, tok->loc))));
   Token* unused;
   Node* funcnode = primary(&unused, built_prefix);
 
@@ -2991,8 +2991,8 @@ static Node* postfix(Token** rest, Token* tok) {
     }
 
     if (equal(tok, "..")) {
-      // v..func(...) is short for stencil_prefix##func(&v, ...)
-      node = stencil_ref(&tok, tok->next, node);
+      // v..func(...) is short for methodcall_prefix##func(&v, ...)
+      node = methodcall_ref(&tok, tok->next, node);
       continue;
     }
 

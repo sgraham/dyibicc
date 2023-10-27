@@ -1,6 +1,6 @@
 #include "test.h"
 
-struct __attribute__((stencil(ZIPPY_))) X {
+struct __attribute__((methodcall(ZIPPY_))) X {
   int a;
   int b;
 };
