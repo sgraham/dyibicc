@@ -116,7 +116,7 @@ static Member* get_struct_member(Type* ty, Token* tok);
 static Type* struct_decl(Token** rest, Token* tok);
 static Type* union_decl(Token** rest, Token* tok);
 static Node* postfix(Token** rest, Token* tok);
-static Node* funcall(Token** rest, Token* tok, Node* node);
+static Node* funcall(Token** rest, Token* tok, Node* node, Node* injected_self);
 static Node* unary(Token** rest, Token* tok);
 static Node* primary(Token** rest, Token* tok);
 static Token* parse_typedef(Token* tok, Type* basety);
@@ -2699,6 +2699,8 @@ static void struct_members(Token** rest, Token* tok, Type* ty) {
 }
 
 // attribute = ("__attribute__" "(" "(" "packed" ")" ")")*
+//           = ("__attribute__" "(" "(" "aligned" "(" N ")" ")" ")")*
+//           = ("__attribute__" "(" "(" "stencil" "(" prefix ")" ")" ")")*
 static Token* attribute_list(Token* tok, Type* ty) {
   while (consume(&tok, tok, "__attribute__")) {
     tok = skip(tok, "(");
@@ -2713,6 +2715,13 @@ static Token* attribute_list(Token* tok, Type* ty) {
 
       if (consume(&tok, tok, "packed")) {
         ty->is_packed = true;
+        continue;
+      }
+
+      if (consume(&tok, tok, "stencil")) {
+        tok = skip(tok, "(");
+        ty->stencil_prefix = tok;
+        tok = skip(tok->next, ")");
         continue;
       }
 
@@ -2875,7 +2884,7 @@ static Member* get_struct_member(Type* ty, Token* tok) {
 static Node* struct_ref(Node* node, Token* tok) {
   add_type(node);
   if (node->ty->kind != TY_STRUCT && node->ty->kind != TY_UNION)
-    error_tok(node->tok, "not a struct nor a union");
+    error_tok(node->tok, "neither a struct nor a union");
 
   Type* ty = node->ty;
 
@@ -2890,6 +2899,35 @@ static Node* struct_ref(Node* node, Token* tok) {
     ty = mem->ty;
   }
   return node;
+}
+
+static Node* stencil_ref(Token** rest, Token* tok, Node* node) {
+  add_type(node);
+  if (node->ty->kind == TY_PTR) {
+    node = new_unary(ND_DEREF, node, tok);
+    return stencil_ref(rest, tok, node);
+  }
+
+  add_type(node);
+  if (node->ty->kind != TY_STRUCT && node->ty->kind != TY_UNION)
+    error_tok(node->tok, "neither a struct nor a union");
+  if (!node->ty->stencil_prefix)
+    error_tok(node->tok, "not an __attribute__((stencil(prefix))) type");
+
+  // TODO: preprocess() is a hack to use #line to make error line correct
+  // (though not column). But it means that stencil_prefix and tok are getting
+  // sent through the preprocessor again which might be undesirable.
+  Token* built_prefix = preprocess(tokenize(new_file(
+      tok->file->name,
+      format(AL_Compile, "#line %d\n%.*s%.*s", tok->line_no - 1, node->ty->stencil_prefix->len,
+             node->ty->stencil_prefix->loc, tok->len, tok->loc))));
+  Token* unused;
+  Node* funcnode = primary(&unused, built_prefix);
+
+  Node* self = new_unary(ND_ADDR, node, tok);
+
+  *rest = tok->next->next;
+  return funcall(rest, tok->next->next, funcnode, self);
 }
 
 // Convert A++ to `(typeof A)((A += 1) - 1)`
@@ -2933,7 +2971,7 @@ static Node* postfix(Token** rest, Token* tok) {
 
   for (;;) {
     if (equal(tok, "(")) {
-      node = funcall(&tok, tok->next, node);
+      node = funcall(&tok, tok->next, node, NULL);
       continue;
     }
 
@@ -2949,6 +2987,12 @@ static Node* postfix(Token** rest, Token* tok) {
     if (equal(tok, ".")) {
       node = struct_ref(node, tok->next);
       tok = tok->next->next;
+      continue;
+    }
+
+    if (equal(tok, "..")) {
+      // v..func(...) is short for stencil_prefix##func(&v, ...)
+      node = stencil_ref(&tok, tok->next, node);
       continue;
     }
 
@@ -2982,7 +3026,7 @@ static Node* postfix(Token** rest, Token* tok) {
 }
 
 // funcall = (assign ("," assign)*)? ")"
-static Node* funcall(Token** rest, Token* tok, Node* fn) {
+static Node* funcall(Token** rest, Token* tok, Node* fn, Node* injected_self) {
   add_type(fn);
 
   if (fn->ty->kind != TY_FUNC && (fn->ty->kind != TY_PTR || fn->ty->base->kind != TY_FUNC))
@@ -2994,11 +3038,25 @@ static Node* funcall(Token** rest, Token* tok, Node* fn) {
   Node head = {0};
   Node* cur = &head;
 
-  while (!equal(tok, ")")) {
-    if (cur != &head)
-      tok = skip(tok, ",");
+  while (!equal(tok, ")") || injected_self) {
+    if (cur != &head) {
+      if (injected_self) {
+        injected_self = NULL;
+        if (equal(tok, ")"))
+          break;
+      } else {
+        tok = skip(tok, ",");
+      }
+    }
 
-    Node* arg = assign(&tok, tok);
+    Node* arg;
+
+    if (injected_self) {
+      arg = injected_self;
+      // cleared on next loop, instead of skipping comma above.
+    } else {
+      arg = assign(&tok, tok);
+    }
     add_type(arg);
 
     if (!param_ty && !ty->is_variadic)

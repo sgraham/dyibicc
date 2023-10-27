@@ -507,6 +507,7 @@ struct Type {
   Member* members;
   bool is_flexible;
   bool is_packed;
+  Token* stencil_prefix;
 
   // Function type
   Type* return_ty;

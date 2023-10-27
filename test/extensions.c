@@ -1,9 +1,24 @@
-typedef struct _Vec__int { int x; } _Vec__int;
-typedef struct _Map__int__int { int x; } _Map__int__int;
+#include "test.h"
 
+struct __attribute__((stencil(ZIPPY_))) X {
+  int a;
+  int b;
+};
+typedef struct X X;
 
-_Vec(int) myvecint;
-_Map(int, int) myintintmap;
+void ZIPPY_func(X* x, int c) {
+  ASSERT(5, x->a);
+  ASSERT(6, x->b);
+  ASSERT(32, c);
+}
 
-int main() {
+int main(void) {
+  X x = {5, 6};
+  x..func(32);
+
+  X* px = &x;
+  px..func(32);
+
+  X** ppx = &px;
+  ppx..func(32);
 }

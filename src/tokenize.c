@@ -75,8 +75,8 @@ static int from_hex(char c) {
 // Read a punctuator token from p and returns its length.
 static int read_punct(char* p) {
   static char* kw[] = {
-      "<<=", ">>=", "...", "==", "!=", "<=", ">=", "->", "+=", "-=", "*=", "/=",
-      "++",  "--",  "%=",  "&=", "|=", "^=", "&&", "||", "<<", ">>", "##",
+      "<<=", ">>=", "...", "..", "==", "!=", "<=", ">=", "->", "+=", "-=", "*=",
+      "/=",  "++",  "--", "%=",  "&=", "|=", "^=", "&&", "||", "<<", ">>", "##",
   };
 
   for (size_t i = 0; i < sizeof(kw) / sizeof(*kw); i++)
@@ -134,12 +134,6 @@ static bool is_keyword(Token* tok) {
       "__thread",
       "_Atomic",
       "__attribute__",
-      "_Vec",
-      "_Str",
-      "_Map",
-      "_Set",
-      "_Hashmap",
-      "_Hashset",
 
 #if X64WIN
       "__int64",
