@@ -24,6 +24,12 @@ int main() {
   ASSERT(8, sizeof(0LL));
   ASSERT(8, sizeof(0LLU));
   ASSERT(8, sizeof(0Ull));
+#ifdef _WIN64
+  ASSERT(8, sizeof(0ui64));
+  ASSERT(8, sizeof(0i64));
+  ASSERT(8, sizeof(1ui64));
+  ASSERT(8, sizeof(1i64));
+#endif
   ASSERT(8, sizeof(0l));
   ASSERT(8, sizeof(0ll));
   ASSERT(8, sizeof(0x0L));
