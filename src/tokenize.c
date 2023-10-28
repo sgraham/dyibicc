@@ -344,6 +344,14 @@ static bool convert_pp_int(Token* tok) {
       startswith(p, "uLL") || startswith(p, "ull")) {
     p += 3;
     l = u = true;
+#if X64WIN
+  } else if (startswith(p, "i64")) {
+    p += 3;
+    l = true;
+  } else if (startswith(p, "ui64")) {
+    p += 4;
+    l = u = true;
+#endif
   } else if (!strncasecmp(p, "lu", 2) || !strncasecmp(p, "ul", 2)) {
     p += 2;
     l = u = true;
