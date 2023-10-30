@@ -47,14 +47,12 @@ CONTAINERS = [
     {
         "in": os.path.join(REPOROOT, "scratch/STC/include/stc/cvec.h"),
         "out": os.path.join(REPOROOT, "include/all/_vec.h"),
-        "prefix": ["#define _i_prefix _Vec$\n",] + 
-                  COMMON_PREFIX,
+        "prefix": COMMON_PREFIX,
     },
     {
         "in": os.path.join(REPOROOT, "scratch/STC/include/stc/cmap.h"),
         "out": os.path.join(REPOROOT, "include/all/_map.h"),
-        "prefix": ["#define _i_prefix _Map$\n",] + 
-                  COMMON_PREFIX,
+        "prefix": COMMON_PREFIX,
     },
 ]
 

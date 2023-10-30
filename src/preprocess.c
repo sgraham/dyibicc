@@ -51,6 +51,7 @@ struct Macro {
   char* va_args_name;
   Token* body;
   macro_handler_fn* handler;
+  bool handler_advances;
 };
 
 // `#if` can be nested, so we use a stack to manage nested `#if`s.
@@ -638,6 +639,9 @@ static bool expand_macro(Token** rest, Token* tok) {
   // Built-in dynamic macro application such as __LINE__
   if (m->handler) {
     *rest = m->handler(m, tok);
+    if (!m->handler_advances) {
+      (*rest)->next = tok->next;
+    }
     return true;
   }
 
@@ -1009,6 +1013,7 @@ IMPLSTATIC void define_function_macro(char* buf, macro_handler_fn* fn) {
   Token* rest = tok;
   Macro* m = read_macro_definition(&rest, tok);
   m->handler = fn;
+  m->handler_advances = true;
 }
 
 static Macro* add_builtin(char* name, macro_handler_fn* fn) {
@@ -1021,9 +1026,7 @@ static Token* file_macro(Macro* m, Token* tmpl) {
   (void)m;
   while (tmpl->origin)
     tmpl = tmpl->origin;
-  Token* ret = new_str_token(tmpl->file->display_name, tmpl);
-  ret->next = tmpl->next;
-  return ret;
+  return new_str_token(tmpl->file->display_name, tmpl);
 }
 
 static Token* line_macro(Macro* m, Token* tmpl) {
@@ -1031,17 +1034,13 @@ static Token* line_macro(Macro* m, Token* tmpl) {
   while (tmpl->origin)
     tmpl = tmpl->origin;
   int i = tmpl->line_no + tmpl->file->line_delta;
-  Token* ret = new_num_token(i, tmpl);
-  ret->next = tmpl->next;
-  return ret;
+  return new_num_token(i, tmpl);
 }
 
 // __COUNTER__ is expanded to serial values starting from 0.
 static Token* counter_macro(Macro* m, Token* tmpl) {
   (void)m;
-  Token* ret = new_num_token(C(counter_macro_i)++, tmpl);
-  ret->next = tmpl->next;
-  return ret;
+  return new_num_token(C(counter_macro_i)++, tmpl);
 }
 
 // __TIMESTAMP__ is expanded to a string describing the last
@@ -1049,16 +1048,12 @@ static Token* counter_macro(Macro* m, Token* tmpl) {
 // "Fri Jul 24 01:32:50 2020"
 static Token* timestamp_macro(Macro* m, Token* tmpl) {
   (void)m;
-  Token* ret = new_str_token("Mon May 02 01:23:45 1977", tmpl);
-  ret->next = tmpl->next;
-  return ret;
+  return new_str_token("Mon May 02 01:23:45 1977", tmpl);
 }
 
 static Token* base_file_macro(Macro* m, Token* tmpl) {
   (void)m;
-  Token* ret = new_str_token(compiler_state.main__base_file, tmpl);
-  ret->next = tmpl->next;
-  return ret;
+  return new_str_token(compiler_state.main__base_file, tmpl);
 }
 
 // __DATE__ is expanded to the current date, e.g. "May 17 2020".
@@ -1113,7 +1108,6 @@ static Token* container_vec_setup(Macro* m, Token* tok) {
 
   char* key_as_arg = format_container_type_as_template_arg(args->tok);
   char* key_as_ident = format_container_type_as_ident(args->tok);
-  //printf("KEY: %s\n", key_as_ident);
 
   char* key = format(AL_Compile, "type:vec,arg:%s", key_as_ident);
   if (!hashmap_get(&C(container_included), key)) {
@@ -1134,34 +1128,35 @@ static Token* container_vec_setup(Macro* m, Token* tok) {
   return ret;
 }
 
-static Token* container_map_setup(Macro* m, Token* tmpl) {
-  (void)m; (void)tmpl;
-  assert(false);
-#if 0
-  // TODO: Needs to be full type, not token!
-  int klen = tmpl->next->next->len;
-  char* kstr = tmpl->next->next->loc;
-  int vlen = tmpl->next->next->next->next->len;
-  char* vstr = tmpl->next->next->next->next->loc;
+static Token* container_map_setup(Macro* m, Token* tok) {
+  Token* rparen;
+  MacroArg* args = read_macro_args(&rparen, tok, m->params, m->va_args_name);
 
-  char* key = format(AL_Compile, "type:map,arg:%.*s,arg:%.*s",
-      klen, kstr, vlen, vstr);
-  if (hashmap_get(&C(container_included), key))
-    return;
+  char* key_as_arg = format_container_type_as_template_arg(args->tok);
+  char* key_as_ident = format_container_type_as_ident(args->tok);
+  char* val_as_arg = format_container_type_as_template_arg(args->next->tok);
+  char* val_as_ident = format_container_type_as_ident(args->next->tok);
 
-  append_to_container_tokens(preprocess(tokenize(
-      new_file(tmpl->file->name, format(AL_Compile,
-                                        "#define __dyibicc_internal_include__ 1\n"
-                                        "#define i_key %.*s\n"
-                                        "#define i_val %.*s\n"
-                                        "#define i_tag %.*s$%.*s\n"
-                                        "#include <_map.h>\n"
-                                        "#undef __dyibicc_internal_include__\n",
-                                        klen, kstr, vlen, vstr, klen, kstr, vlen, vstr)))));
+  char* key = format(AL_Compile, "type:map,arg:%s,arg:%s", key_as_ident, val_as_ident);
 
-  hashmap_put(&C(container_included), key, (void*)1);
-#endif
-  return NULL;
+  if (!hashmap_get(&C(container_included), key)) {
+    append_to_container_tokens(preprocess(tokenize(
+        new_file(tok->file->name, format(AL_Compile,
+                                         "#define __dyibicc_internal_include__ 1\n"
+                                         "#define i_key %s\n"
+                                         "#define i_val %s\n"
+                                         "#define i_type _Map$%s$%s\n"
+                                         "#include <_map.h>\n"
+                                         "#undef __dyibicc_internal_include__\n",
+                                         key_as_arg, val_as_arg, key_as_ident, val_as_ident)))));
+
+    hashmap_put(&C(container_included), key, (void*)1);
+  }
+
+  Token* ret = tokenize(
+      new_file(tok->file->name, format(AL_Compile, "_Map$%s$%s", key_as_ident, val_as_ident)));
+  ret->next = rparen->next;
+  return ret;
 }
 
 IMPLSTATIC void init_macros(void) {

@@ -1,4 +1,3 @@
-#define _i_prefix _Vec$
 // BEGIN regen_container_headers.py
 #ifndef __dyibicc_internal_include__
 #error Can only be included by the compiler, or confusing errors will result!
