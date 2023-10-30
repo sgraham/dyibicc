@@ -116,6 +116,23 @@ IMPLSTATIC void fileptrarray_push(FilePtrArray* arr, File* item, AllocLifetime l
   arr->data[arr->len++] = item;
 }
 
+IMPLSTATIC void tokenptrarray_push(TokenPtrArray* arr, Token* item, AllocLifetime lifetime) {
+  if (!arr->data) {
+    arr->data = bumpcalloc(8, sizeof(Token*), lifetime);
+    arr->capacity = 8;
+  }
+
+  if (arr->capacity == arr->len) {
+    arr->data = bumplamerealloc(arr->data, sizeof(Token*) * arr->capacity,
+                                sizeof(Token*) * arr->capacity * 2, lifetime);
+    arr->capacity *= 2;
+    for (int i = arr->len; i < arr->capacity; i++)
+      arr->data[i] = NULL;
+  }
+
+  arr->data[arr->len++] = item;
+}
+
 #if X64WIN
 IMPLSTATIC void intintintarray_push(IntIntIntArray* arr, IntIntInt item, AllocLifetime lifetime) {
   if (!arr->data) {

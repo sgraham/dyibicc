@@ -1073,22 +1073,31 @@ static char* format_time(struct tm* tm) {
   return "\"01:23:45\"";
 }
 
+static void append_to_container_tokens(Token* to_add) {
+  // Must be maintained in order that the files were instantiated because (e.g.)
+  // header guards will cause different structs to be defined, and they might be
+  // later referenced by a reinclude.
+  tokenptrarray_push(&C(container_tokens), to_add, AL_Compile);
+}
+
 static void container_vec_setup(Token* tmpl) {
   // TODO: Needs to be full type, not token!
   size_t klen = tmpl->next->next->len;
   char* kstr = tmpl->next->next->loc;
 
   char* key = format(AL_Compile, "type:vec,arg:%.*s", klen, kstr);
-  if (hashmap_get(&C(container_includes), key))
+  if (hashmap_get(&C(container_included), key))
     return;
 
-  Token* include_tokens =
-      preprocess(tokenize(new_file(tmpl->file->name, format(AL_Compile,
-                                                            "#define i_key %.*s\n"
-                                                            "#include <_vec.h>\n",
-                                                            klen, kstr))));
+  append_to_container_tokens(preprocess(
+      tokenize(new_file(tmpl->file->name, format(AL_Compile,
+                                                 "#define __dyibicc_internal_include__ 1\n"
+                                                 "#define i_key %.*s\n"
+                                                 "#include <_vec.h>\n"
+                                                 "#undef __dyibicc_internal_include__\n",
+                                                 klen, kstr)))));
 
-  hashmap_put(&C(container_includes), key, include_tokens);
+  hashmap_put(&C(container_included), key, (void*)1);
 }
 
 static void container_map_setup(Token* tmpl) {
@@ -1100,18 +1109,20 @@ static void container_map_setup(Token* tmpl) {
 
   char* key = format(AL_Compile, "type:map,arg:%.*s,arg:%.*s",
       klen, kstr, vlen, vstr);
-  if (hashmap_get(&C(container_includes), key))
+  if (hashmap_get(&C(container_included), key))
     return;
 
-  Token* include_tokens = preprocess(
-      tokenize(new_file(tmpl->file->name, format(AL_Compile,
-                                                 "#define i_key %.*s\n"
-                                                 "#define i_val %.*s\n"
-                                                 "#define i_tag %.*s$%.*s\n"
-                                                 "#include <_map.h>\n",
-                                                 klen, kstr, vlen, vstr, klen, kstr, vlen, vstr))));
+  append_to_container_tokens(preprocess(tokenize(
+      new_file(tmpl->file->name, format(AL_Compile,
+                                        "#define __dyibicc_internal_include__ 1\n"
+                                        "#define i_key %.*s\n"
+                                        "#define i_val %.*s\n"
+                                        "#define i_tag %.*s$%.*s\n"
+                                        "#include <_map.h>\n"
+                                        "#undef __dyibicc_internal_include__\n",
+                                        klen, kstr, vlen, vstr, klen, kstr, vlen, vstr)))));
 
-  hashmap_put(&C(container_includes), key, include_tokens);
+  hashmap_put(&C(container_included), key, (void*)1);
 }
 
 IMPLSTATIC void init_macros(void) {
@@ -1310,9 +1321,10 @@ IMPLSTATIC Token* preprocess(Token* tok) {
 }
 
 IMPLSTATIC Token* add_container_instantiations(Token* tok) {
-  void** token_lists = hashmap_get_all_values(&C(container_includes));
-  for (void** p = &token_lists[0]; *p; ++p) {
-    Token* to_add = (Token*)*p;
+  // Reverse order is important. They were appended as included, so we need to
+  // maintain that order here.
+  for (int i = C(container_tokens).len - 1; i >= 0; --i) {
+    Token* to_add = C(container_tokens).data[i];
     Token* cur = to_add;
     while (cur->next->kind != TK_EOF)
       cur = cur->next;
