@@ -252,6 +252,7 @@ IMPLSTATIC void init_macros(void);
 IMPLSTATIC void define_macro(char* name, char* buf);
 IMPLSTATIC void undef_macro(char* name);
 IMPLSTATIC Token* preprocess(Token* tok);
+IMPLSTATIC Token* add_container_instantiations(Token* tok);
 
 //
 // parse.c
@@ -616,6 +617,7 @@ IMPLSTATIC void hashmap_delete(HashMap* map, char* key);
 IMPLSTATIC void hashmap_delete2(HashMap* map, char* key, int keylen);
 IMPLSTATIC void hashmap_clear_manual_key_owned_value_owned_aligned(HashMap* map);
 IMPLSTATIC void hashmap_clear_manual_key_owned_value_unowned(HashMap* map);
+IMPLSTATIC void** hashmap_get_all_values(HashMap* map);
 
 //
 // link.c
@@ -707,6 +709,7 @@ typedef struct CompilerState {
   HashMap preprocess__macros;
   CondIncl* preprocess__cond_incl;
   HashMap preprocess__pragma_once;
+  HashMap preprocess__container_includes;
   int preprocess__include_next_idx;
   HashMap preprocess__include_path_cache;
   HashMap preprocess__include_guards;

@@ -7,18 +7,18 @@
 #define C(x) compiler_state.main__##x
 #define L(x) linker_state.main__##x
 
-#if 0  // for -E call after preprocess().
+#if 1  // for -E call after preprocess().
 static void print_tokens(Token* tok) {
   int line = 1;
   for (; tok->kind != TK_EOF; tok = tok->next) {
     if (line > 1 && tok->at_bol)
-      logout("\n");
+      printf("\n");
     if (tok->has_space && !tok->at_bol)
-      logout(" ");
-    logout("%.*s", tok->len, tok->loc);
+      printf(" ");
+    printf("%.*s", tok->len, tok->loc);
     line++;
   }
-  logout("\n");
+  printf("\n");
 }
 #endif
 
@@ -250,6 +250,11 @@ bool dyibicc_update(DyibiccContext* context, char* filename, char* contents) {
         if (!tok)
           error("%s: %s", C(base_file), strerror(errno));
         tok = preprocess(tok);
+        //printf("--------------------- FIRST PP --------------------\n");
+        //print_tokens(tok);
+        tok = add_container_instantiations(tok);
+        //printf("--------------------- WITH CONTAINER --------------------\n");
+        //print_tokens(tok);
 
         codegen_init();  // Initializes dynasm so that parse() can assign labels.
 

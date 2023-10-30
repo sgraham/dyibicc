@@ -1019,6 +1019,13 @@ IMPLSTATIC void define_function_macro(char* buf) {
   read_macro_definition(&rest, tok);
 }
 
+static void define_container(char* buf, macro_side_effect_handler_fn* fn) {
+  Token* tok = tokenize(new_file("<built-in>", buf));
+  Token* rest = tok;
+  Macro* m = read_macro_definition(&rest, tok);
+  m->side_effect_handler = fn;
+}
+
 static Macro* add_builtin(char* name, macro_handler_fn* fn) {
   Macro* m = add_macro(name, true, NULL);
   m->handler = fn;
@@ -1064,6 +1071,47 @@ static char* format_date(struct tm* tm) {
 static char* format_time(struct tm* tm) {
   (void)tm;
   return "\"01:23:45\"";
+}
+
+static void container_vec_setup(Token* tmpl) {
+  // TODO: Needs to be full type, not token!
+  size_t klen = tmpl->next->next->len;
+  char* kstr = tmpl->next->next->loc;
+
+  char* key = format(AL_Compile, "type:vec,arg:%.*s", klen, kstr);
+  if (hashmap_get(&C(container_includes), key))
+    return;
+
+  Token* include_tokens =
+      preprocess(tokenize(new_file(tmpl->file->name, format(AL_Compile,
+                                                            "#define i_key %.*s\n"
+                                                            "#include <_vec.h>\n",
+                                                            klen, kstr))));
+
+  hashmap_put(&C(container_includes), key, include_tokens);
+}
+
+static void container_map_setup(Token* tmpl) {
+  // TODO: Needs to be full type, not token!
+  size_t klen = tmpl->next->next->len;
+  char* kstr = tmpl->next->next->loc;
+  size_t vlen = tmpl->next->next->next->next->len;
+  char* vstr = tmpl->next->next->next->next->loc;
+
+  char* key = format(AL_Compile, "type:map,arg:%.*s,arg:%.*s",
+      klen, kstr, vlen, vstr);
+  if (hashmap_get(&C(container_includes), key))
+    return;
+
+  Token* include_tokens = preprocess(
+      tokenize(new_file(tmpl->file->name, format(AL_Compile,
+                                                 "#define i_key %.*s\n"
+                                                 "#define i_val %.*s\n"
+                                                 "#define i_tag %.*s$%.*s\n"
+                                                 "#include <_map.h>\n",
+                                                 klen, kstr, vlen, vstr, klen, kstr, vlen, vstr))));
+
+  hashmap_put(&C(container_includes), key, include_tokens);
 }
 
 IMPLSTATIC void init_macros(void) {
@@ -1148,6 +1196,9 @@ IMPLSTATIC void init_macros(void) {
   add_builtin("__COUNTER__", counter_macro);
   add_builtin("__TIMESTAMP__", timestamp_macro);
   add_builtin("__BASE_FILE__", base_file_macro);
+
+  define_container("$vec(T) _Vec$##T", container_vec_setup);
+  define_container("$map(K,V) _Map$##K##$##V", container_map_setup);
 
   time_t now = time(NULL);
   struct tm* tm = localtime(&now);
@@ -1255,5 +1306,18 @@ IMPLSTATIC Token* preprocess(Token* tok) {
 
   for (Token* t = tok; t; t = t->next)
     t->line_no += t->line_delta;
+  return tok;
+}
+
+IMPLSTATIC Token* add_container_instantiations(Token* tok) {
+  void** token_lists = hashmap_get_all_values(&C(container_includes));
+  for (void** p = &token_lists[0]; *p; ++p) {
+    Token* to_add = (Token*)*p;
+    Token* cur = to_add;
+    while (cur->next->kind != TK_EOF)
+      cur = cur->next;
+    cur->next = tok;
+    tok = to_add;
+  }
   return tok;
 }

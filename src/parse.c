@@ -2914,13 +2914,11 @@ static Node* methodcall_ref(Token** rest, Token* tok, Node* node) {
   if (!node->ty->methodcall_prefix)
     error_tok(node->tok, "not an __attribute__((methodcall(prefix))) type");
 
-  // TODO: preprocess() is a hack to use #line to make error line correct
-  // (though not column). But it means that methodcall_prefix and tok are getting
-  // sent through the preprocessor again which might be undesirable.
-  Token* built_prefix = preprocess(tokenize(new_file(
-      tok->file->name,
-      format(AL_Compile, "#line %d\n%.*s%.*s", tok->line_no - 1, node->ty->methodcall_prefix->len,
-             node->ty->methodcall_prefix->loc, tok->len, tok->loc))));
+  Token* built_prefix = tokenize(
+      new_file(tok->file->name, format(AL_Compile, "%.*s%.*s", node->ty->methodcall_prefix->len,
+                                       node->ty->methodcall_prefix->loc, tok->len, tok->loc)));
+  built_prefix->line_no = tok->line_no;
+
   Token* unused;
   Node* funcnode = primary(&unused, built_prefix);
 
