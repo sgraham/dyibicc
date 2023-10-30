@@ -126,3 +126,20 @@ Ty20 struct_test27(void) {
 Ty21 struct_test28(void) {
   return (Ty21){1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20};
 }
+
+$vec(int) container_test29($map(int, int)* py) {
+  $vec(int) x = {0};
+  x..push_back(3);
+  x..push_back(4);
+  x..push_back(5);
+  x..push_back(6);
+  x..push_back(7);
+  x..push_back(8);
+  x..push_back(9);
+
+  py..insert(1, 2);
+  py..insert(3, 4);
+  py..insert(5, 6);
+  py..insert(7, 8);
+  return x;
+}
