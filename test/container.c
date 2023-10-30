@@ -13,4 +13,7 @@ int main() {
   y..insert(5, 1.2f);
 
   ASSERT(3.14f, *y..at(4));
+
+  x..drop();
+  y..drop();
 }

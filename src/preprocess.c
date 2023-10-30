@@ -1082,7 +1082,7 @@ static void append_to_container_tokens(Token* to_add) {
 
 static void container_vec_setup(Token* tmpl) {
   // TODO: Needs to be full type, not token!
-  size_t klen = tmpl->next->next->len;
+  int klen = tmpl->next->next->len;
   char* kstr = tmpl->next->next->loc;
 
   char* key = format(AL_Compile, "type:vec,arg:%.*s", klen, kstr);
@@ -1102,9 +1102,9 @@ static void container_vec_setup(Token* tmpl) {
 
 static void container_map_setup(Token* tmpl) {
   // TODO: Needs to be full type, not token!
-  size_t klen = tmpl->next->next->len;
+  int klen = tmpl->next->next->len;
   char* kstr = tmpl->next->next->loc;
-  size_t vlen = tmpl->next->next->next->next->len;
+  int vlen = tmpl->next->next->next->next->len;
   char* vstr = tmpl->next->next->next->next->loc;
 
   char* key = format(AL_Compile, "type:map,arg:%.*s,arg:%.*s",

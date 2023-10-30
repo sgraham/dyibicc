@@ -177,26 +177,3 @@ IMPLSTATIC void hashmap_clear_manual_key_owned_value_unowned(HashMap* map) {
   map->used = 0;
   map->capacity = 0;
 }
-
-// Used when treating the map as a set to dedupe the RHS.
-IMPLSTATIC void** hashmap_get_all_values(HashMap* map) {
-  int nkeys = 0;
-  for (int i = 0; i < map->capacity; i++)
-    if (map->buckets[i].key && map->buckets[i].key != TOMBSTONE)
-      nkeys++;
-
-  void** result = bumpcalloc(nkeys + 1 /*NULL*/, sizeof(void*), map->alloc_lifetime);
-  int j = 0;
-  for (int i = 0; i < map->capacity; i++) {
-    HashEntry* ent = &map->buckets[i];
-    if (ent->key && ent->key != TOMBSTONE) {
-      result[j++] = ent->val;
-    }
-  }
-
-  assert(nkeys == j);
-
-  result[j] = NULL;
-
-  return result;
-}

@@ -624,7 +624,6 @@ IMPLSTATIC void hashmap_delete(HashMap* map, char* key);
 IMPLSTATIC void hashmap_delete2(HashMap* map, char* key, int keylen);
 IMPLSTATIC void hashmap_clear_manual_key_owned_value_owned_aligned(HashMap* map);
 IMPLSTATIC void hashmap_clear_manual_key_owned_value_unowned(HashMap* map);
-IMPLSTATIC void** hashmap_get_all_values(HashMap* map);
 
 //
 // link.c
