@@ -40,10 +40,10 @@ struct MacroArg {
   Token* tok;
 };
 
-typedef Token* macro_handler_fn(Token*);
-typedef void macro_side_effect_handler_fn(Token*);
-
 typedef struct Macro Macro;
+
+typedef Token* macro_handler_fn(Macro* mac, Token*);
+
 struct Macro {
   char* name;
   bool is_objlike;  // Object-like or function-like
@@ -51,7 +51,6 @@ struct Macro {
   char* va_args_name;
   Token* body;
   macro_handler_fn* handler;
-  macro_side_effect_handler_fn* side_effect_handler;
 };
 
 // `#if` can be nested, so we use a stack to manage nested `#if`s.
@@ -638,16 +637,8 @@ static bool expand_macro(Token** rest, Token* tok) {
 
   // Built-in dynamic macro application such as __LINE__
   if (m->handler) {
-    *rest = m->handler(tok);
-    (*rest)->next = tok->next;
+    *rest = m->handler(m, tok);
     return true;
-  }
-
-  // Like |handler|, but regular expansion is done afterwards. This handler can
-  // only usefully used for side-effects (bookkeeping) inside the compiler.
-  // Used for container setup/instantiation.
-  if (m->side_effect_handler) {
-    m->side_effect_handler(tok);
   }
 
   // Object-like macro application
@@ -1013,17 +1004,11 @@ IMPLSTATIC void undef_macro(char* name) {
   hashmap_delete(&C(macros), name);
 }
 
-IMPLSTATIC void define_function_macro(char* buf) {
-  Token* tok = tokenize(new_file("<built-in>", buf));
-  Token* rest = tok;
-  read_macro_definition(&rest, tok);
-}
-
-static void define_container(char* buf, macro_side_effect_handler_fn* fn) {
+IMPLSTATIC void define_function_macro(char* buf, macro_handler_fn* fn) {
   Token* tok = tokenize(new_file("<built-in>", buf));
   Token* rest = tok;
   Macro* m = read_macro_definition(&rest, tok);
-  m->side_effect_handler = fn;
+  m->handler = fn;
 }
 
 static Macro* add_builtin(char* name, macro_handler_fn* fn) {
@@ -1032,33 +1017,48 @@ static Macro* add_builtin(char* name, macro_handler_fn* fn) {
   return m;
 }
 
-static Token* file_macro(Token* tmpl) {
+static Token* file_macro(Macro* m, Token* tmpl) {
+  (void)m;
   while (tmpl->origin)
     tmpl = tmpl->origin;
-  return new_str_token(tmpl->file->display_name, tmpl);
+  Token* ret = new_str_token(tmpl->file->display_name, tmpl);
+  ret->next = tmpl->next;
+  return ret;
 }
 
-static Token* line_macro(Token* tmpl) {
+static Token* line_macro(Macro* m, Token* tmpl) {
+  (void)m;
   while (tmpl->origin)
     tmpl = tmpl->origin;
   int i = tmpl->line_no + tmpl->file->line_delta;
-  return new_num_token(i, tmpl);
+  Token* ret = new_num_token(i, tmpl);
+  ret->next = tmpl->next;
+  return ret;
 }
 
 // __COUNTER__ is expanded to serial values starting from 0.
-static Token* counter_macro(Token* tmpl) {
-  return new_num_token(C(counter_macro_i)++, tmpl);
+static Token* counter_macro(Macro* m, Token* tmpl) {
+  (void)m;
+  Token* ret = new_num_token(C(counter_macro_i)++, tmpl);
+  ret->next = tmpl->next;
+  return ret;
 }
 
 // __TIMESTAMP__ is expanded to a string describing the last
 // modification time of the current file. E.g.
 // "Fri Jul 24 01:32:50 2020"
-static Token* timestamp_macro(Token* tmpl) {
-  return new_str_token("Mon May 02 01:23:45 1977", tmpl);
+static Token* timestamp_macro(Macro* m, Token* tmpl) {
+  (void)m;
+  Token* ret = new_str_token("Mon May 02 01:23:45 1977", tmpl);
+  ret->next = tmpl->next;
+  return ret;
 }
 
-static Token* base_file_macro(Token* tmpl) {
-  return new_str_token(compiler_state.main__base_file, tmpl);
+static Token* base_file_macro(Macro* m, Token* tmpl) {
+  (void)m;
+  Token* ret = new_str_token(compiler_state.main__base_file, tmpl);
+  ret->next = tmpl->next;
+  return ret;
 }
 
 // __DATE__ is expanded to the current date, e.g. "May 17 2020".
@@ -1080,27 +1080,64 @@ static void append_to_container_tokens(Token* to_add) {
   tokenptrarray_push(&C(container_tokens), to_add, AL_Compile);
 }
 
-static void container_vec_setup(Token* tmpl) {
-  // TODO: Needs to be full type, not token!
-  int klen = tmpl->next->next->len;
-  char* kstr = tmpl->next->next->loc;
-
-  char* key = format(AL_Compile, "type:vec,arg:%.*s", klen, kstr);
-  if (hashmap_get(&C(container_included), key))
-    return;
-
-  append_to_container_tokens(preprocess(
-      tokenize(new_file(tmpl->file->name, format(AL_Compile,
-                                                 "#define __dyibicc_internal_include__ 1\n"
-                                                 "#define i_key %.*s\n"
-                                                 "#include <_vec.h>\n"
-                                                 "#undef __dyibicc_internal_include__\n",
-                                                 klen, kstr)))));
-
-  hashmap_put(&C(container_included), key, (void*)1);
+static char* format_container_type_as_ident(Token* ma) {
+  if (ma->kind == TK_EOF) {
+    return "";
+  } else if (ma->kind == TK_IDENT) {
+    return format(AL_Compile, "%.*s%s", ma->len, ma->loc, format_container_type_as_ident(ma->next));
+  } else if (ma->kind == TK_PUNCT) {
+    assert(ma->loc[0] == '*' && ma->len == 1);
+    return format(AL_Compile, "$STAR$%s", format_container_type_as_ident(ma->next));
+  } else {
+    unreachable();
+  }
 }
 
-static void container_map_setup(Token* tmpl) {
+static char* format_container_type_as_template_arg(Token* ma) {
+  if (ma->kind == TK_EOF) {
+    return "";
+  } else if (ma->kind == TK_IDENT) {
+    return format(AL_Compile, "%.*s%s", ma->len, ma->loc,
+                  format_container_type_as_template_arg(ma->next));
+  } else if (ma->kind == TK_PUNCT) {
+    assert(ma->loc[0] == '*' && ma->len == 1);
+    return format(AL_Compile, "*%s", format_container_type_as_template_arg(ma->next));
+  } else {
+    unreachable();
+  }
+}
+
+static Token* container_vec_setup(Macro* m, Token* tok) {
+  Token* rparen;
+  MacroArg* args = read_macro_args(&rparen, tok, m->params, m->va_args_name);
+
+  char* key_as_arg = format_container_type_as_template_arg(args->tok);
+  char* key_as_ident = format_container_type_as_ident(args->tok);
+  //printf("KEY: %s\n", key_as_ident);
+
+  char* key = format(AL_Compile, "type:vec,arg:%s", key_as_ident);
+  if (!hashmap_get(&C(container_included), key)) {
+    append_to_container_tokens(preprocess(
+        tokenize(new_file(tok->file->name, format(AL_Compile,
+                                                  "#define __dyibicc_internal_include__ 1\n"
+                                                  "#define i_key %s\n"
+                                                  "#define i_type _Vec$%s\n"
+                                                  "#include <_vec.h>\n"
+                                                  "#undef __dyibicc_internal_include__\n",
+                                                  key_as_arg, key_as_ident)))));
+
+    hashmap_put(&C(container_included), key, (void*)1);
+  }
+
+  Token* ret = tokenize(new_file(tok->file->name, format(AL_Compile, "_Vec$%s", key_as_ident)));
+  ret->next = rparen->next;
+  return ret;
+}
+
+static Token* container_map_setup(Macro* m, Token* tmpl) {
+  (void)m; (void)tmpl;
+  assert(false);
+#if 0
   // TODO: Needs to be full type, not token!
   int klen = tmpl->next->next->len;
   char* kstr = tmpl->next->next->loc;
@@ -1123,6 +1160,8 @@ static void container_map_setup(Token* tmpl) {
                                         klen, kstr, vlen, vstr, klen, kstr, vlen, vstr)))));
 
   hashmap_put(&C(container_included), key, (void*)1);
+#endif
+  return NULL;
 }
 
 IMPLSTATIC void init_macros(void) {
@@ -1186,8 +1225,8 @@ IMPLSTATIC void init_macros(void) {
   define_macro("_NO_CRT_STDIO_INLINE", "1");
   define_macro("_CRT_DECLARE_NONSTDC_NAMES", "1");
   define_macro("__WINT_TYPE__", "unsigned short");
-  define_function_macro("__pragma(_)\n");
-  define_function_macro("__declspec(_)\n");
+  define_function_macro("__pragma(_)\n", NULL);
+  define_function_macro("__declspec(_)\n", NULL);
 #else
   define_macro("__SIZEOF_LONG__", "8");
   define_macro("__SIZEOF_LONG_DOUBLE__", "16");
@@ -1199,7 +1238,6 @@ IMPLSTATIC void init_macros(void) {
   define_macro("__linux", "1");
   define_macro("__linux__", "1");
   define_macro("__gnu_linux__", "1");
-  (void)define_function_macro;
 #endif
 
   add_builtin("__FILE__", file_macro);
@@ -1208,8 +1246,8 @@ IMPLSTATIC void init_macros(void) {
   add_builtin("__TIMESTAMP__", timestamp_macro);
   add_builtin("__BASE_FILE__", base_file_macro);
 
-  define_container("$vec(T) _Vec$##T", container_vec_setup);
-  define_container("$map(K,V) _Map$##K##$##V", container_map_setup);
+  define_function_macro("$vec(T)", container_vec_setup);
+  define_function_macro("$map(K,V)", container_map_setup);
 
   time_t now = time(NULL);
   struct tm* tm = localtime(&now);
