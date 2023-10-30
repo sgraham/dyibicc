@@ -99,11 +99,8 @@ static HashEntry* get_or_insert_entry(HashMap* map, char* key, int keylen) {
       return ent;
     }
 
-    if (ent->key == TOMBSTONE) {
-      ent->key = key;
-      ent->keylen = keylen;
-      return ent;
-    }
+    // It is tempting to allow a TOMBSTONE entry to be reused here, but they
+    // cannot be, see: https://github.com/rui314/chibicc/issues/135.
 
     if (ent->key == NULL) {
       ent->key = key;
