@@ -12,13 +12,13 @@ static void print_tokens(Token* tok) {
   int line = 1;
   for (; tok->kind != TK_EOF; tok = tok->next) {
     if (line > 1 && tok->at_bol)
-      logout("\n");
+      printf("\n");
     if (tok->has_space && !tok->at_bol)
-      logout(" ");
-    logout("%.*s", tok->len, tok->loc);
+      printf(" ");
+    printf("%.*s", tok->len, tok->loc);
     line++;
   }
-  logout("\n");
+  printf("\n");
 }
 #endif
 
@@ -250,6 +250,7 @@ bool dyibicc_update(DyibiccContext* context, char* filename, char* contents) {
         if (!tok)
           error("%s: %s", C(base_file), strerror(errno));
         tok = preprocess(tok);
+        tok = add_container_instantiations(tok);
 
         codegen_init();  // Initializes dynasm so that parse() can assign labels.
 

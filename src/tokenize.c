@@ -75,8 +75,8 @@ static int from_hex(char c) {
 // Read a punctuator token from p and returns its length.
 static int read_punct(char* p) {
   static char* kw[] = {
-      "<<=", ">>=", "...", "==", "!=", "<=", ">=", "->", "+=", "-=", "*=", "/=",
-      "++",  "--",  "%=",  "&=", "|=", "^=", "&&", "||", "<<", ">>", "##",
+      "<<=", ">>=", "...", "..", "==", "!=", "<=", ">=", "->", "+=", "-=", "*=",
+      "/=",  "++",  "--", "%=",  "&=", "|=", "^=", "&&", "||", "<<", ">>", "##",
   };
 
   for (size_t i = 0; i < sizeof(kw) / sizeof(*kw); i++)

@@ -143,6 +143,12 @@ typedef struct FilePtrArray {
   int len;
 } FilePtrArray;
 
+typedef struct TokenPtrArray {
+  Token** data;
+  int capacity;
+  int len;
+} TokenPtrArray;
+
 typedef struct IntIntInt {
   int a;
   int b;
@@ -164,6 +170,7 @@ IMPLSTATIC unsigned int get_page_size(void);
 IMPLSTATIC void strarray_push(StringArray* arr, char* s, AllocLifetime lifetime);
 IMPLSTATIC void strintarray_push(StringIntArray* arr, StringInt item, AllocLifetime lifetime);
 IMPLSTATIC void fileptrarray_push(FilePtrArray* arr, File* item, AllocLifetime lifetime);
+IMPLSTATIC void tokenptrarray_push(TokenPtrArray* arr, Token* item, AllocLifetime lifetime);
 #if X64WIN
 IMPLSTATIC void intintintarray_push(IntIntIntArray* arr, IntIntInt item, AllocLifetime lifetime);
 #endif
@@ -252,6 +259,7 @@ IMPLSTATIC void init_macros(void);
 IMPLSTATIC void define_macro(char* name, char* buf);
 IMPLSTATIC void undef_macro(char* name);
 IMPLSTATIC Token* preprocess(Token* tok);
+IMPLSTATIC Token* add_container_instantiations(Token* tok);
 
 //
 // parse.c
@@ -507,6 +515,7 @@ struct Type {
   Member* members;
   bool is_flexible;
   bool is_packed;
+  Token* methodcall_prefix;
 
   // Function type
   Type* return_ty;
@@ -706,6 +715,9 @@ typedef struct CompilerState {
   HashMap preprocess__macros;
   CondIncl* preprocess__cond_incl;
   HashMap preprocess__pragma_once;
+  HashMap preprocess__container_included;
+  TokenPtrArray preprocess__container_tokens;
+
   int preprocess__include_next_idx;
   HashMap preprocess__include_path_cache;
   HashMap preprocess__include_guards;

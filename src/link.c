@@ -199,6 +199,7 @@ static void* get_standard_runtime_function(char* name) {
     X(atan);
     X(atan2);
     X(atoi);
+    X(calloc);
     X(ceil);
     X(cos);
     X(cosh);
