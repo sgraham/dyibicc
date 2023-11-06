@@ -63,8 +63,8 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
 
   StringArray sys_inc_paths = {0};
 #if X64WIN
-  strarray_push(&sys_inc_paths, format(AL_Temp, "%s/win", env_data->dyibicc_include_dir), AL_Temp);
-  strarray_push(&sys_inc_paths, format(AL_Temp, "%s/all", env_data->dyibicc_include_dir), AL_Temp);
+  strarray_push(&sys_inc_paths, "__include__/win", AL_Temp);
+  strarray_push(&sys_inc_paths, "__include__/all", AL_Temp);
 
 #define GET_ENV_VAR(x)                          \
   char* env_##x = getenv(#x);                   \
@@ -89,9 +89,8 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
   strarray_push(&sys_inc_paths, format(AL_Temp, "%sinclude", env_VcToolsInstallDir), AL_Temp);
 
 #else
-  strarray_push(&sys_inc_paths, format(AL_Temp, "%s/linux", env_data->dyibicc_include_dir),
-                AL_Temp);
-  strarray_push(&sys_inc_paths, format(AL_Temp, "%s/all", env_data->dyibicc_include_dir), AL_Temp);
+  strarray_push(&sys_inc_paths, "__include__/linux", AL_Temp);
+  strarray_push(&sys_inc_paths, "__include__/all", AL_Temp);
 
   strarray_push(&sys_inc_paths, "/usr/local/include", AL_Temp);
   strarray_push(&sys_inc_paths, "/usr/include/x86_64-linux-gnu", AL_Temp);

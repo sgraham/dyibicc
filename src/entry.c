@@ -100,7 +100,6 @@ int main(int argc, char** argv) {
   DyibiccEnviromentData env_data = {
       .include_paths = (const char**)include_paths.data,
       .files = (const char**)input_paths.data,
-      .dyibicc_include_dir = "./include",
       .load_file_contents = read_file,
       .get_function_address = NULL,
       .output_function = NULL,

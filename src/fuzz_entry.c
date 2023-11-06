@@ -25,7 +25,6 @@ int LLVMFuzzerTestOneInput(const uint8_t* Data, size_t Size) {
   DyibiccEnviromentData env_data = {
       .include_paths = no_include_paths,
       .files = one_input_path,
-      .dyibicc_include_dir = "./include",
       .load_file_contents = read_file,
       .get_function_address = NULL,
       .output_function = NULL,

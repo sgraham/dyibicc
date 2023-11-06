@@ -51,6 +51,8 @@ def include_file(f, src):
                 continue
             if line.startswith('#include "dyn_basic_pdb.h"'):
                 continue
+            if line.startswith('#include "compincl.h"'):
+                continue
             if line.startswith('#include "../include/all/reflect.h"'):
                 continue
             if line.startswith('#pragma once'):
@@ -82,8 +84,6 @@ def main():
         f.write('#endif // !X64WIN\n')
     shutil.copyfile(os.path.join(root_src, 'libdyibicc.h'), os.path.join(out_dir, 'libdyibicc.h'))
     shutil.copyfile(os.path.join(root_src, '..', 'LICENSE'), os.path.join(out_dir, 'LICENSE'))
-    shutil.copytree(os.path.join(root_src, '..', 'include'), os.path.join(out_dir, 'include'),
-                    dirs_exist_ok=True)
 
     # Smoke test that there's no warnings, etc. Currently only on host platform.
     os.chdir(out_dir)

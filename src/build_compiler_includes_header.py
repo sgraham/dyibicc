@@ -25,7 +25,7 @@ def escape(s, encoding='ascii'):
 def main():
     out, inputs = sys.argv[1], sys.argv[2:]
     with open(out, 'w', newline='\n', encoding='utf-8') as f:
-        files = {'all':{}, 'linux':{}, 'win':{}}
+        files = []
         for i in inputs:
             PREFIX = '../../include/'
             if not i.startswith(PREFIX):
@@ -33,27 +33,21 @@ def main():
                 return 1
             path = i[len(PREFIX):]
             category, name = os.path.split(path)
-            if files.get(category) is None:
-                print('Unexpected include category %s' % category)
-                return 1
             with open(i, 'r', encoding='utf-8') as g:
-                files[category][name] = g.read()
+                files.append((category, name, g.read()))
 
-
-
-        f.write('#pragma once\n\n'
-                'typedef struct CompilerInclude {\n'
-                '    char* name;\n'
+        f.write('typedef struct CompilerInclude {\n'
+                '    char* path;\n'
                 '    int offset;\n'
                 '} CompilerInclude;\n\n')
+
         blob = ''
-        for c, fc in files.items():
-            f.write('static CompilerInclude compiler_includes_%s[] = {\n' % c)
-            for name, contents in fc.items():
-                f.write('    { "%s", %d },\n' % (name, len(blob)))
-                blob += contents + '\0'
-            f.write('};\n')
-        f.write('static const unsigned char compiler_include_blob[%d] = {\n' % len(blob))
+        f.write('static CompilerInclude compiler_includes[%d] = {\n' % len(files))
+        for cat, name, contents  in files:
+            f.write('    { "__include__/%s/%s", %d },\n' % (cat, name, len(blob)))
+            blob += contents + '\0'
+        f.write('};\n')
+        f.write('static unsigned char compiler_include_blob[%d] = {\n' % len(blob))
         f.write('\n'.join(textwrap.wrap(', '.join(str(ord(x)) for x in blob))))
         f.write('};\n')
 

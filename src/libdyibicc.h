@@ -23,9 +23,6 @@ typedef struct DyibiccEnviromentData {
   // NULL-terminated list of .c files to include in the project.
   const char** files;
 
-  // Path to the compiler's include directory.
-  const char* dyibicc_include_dir;
-
   // Load the contents of a file by name (typically from disk).
   //
   // NOTE/TODO: There is currently a gotcha with this callback. It is used in

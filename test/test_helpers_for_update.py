@@ -41,7 +41,6 @@ int main(void) {
   DyibiccEnviromentData env_data = {
       .include_paths = (const char**)include_paths,
       .files = (const char**)input_paths,
-      .dyibicc_include_dir = "embed/include",
       .load_file_contents = get_file_by_name,
       .get_function_address = get_host_helper_func,
       .output_function = NULL,

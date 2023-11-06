@@ -717,6 +717,7 @@ typedef struct CompilerState {
   HashMap preprocess__pragma_once;
   HashMap preprocess__container_included;
   TokenPtrArray preprocess__container_tokens;
+  HashMap preprocess__builtin_includes_map;
 
   int preprocess__include_next_idx;
   HashMap preprocess__include_path_cache;

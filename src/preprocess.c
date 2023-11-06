@@ -623,8 +623,23 @@ static Token* subst(Token* tok, MacroArg* args) {
   return head.next;
 }
 
+static bool file_exists_in_builtins(char* path) {
+  if (C(builtin_includes_map).capacity == 0) {
+    for (size_t i = 0; i < sizeof(compiler_includes) / sizeof(compiler_includes[0]); ++i) {
+      hashmap_put(&C(builtin_includes_map), compiler_includes[i].path,
+                  (void*)&compiler_include_blob[compiler_includes[i].offset]);
+    }
+  }
+
+  return hashmap_get(&C(builtin_includes_map), path) != NULL;
+}
+
 static bool file_exists(char* path) {
   struct stat st;
+
+  if (file_exists_in_builtins(path))
+    return true;
+
   return !stat(path, &st);
 }
 
@@ -809,7 +824,13 @@ static Token* include_file(Token* tok, char* path, Token* filename_tok) {
   if (guard_name && hashmap_get(&C(macros), guard_name))
     return tok;
 
-  Token* tok2 = tokenize_file(path);
+  Token* tok2;
+  char* builtin_include_contents = hashmap_get(&C(builtin_includes_map), path);
+  if (builtin_include_contents) {
+    tok2 = tokenize_filecontents(path, builtin_include_contents);
+  } else {
+    tok2 = tokenize_file(path);
+  }
   if (!tok2)
     error_tok(filename_tok, "%s: cannot open file: %s", path, strerror(errno));
 
