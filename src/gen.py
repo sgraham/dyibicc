@@ -2,6 +2,7 @@ import base64
 import glob
 import json
 import os
+import pathlib
 import sys
 
 # Assumes we're in $root/scripts.
@@ -28,19 +29,19 @@ FILELIST = [
 CONFIGS = {
     'w': {
         'd': {
-            'COMPILE': 'cl /showIncludes /nologo /FS /Od /Zi /D_DEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo:$out /Fd:$out.pdb',
+            'COMPILE': 'cl /showIncludes /nologo /FS /Od /Zi /D_DEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /I. /c $in /Fo:$out /Fd:$out.pdb',
             'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /DEBUG $in /out:$out /pdb:$out.pdb',
             'ML': 'cl /nologo /wd4132 /wd4324 $in /link /out:$out',
             'TESTCEXE': 'cl /nologo /Zi /FS /D_CRT_SECURE_NO_WARNINGS /Iembed /W4 /Wall /WX $in /link /debug onecore.lib user32.lib /out:$out',
         },
         'r': {
-            'COMPILE': 'cl /showIncludes /nologo /FS /Ox /GL /Zi /DNDEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo$out /Fd:$out.pdb',
+            'COMPILE': 'cl /showIncludes /nologo /FS /Ox /GL /Zi /DNDEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /I. /c $in /Fo$out /Fd:$out.pdb',
             'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /LTCG /DEBUG /OPT:REF /OPT:ICF $in /out:$out /pdb:$out.pdb',
             'ML': 'cl /nologo /wd4132 /wd4324 $in /link /out:$out',
             'TESTCEXE': 'cl /nologo /FS /D_CRT_SECURE_NO_WARNINGS /Iembed /W4 /Zi /Ox /GL /Wall /WX /wd4710 /wd4711 $in /link onecore.lib user32.lib /LTCG /DEBUG /out:$out',
         },
         'a': {
-            'COMPILE': 'cl /showIncludes /nologo /FS /Od /fsanitize=address /Zi /D_DEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /c $in /Fo:$out /Fd:$out.pdb',
+            'COMPILE': 'cl /showIncludes /nologo /FS /Od /fsanitize=address /Zi /D_DEBUG /DIMPLSTATIC= /DIMPLEXTERN=extern /D_CRT_SECURE_NO_DEPRECATE /W4 /WX /I$root /I. /c $in /Fo:$out /Fd:$out.pdb',
             'LINK': 'link /nologo gdi32.lib user32.lib onecore.lib /DEBUG $in /out:$out /pdb:$out.pdb',
             'ML': 'cl /nologo /wd4132 /wd4324 $in /link /out:$out',
             'TESTCEXE': 'cl /nologo /FS /D_CRT_SECURE_NO_WARNINGS /Iembed /W4 /Wall /WX $in /link /DEBUG onecore.lib user32.lib /out:$out',
@@ -52,25 +53,25 @@ CONFIGS = {
     },
     'l': {
         'f': {
-            'COMPILE': 'clang -fsanitize=fuzzer -std=c11 -MMD -MT $out -MF $out.d -g -O0 -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -DNDEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -I$root -c $in -o $out',
+            'COMPILE': 'clang -fsanitize=fuzzer -std=c11 -MMD -MT $out -MF $out.d -g -O0 -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -DNDEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -I$root -I. -c $in -o $out',
             'LINK': 'clang -fsanitize=fuzzer -o $out $in -pthread -lm -ldl -g',
             'ML': 'clang -o $out $in -lm',
             'TESTCEXE': 'clang -fsanitize=fuzzer -Iembed -Wall -Wextra -Werror -ldl -lm -o $out $in',
         },
         'd': {
-            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -O0 -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -DNDEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -I$root -c $in -o $out',
+            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -O0 -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -DNDEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -I$root -I. -c $in -o $out',
             'LINK': 'clang -o $out $in -pthread -lm -ldl -g',
             'ML': 'clang -o $out $in -lm',
             'TESTCEXE': 'clang -Iembed -Wall -Wextra -Werror -ldl -lm -o $out $in',
         },
         'r': {
-            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -Oz -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -D_DEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -c -I$root $in -o $out',
+            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -Oz -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -D_DEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -c -I$root -I. $in -o $out',
             'LINK': 'clang -o $out $in -pthread -lm -ldl -g',
             'ML': 'clang -o $out $in -lm',
             'TESTCEXE': 'clang -Iembed -Wall -Wextra -Werror -ldl -lm -Oz -o $out $in',
         },
         'a': {
-            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -O0 -fsanitize=address -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -D_DEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -c -I$root $in -o $out',
+            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -O0 -fsanitize=address -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -D_DEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -c -I$root -I. $in -o $out',
             'LINK': 'clang -fsanitize=address -o $out $in -pthread -lm -ldl -g',
             'ML': 'clang -o $out $in -lm',
             'TESTCEXE': 'clang -Iembed -Wall -Wextra -Werror -ldl -lm -fsanitize=address -o $out $in',
@@ -161,6 +162,9 @@ def generate(platform, config, settings, cmdlines, tests, upd_tests, fuzz_tests)
         f.write('rule amalg\n')
         f.write('  command = %s $root/build_amalg.py embed $root $in\n' % sys.executable)
         f.write('\n')
+        f.write('rule compincl\n')
+        f.write('  command = %s $root/build_compiler_includes_header.py $out $in\n' % sys.executable)
+        f.write('\n')
 
         objs = []
 
@@ -181,11 +185,17 @@ def generate(platform, config, settings, cmdlines, tests, upd_tests, fuzz_tests)
             if config != 'f' and src == 'fuzz_entry.c': continue
             obj = os.path.splitext(src)[0] + obj_ext
             objs.append(obj)
-            f.write('build %s: cc $root/%s\n' % (obj, src))
+            extra_deps = ' | compincl.h' if src == 'preprocess.c' else ''
+            f.write('build %s: cc $root/%s%s\n' % (obj, src, extra_deps))
+
+        compiler_include_headers = pathlib.Path('include').rglob('*.h')
+        f.write('build compincl.h: compincl %s | $root/build_compiler_includes_header.py\n' %
+                (' '.join([os.path.join('$root', '..', x).replace('\\', '/')
+                           for x in compiler_include_headers])))
 
         EXTRAS_FOR_AMALG = [
                 '$root/dyibicc.h',
-                '$root/../include/all/reflect.h',
+                'compincl.h',
                 '$root/dynasm/dasm_proto.h',
                 '$root/dynasm/dasm_x86.h',
         ]

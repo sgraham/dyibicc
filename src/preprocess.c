@@ -24,6 +24,8 @@
 
 #include "dyibicc.h"
 
+#include "compincl.h"
+
 #define C(x) compiler_state.preprocess__##x
 
 typedef struct MacroParam MacroParam;
