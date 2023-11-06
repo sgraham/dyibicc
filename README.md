@@ -26,3 +26,8 @@ or on Windows (from a VS x64 cmd):
 
 For example, using `m a test -j1` would run the tests under an ASAN build, one
 at a time (the extra args `-j1` are passed to the sub-ninja invocation).
+
+On Linux, there is also a fuzzer target, which can be built by `m f`. This makes
+the main binary a [libFuzzer](https://llvm.org/docs/LibFuzzer.html) runner. As
+the fuzzer doesn't yet understand C structure, is only mostly only able to fuzz
+the tokenizer and preprocessor.
