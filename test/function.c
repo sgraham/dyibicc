@@ -173,7 +173,7 @@ int struct_test5(Ty5 x, int n);
 int struct_test4(Ty4 x, int n);
 int struct_test6(Ty6 x, int n);
 int struct_test7(Ty7 x, int n);
-int struct_test8(Ty7 x, int n);
+int struct_test8(Ty8 x, int n);
 
 int struct_test14(Ty4 x, int n) {
   switch (n) {
