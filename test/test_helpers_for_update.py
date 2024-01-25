@@ -45,6 +45,7 @@ int main(void) {
       .get_function_address = get_host_helper_func,
       .output_function = NULL,
       .use_ansi_codes = false,
+      .generate_debug_symbols = false,
   };
 
   DyibiccContext* ctx = dyibicc_set_environment(&env_data);

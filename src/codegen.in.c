@@ -835,7 +835,9 @@ static int push_args_win(Node* node, int* by_ref_copies_size) {
   assert((*by_ref_copies_size == 0 && !has_by_ref_args) ||
          (*by_ref_copies_size && has_by_ref_args));
 
-  if ((C(depth) + stack + (*by_ref_copies_size / 8)) % 2 == 1) {
+  // Realign the stack to 16 bytes if rsp fiddling mucked it up.
+  size_t r11_push_size = has_by_ref_args ? 1 : 0;
+  if ((C(depth) + stack + r11_push_size) % 2 == 1) {
     ///| sub rsp, 8
     C(depth)++;
     stack++;
