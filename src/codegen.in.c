@@ -219,6 +219,11 @@ static void gen_addr(Node* node) {
       // Local variable
       if (node->var->is_local) {
         ///| lea rax, [rbp+node->var->offset]
+#if X64WIN
+        if (node->var->is_param_passed_by_reference) {
+          ///| mov rax, [rax]
+        }
+#endif
         return;
       }
 
@@ -272,11 +277,6 @@ static void gen_addr(Node* node) {
       return;
     case ND_MEMBER:
       gen_addr(node->lhs);
-#if X64WIN
-      if (node->lhs->kind == ND_VAR && node->lhs->var->is_param_passed_by_reference) {
-        ///| mov rax, [rax]
-      }
-#endif
       ///| add rax, node->member->offset
       return;
     case ND_FUNCALL:
@@ -2090,7 +2090,7 @@ static void assign_lvar_offsets(Obj* prog) {
             // such and then either assign a register or stack slot for the
             // reference.
             // outaf("by ref %s\n", var->name);
-            // var->passed_by_reference = true;
+            assert(var->is_param_passed_by_reference);
           }
 
           // If the pointer to a referenced value or the value itself can be
