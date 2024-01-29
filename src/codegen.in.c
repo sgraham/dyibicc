@@ -710,7 +710,7 @@ static void push_args2_win(Node* args, bool first_pass) {
     case TY_UNION:
       if (!type_passed_in_register(args->ty)) {
         assert(args->pass_by_reference);
-        ///| lea rax, [r11-args->pass_by_reference]
+        ///| lea rax, [rbp - C(current_fn)->stack_size - args->pass_by_reference]
       } else {
         ///| mov rax, [rax]
       }
@@ -784,12 +784,6 @@ static int push_args_win(Node* node, int* by_ref_copies_size) {
     }
   }
 
-  if (has_by_ref_args) {
-    // Use r11 as a base pointer for by-reference copies of structs.
-    ///| push r11
-    ///| mov r11, rsp
-  }
-
   // If the return type is a large struct/union, the caller passes
   // a pointer to a buffer as if it were the first argument.
   if (node->ret_buffer && !type_passed_in_register(node->ty))
@@ -814,7 +808,7 @@ static int push_args_win(Node* node, int* by_ref_copies_size) {
           // Make a copy, and note the offset for passing by reference.
           gen_expr(arg);
           *by_ref_copies_size += push_struct(ty);
-          arg->pass_by_reference = *by_ref_copies_size;
+          arg->pass_by_reference = C(depth) * 8;
         }
         break;
       case TY_FLOAT:
@@ -836,8 +830,7 @@ static int push_args_win(Node* node, int* by_ref_copies_size) {
          (*by_ref_copies_size && has_by_ref_args));
 
   // Realign the stack to 16 bytes if rsp fiddling mucked it up.
-  size_t r11_push_size = has_by_ref_args ? 1 : 0;
-  if ((C(depth) + stack + r11_push_size) % 2 == 1) {
+  if ((C(depth) + stack) % 2 == 1) {
     ///| sub rsp, 8
     C(depth)++;
     stack++;
@@ -1405,9 +1398,6 @@ static void gen_expr(Node* node) {
       ///| mov r10, rax
       ///| call r10
       ///| add rsp, stack_args*8 + PARAMETER_SAVE_SIZE + by_ref_copies_size
-      if (by_ref_copies_size > 0) {
-        ///| pop r11
-      }
 
       C(depth) -= by_ref_copies_size / 8;
       C(depth) -= stack_args;
@@ -2454,8 +2444,7 @@ static void emit_text(Obj* prog) {
       //| .dword =>fn->dasm_end_of_function_label
       //| .dword =>fn->dasm_unwind_info_label
 
-      // TODO: probably need to relocate and add info about r11 used as a base
-      // for the value stack copies, and also rdi pushed for memsets.
+      // TODO: probably info about rdi pushed for memsets.
 
       // https://learn.microsoft.com/en-us/cpp/build/exception-handling-x64?view=msvc-170
       enum {
