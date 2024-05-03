@@ -2113,7 +2113,11 @@ static void assign_lvar_offsets(Obj* prog) {
 
       var->offset = top;
       // outaf("int stack %s at stack 0x%x\n", var->name, var->offset);
-      top += MAX(8, var->ty->size);
+      if (var->is_param_passed_by_reference) {
+        top += 8;
+      } else {
+        top += MAX(8, var->ty->size);
+      }
     }
 
     // Assign offsets to local variables.
