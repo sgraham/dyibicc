@@ -733,7 +733,7 @@ static char* search_include_next(char* filename) {
 }
 
 // Read an #include argument.
-static char* read_include_filename(Token** rest, Token* tok, bool* is_dquote) {
+static char* read_include_filename(Token** rest, Token* tok, bool* is_dquote, bool can_expand) {
   // Pattern 1: #include "foo.h"
   if (tok->kind == TK_STR) {
     // A double-quoted filename for #include is a special kind of
@@ -765,9 +765,9 @@ static char* read_include_filename(Token** rest, Token* tok, bool* is_dquote) {
   // Pattern 3: #include FOO
   // In this case FOO must be macro-expanded to either
   // a single string token or a sequence of "<" ... ">".
-  if (tok->kind == TK_IDENT) {
+  if (can_expand && tok->kind == TK_IDENT) {
     Token* tok2 = preprocess2(copy_line(rest, tok));
-    return read_include_filename(&tok2, tok2, is_dquote);
+    return read_include_filename(&tok2, tok2, is_dquote, /*can_expand=*/false);
   }
 
   error_tok(tok, "expected a filename");
@@ -884,7 +884,7 @@ static Token* preprocess2(Token* tok) {
 
     if (equal(tok, "include")) {
       bool is_dquote;
-      char* filename = read_include_filename(&tok, tok->next, &is_dquote);
+      char* filename = read_include_filename(&tok, tok->next, &is_dquote, true);
 
       if (filename[0] != '/' && is_dquote) {
         char* path = format(AL_Compile, "%s/%s", dirname(bumpstrdup(start->file->name, AL_Compile)),
@@ -902,7 +902,7 @@ static Token* preprocess2(Token* tok) {
 
     if (equal(tok, "include_next")) {
       bool ignore;
-      char* filename = read_include_filename(&tok, tok->next, &ignore);
+      char* filename = read_include_filename(&tok, tok->next, &ignore, true);
       char* path = search_include_next(filename);
       tok = include_file(tok, path ? path : filename, start->next->next);
       continue;
