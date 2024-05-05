@@ -62,7 +62,7 @@ typedef struct DyibiccContext DyibiccContext;
 // multiple. See notes in the structure about how it should be filled out.
 DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data);
 
-// Called once on initializtion with a file == NULL and contents == NULL, and
+// Called once on initialization with a file == NULL and contents == NULL, and
 // subsequently whenever any file contents are updated and the running code
 // should be recompiled/relinked.
 bool dyibicc_update(DyibiccContext* context, char* file, char* contents);

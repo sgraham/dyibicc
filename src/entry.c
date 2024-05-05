@@ -84,7 +84,16 @@ static void parse_args(int argc,
   }
 }
 
+#if X64WIN
+extern _Bool __stdcall SetConsoleMode(void*, int);
+extern void* __stdcall GetStdHandle(int);
+#endif
+
 int main(int argc, char** argv) {
+#if X64WIN
+  SetConsoleMode(GetStdHandle(-11), 7);
+#endif
+
   alloc_init(AL_Link);
 
   StringArray include_paths = {0};
