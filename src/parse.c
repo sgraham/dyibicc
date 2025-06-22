@@ -413,8 +413,18 @@ static Type* declspec(Token** rest, Token* tok, VarAttr* attr) {
     if (consume(&tok, tok, "const") || consume(&tok, tok, "volatile") ||
         consume(&tok, tok, "auto") || consume(&tok, tok, "register") ||
         consume(&tok, tok, "restrict") || consume(&tok, tok, "__restrict") ||
-        consume(&tok, tok, "__restrict__") || consume(&tok, tok, "_Noreturn"))
+        consume(&tok, tok, "__restrict__") || consume(&tok, tok, "_Noreturn")) {
       continue;
+    }
+
+    if (consume(&tok, tok, "__attribute__")) {
+      tok = skip(tok, "(");
+      tok = skip(tok, "(");
+      // ignored
+      consume(&tok, tok, "unused");
+      tok = skip(tok, ")");
+      tok = skip(tok, ")");
+    }
 
     if (equal(tok, "_Atomic")) {
       tok = tok->next;
@@ -1567,6 +1577,7 @@ static bool is_typename(Token* tok) {
       "_Thread_local",
       "__thread",
       "_Atomic",
+      "__attribute__",
 #if X64WIN
       "__int64",
 #endif
@@ -2701,7 +2712,7 @@ static void struct_members(Token** rest, Token* tok, Type* ty) {
 // attribute = ("__attribute__" "(" "(" "packed" ")" ")")*
 //           = ("__attribute__" "(" "(" "aligned" "(" N ")" ")" ")")*
 //           = ("__attribute__" "(" "(" "methodcall" "(" prefix ")" ")" ")")*
-static Token* attribute_list(Token* tok, Type* ty) {
+static Token* struct_attribute_list(Token* tok, Type* ty) {
   while (consume(&tok, tok, "__attribute__")) {
     tok = skip(tok, "(");
     tok = skip(tok, "(");
@@ -2744,7 +2755,7 @@ static Token* attribute_list(Token* tok, Type* ty) {
 // struct-union-decl = attribute? ident? ("{" struct-members)?
 static Type* struct_union_decl(Token** rest, Token* tok) {
   Type* ty = struct_type();
-  tok = attribute_list(tok, ty);
+  tok = struct_attribute_list(tok, ty);
 
   // Read a tag.
   Token* tag = NULL;
@@ -2769,7 +2780,7 @@ static Type* struct_union_decl(Token** rest, Token* tok) {
 
   // Construct a struct object.
   struct_members(&tok, tok, ty);
-  *rest = attribute_list(tok, ty);
+  *rest = struct_attribute_list(tok, ty);
 
   ty->name = tag;
 
