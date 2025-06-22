@@ -336,9 +336,9 @@ static void push_tag_scope(Token* tok, Type* ty) {
   hashmap_put2(&C(scope)->tags, tok->loc, tok->len, ty);
 }
 
-static bool skip_function_attribute(Token** rest, Token* tok) {
+static bool skip_function_attributes(Token** rest, Token* tok) {
   bool got_one = false;
-  if (consume(&tok, tok, "__attribute__")) {
+  while (consume(&tok, tok, "__attribute__")) {
     got_one = true;
     tok = skip(tok, "(");
     tok = skip(tok, "(");
@@ -452,7 +452,7 @@ static Type* declspec(Token** rest, Token* tok, VarAttr* attr) {
       continue;
     }
 
-    if (skip_function_attribute(&tok, tok)) {
+    if (skip_function_attributes(&tok, tok)) {
       continue;
     }
 
@@ -686,7 +686,7 @@ static Type* func_params(Token** rest, Token* tok, Type* ty) {
   if (cur == &head)
     is_variadic = true;
 
-  bool skipped_func_attrib = skip_function_attribute(&tok, tok->next);
+  bool skipped_func_attrib = skip_function_attributes(&tok, tok->next);
 
   ty = func_type(ty);
   ty->params = head.next;
