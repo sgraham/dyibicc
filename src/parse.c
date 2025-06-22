@@ -424,6 +424,7 @@ static Type* declspec(Token** rest, Token* tok, VarAttr* attr) {
       consume(&tok, tok, "unused");
       tok = skip(tok, ")");
       tok = skip(tok, ")");
+      continue;
     }
 
     if (equal(tok, "_Atomic")) {
