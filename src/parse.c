@@ -498,8 +498,9 @@ static Type* declspec(Token** rest, Token* tok, VarAttr* attr) {
       counter |= SIGNED;
     else if (equal(tok, "unsigned"))
       counter |= UNSIGNED;
-    else
-      unreachable();
+    else {
+      error_tok(tok, "expected type");
+    }
 
     switch (counter) {
       case VOID:
