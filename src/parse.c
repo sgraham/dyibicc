@@ -336,6 +336,40 @@ static void push_tag_scope(Token* tok, Type* ty) {
   hashmap_put2(&C(scope)->tags, tok->loc, tok->len, ty);
 }
 
+static bool skip_function_attribute(Token** rest, Token* tok) {
+  bool got_one = false;
+  if (consume(&tok, tok, "__attribute__")) {
+    got_one = true;
+    tok = skip(tok, "(");
+    tok = skip(tok, "(");
+    tok = tok->next;  // Skip the attribute name.
+    if (equal(tok, "(")) {
+      // If it's function-like, ignore all the details, but balance parens.
+      tok = skip(tok, "(");
+      int count = 1;
+      while (tok) {
+        if (consume(&tok, tok, "(")) {
+          ++count;
+          continue;
+        }
+        if (consume(&tok, tok, ")")) {
+          --count;
+          if (count == 0) {
+            break;
+          }
+          continue;
+        }
+        tok = tok->next;
+      }
+    }
+    tok = skip(tok, ")");
+    tok = skip(tok, ")");
+
+    *rest = tok;
+  }
+  return got_one;
+}
+
 // declspec = ("void" | "_Bool" | "char" | "short" | "int" | "long"
 //             | "typedef" | "static" | "extern" | "inline"
 //             | "_Thread_local" | "__thread"
@@ -417,13 +451,7 @@ static Type* declspec(Token** rest, Token* tok, VarAttr* attr) {
       continue;
     }
 
-    if (consume(&tok, tok, "__attribute__")) {
-      tok = skip(tok, "(");
-      tok = skip(tok, "(");
-      // ignored
-      consume(&tok, tok, "unused");
-      tok = skip(tok, ")");
-      tok = skip(tok, ")");
+    if (skip_function_attribute(&tok, tok)) {
       continue;
     }
 
@@ -657,10 +685,12 @@ static Type* func_params(Token** rest, Token* tok, Type* ty) {
   if (cur == &head)
     is_variadic = true;
 
+  bool skipped_func_attrib = skip_function_attribute(&tok, tok->next);
+
   ty = func_type(ty);
   ty->params = head.next;
   ty->is_variadic = is_variadic;
-  *rest = tok->next;
+  *rest = skipped_func_attrib ? tok : tok->next;
   return ty;
 }
 

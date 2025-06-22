@@ -1,10 +1,14 @@
-// DISABLED
+// RET: 23
+typedef unsigned long long size_t;
 
-void blabha(const char* __restrict, ...) __attribute__((noreturn));
+// Something without one too.
+void* memset(void* dest, int ch, size_t count);
 
-void printy(const char* __restrict, ...)
+void blabha(const char* __restrict fmt, ...) __attribute__((noreturn));
+
+void printy(const char* __restrict fmt, ...)
     __attribute__((__format__(__printf__, fmtarg, firstvararg)));
 
 int main(void) {
-  return 3;
+  return 23;
 }
