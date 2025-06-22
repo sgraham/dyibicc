@@ -28,7 +28,13 @@ COMMON_PREFIX = [
             "typedef unsigned long long uint64_t;\n",
             "typedef unsigned long long size_t;\n",
             "typedef long long int64_t;\n",
+            "typedef signed char int8_t;\n",
+            "typedef signed short int16_t;\n",
+            "typedef unsigned short uint16_t;\n",
+            "typedef signed int int32_t;\n",
             "typedef long long intptr_t;\n",
+            "typedef unsigned long long uintptr_t;\n",
+            "typedef long long ptrdiff_t;\n",
             "typedef unsigned int uint32_t;\n",
             "void* memset(void* dest, int ch, size_t count);\n",
             "void* memcpy(void* dest, const void* src, size_t count);\n",
@@ -45,12 +51,12 @@ COMMON_PREFIX = [
 
 CONTAINERS = [
     {
-        "in": os.path.join(REPOROOT, "scratch/STC/include/stc/cvec.h"),
+        "in": os.path.join(REPOROOT, "scratch/STC/include/stc/vec.h"),
         "out": os.path.join(REPOROOT, "include/all/_vec.h"),
         "prefix": COMMON_PREFIX,
     },
     {
-        "in": os.path.join(REPOROOT, "scratch/STC/include/stc/cmap.h"),
+        "in": os.path.join(REPOROOT, "scratch/STC/include/stc/hmap.h"),
         "out": os.path.join(REPOROOT, "include/all/_map.h"),
         "prefix": COMMON_PREFIX,
     },
