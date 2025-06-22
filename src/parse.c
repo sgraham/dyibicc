@@ -3617,8 +3617,16 @@ static Token* parse_typedef(Token* tok, Type* basety) {
 static void create_param_lvars(Type* param) {
   if (param) {
     create_param_lvars(param->next);
+#if defined(__APPLE__)
+    // Some Apple headers (e.g. _printf.h) don't have param names. I guess
+    // they're parsing in C++ mode? Or somehow always handling headers in C23? I
+    // have no idea.
+    Token none = {0};
+    param->name = get_ident(none);
+#else
     if (!param->name)
       error_tok(param->name_pos, "parameter name omitted");
+#endif
     Obj* p = new_lvar(get_ident(param->name), param);
 #if X64WIN
     if (!type_passed_in_register(param)) {
