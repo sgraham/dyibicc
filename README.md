@@ -22,6 +22,13 @@ or on Windows (from a VS x64 cmd):
 > m r test
 ```
 
+or on Mac (currently requires Rosetta, and only lightly tested):
+
+```
+% ./m r
+% ./m r test
+```
+
 `r` means Release, and can also be `d` for Debug or `a` for ASAN.
 
 For example, using `m a test -j1` would run the tests under an ASAN build, one

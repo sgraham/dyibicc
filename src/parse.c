@@ -419,7 +419,8 @@ static Type* declspec(Token** rest, Token* tok, VarAttr* attr) {
   while (is_typename(tok)) {
     // Handle storage class specifiers.
     if (equal(tok, "typedef") || equal(tok, "static") || equal(tok, "extern") ||
-        equal(tok, "inline") || equal(tok, "_Thread_local") || equal(tok, "__thread")) {
+        equal(tok, "inline") || equal(tok, "__inline") || equal(tok, "_Thread_local") ||
+        equal(tok, "__thread")) {
       if (!attr)
         error_tok(tok, "storage class specifier is not allowed in this context");
 
@@ -429,7 +430,7 @@ static Type* declspec(Token** rest, Token* tok, VarAttr* attr) {
         attr->is_static = true;
       else if (equal(tok, "extern"))
         attr->is_extern = true;
-      else if (equal(tok, "inline"))
+      else if (equal(tok, "inline") || equal(tok, "__inline"))
         attr->is_inline = true;
       else
         attr->is_tls = true;
@@ -1606,6 +1607,7 @@ static bool is_typename(Token* tok) {
       "double",
       "typeof",
       "inline",
+      "__inline",
       "_Thread_local",
       "__thread",
       "_Atomic",
@@ -1627,7 +1629,7 @@ static Node* asm_stmt(Token** rest, Token* tok) {
   Node* node = new_node(ND_ASM, tok);
   tok = tok->next;
 
-  while (equal(tok, "volatile") || equal(tok, "inline"))
+  while (equal(tok, "volatile") || equal(tok, "inline") || equal(tok, "__inline"))
     tok = tok->next;
 
   tok = skip(tok, "(");

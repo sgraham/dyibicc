@@ -1251,9 +1251,10 @@ IMPLSTATIC void init_macros(void) {
   define_macro("__SIZEOF_LONG_DOUBLE__", "16");
   define_macro("__APPLE__", "1");
   define_macro("__GNUC__", "4");
-  define_macro("__GNUC_STDC_INLINE__", "1");
   define_macro("__GNUC_MINOR__", "2");
   define_macro("__GNUC_PATCHLEVEL__", "1");
+  define_function_macro("__asm(_)\n", NULL);
+  define_function_macro("__asm__(_)\n", NULL);
 #else
   define_macro("__SIZEOF_LONG__", "8");
   define_macro("__SIZEOF_LONG_DOUBLE__", "16");
