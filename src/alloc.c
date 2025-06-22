@@ -102,6 +102,12 @@ IMPLSTATIC void* bumplamerealloc(void* old,
 }
 
 IMPLSTATIC void* aligned_allocate(size_t size, size_t alignment) {
+#if __APPLE__
+  if (alignment < sizeof(void*)) {
+    return malloc(size);
+  }
+#endif
+
   size = align_to_u(size, alignment);
 #if X64WIN
   return _aligned_malloc(size, alignment);
