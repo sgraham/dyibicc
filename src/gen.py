@@ -81,6 +81,24 @@ CONFIGS = {
             'obj_ext': '.o',
         },
     },
+    'm': {
+        'd': {
+            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -O0 -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -D_DARWIN_C_SOURCE -DNDEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -I$root -I. -c $in -o $out',
+            'LINK': 'clang -o $out $in -pthread -lm -ldl -g',
+            'ML': 'clang -o $out $in -lm',
+            'TESTCEXE': 'clang -Iembed -Wall -Wextra -Werror -ldl -lm -o $out $in',
+        },
+        'r': {
+            'COMPILE': 'clang -std=c11 -MMD -MT $out -MF $out.d -g -Oz -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -D_DARWIN_C_SOURCE -D_DEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -c -I$root -I. $in -o $out',
+            'LINK': 'clang -o $out $in -pthread -lm -ldl -g',
+            'ML': 'clang -o $out $in -lm',
+            'TESTCEXE': 'clang -Iembed -Wall -Wextra -Werror -ldl -lm -Oz -o $out $in',
+        },
+        '__': {
+            'exe_ext': '',
+            'obj_ext': '.o',
+        },
+    },
 }
 
 
@@ -287,7 +305,8 @@ def main():
     fuzz_tests = get_fuzz_tests()
     for platform, pdata in CONFIGS.items():
         if (sys.platform == 'win32' and platform == 'w') or \
-                (sys.platform == 'linux' and platform == 'l'):
+                (sys.platform == 'linux' and platform == 'l') or \
+                (sys.platform == 'darwin' and platform == 'm'):
             for config, cmdlines in pdata.items():
                 if config == '__':
                     continue

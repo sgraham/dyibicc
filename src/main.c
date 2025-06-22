@@ -88,6 +88,16 @@ DyibiccContext* dyibicc_set_environment(DyibiccEnviromentData* env_data) {
                 AL_Temp);
   strarray_push(&sys_inc_paths, format(AL_Temp, "%sinclude", env_VcToolsInstallDir), AL_Temp);
 
+#elif defined(__APPLE__)
+  strarray_push(&sys_inc_paths, "__include__/mac", AL_Temp);
+  strarray_push(&sys_inc_paths, "__include__/all", AL_Temp);
+
+  strarray_push(&sys_inc_paths, "/usr/local/include", AL_Temp);
+  strarray_push(&sys_inc_paths, "/usr/include", AL_Temp);
+  strarray_push(&sys_inc_paths,
+                "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/"
+                "SDKs/MacOSX.sdk/usr/include",
+                AL_Temp);
 #else
   strarray_push(&sys_inc_paths, "__include__/linux", AL_Temp);
   strarray_push(&sys_inc_paths, "__include__/all", AL_Temp);

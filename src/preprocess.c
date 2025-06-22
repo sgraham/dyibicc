@@ -1246,6 +1246,14 @@ IMPLSTATIC void init_macros(void) {
   define_macro("__WINT_TYPE__", "unsigned short");
   define_function_macro("__pragma(_)\n", NULL);
   define_function_macro("__declspec(_)\n", NULL);
+#elif defined(__APPLE__)
+  define_macro("__SIZEOF_LONG__", "8");
+  define_macro("__SIZEOF_LONG_DOUBLE__", "16");
+  define_macro("__APPLE__", "1");
+  define_macro("__GNUC__", "4");
+  define_macro("__GNUC_STDC_INLINE__", "1");
+  define_macro("__GNUC_MINOR__", "2");
+  define_macro("__GNUC_PATCHLEVEL__", "1");
 #else
   define_macro("__SIZEOF_LONG__", "8");
   define_macro("__SIZEOF_LONG_DOUBLE__", "16");
