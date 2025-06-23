@@ -1,15 +1,7 @@
 #ifndef __STDARG_H
 #define __STDARG_H
 
-typedef struct {
-  unsigned int gp_offset;
-  unsigned int fp_offset;
-  void* overflow_arg_area;
-  void* reg_save_area;
-} __va_elem;
-
 typedef __va_elem va_list[1];
-typedef va_list __builtin_va_list;
 
 #define va_start(ap, last)            \
   do {                                \

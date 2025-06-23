@@ -3858,6 +3858,38 @@ static void declare_builtin_functions(void) {
   C(builtin_alloca)->is_definition = false;
 }
 
+static Token* append_tokens(Token* tok1, Token* tok2) {
+  if (!tok1 || tok1->kind == TK_EOF)
+    return tok2;
+
+  Token* t = tok1;
+  while (t->next->kind != TK_EOF)
+    t = t->next;
+  t->next = tok2;
+  return tok1;
+}
+
+static Token* add_builtin_types(Token* base) {
+#if defined(__APPLE__)
+  // __builtin_va_list is used by system headers, so we have to move some of
+  // this that is stdarg.h on other platforms to be always-injected instead.
+  Token* va_list_typedef =
+      preprocess(tokenize(new_file("<built-in>",
+                                   "typedef struct {\n"
+                                   "  unsigned int gp_offset;\n"
+                                   "  unsigned int fp_offset;\n"
+                                   "  void* overflow_arg_area;\n"
+                                   "  void* reg_save_area;\n"
+                                   "} __va_elem;\n"
+                                   "typedef __va_elem __builtin_va_list[1];\n")));
+  // This is linear in the length of the injection since we have to walk to the
+  // end of the list, but the list shouldn't be too long. :/
+  return append_tokens(va_list_typedef, base);
+#else
+  return base;
+#endif
+}
+
 // program = (typedef | function-definition | global-variable)*
 IMPLSTATIC Obj* parse(Token* tok) {
   C(scope) = &C(empty_scope);
@@ -3865,8 +3897,10 @@ IMPLSTATIC Obj* parse(Token* tok) {
   declare_builtin_functions();
   C(globals) = NULL;
 
+  tok = add_builtin_types(tok);
+
   while (tok->kind != TK_EOF) {
-    // logerr("%s:%d\n", tok->filename, tok->line_no);
+    // outaf("%s:%d\n", tok->filename, tok->line_no);
     VarAttr attr = {0};
     Type* basety = declspec(&tok, tok, &attr);
 
