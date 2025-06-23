@@ -1214,13 +1214,6 @@ static Token* container_map_setup(Macro* m, Token* tok) {
   return ret;
 }
 
-static Token* has_macro_false(Macro* m, Token* tok) {
-  (void)m;
-  (void)tok;
-  char* buf = format(AL_Compile, "0\n");
-  return tokenize(new_file("<built-in>", buf));
-}
-
 IMPLSTATIC void init_macros(void) {
   // Define predefined macros
   define_macro("_LP64", "1");
@@ -1253,6 +1246,12 @@ IMPLSTATIC void init_macros(void) {
   define_macro("__volatile__", "volatile");
   define_macro("__x86_64", "1");
   define_macro("__x86_64__", "1");
+
+  define_macro("__has_builtin(_)", "0");
+  define_macro("__has_include(_)", "0");
+  define_macro("__has_feature(_)", "0");
+  define_macro("__has_attribute(_)", "0");
+
 #if X64WIN
   define_macro("__SIZEOF_LONG__", "4");
   define_macro("__SIZEOF_LONG_DOUBLE__", "8");
@@ -1318,10 +1317,6 @@ IMPLSTATIC void init_macros(void) {
   define_function_macro("_Pragma(_)\n", NULL);
   define_function_macro("$vec(T)", container_vec_setup);
   define_function_macro("$map(K,V)", container_map_setup);
-  define_function_macro("__has_builtin(x)", has_macro_false);
-  define_function_macro("__has_include(x)", has_macro_false);
-  define_function_macro("__has_feature(x)", has_macro_false);
-  define_function_macro("__has_attribute(x)", has_macro_false);
 
   define_macro("__DATE__", format_date());
   define_macro("__TIME__", format_time());
