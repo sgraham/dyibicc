@@ -1214,6 +1214,13 @@ static Token* container_map_setup(Macro* m, Token* tok) {
   return ret;
 }
 
+static Token* has_macro_false(Macro* m, Token* tok) {
+  (void)m;
+  (void)tok;
+  char* buf = format(AL_Compile, "0\n");
+  return tokenize(new_file("<built-in>", buf));
+}
+
 IMPLSTATIC void init_macros(void) {
   // Define predefined macros
   define_macro("_LP64", "1");
@@ -1247,10 +1254,10 @@ IMPLSTATIC void init_macros(void) {
   define_macro("__x86_64", "1");
   define_macro("__x86_64__", "1");
 
-  define_macro("__has_builtin(_)", "0");
-  define_macro("__has_include(_)", "0");
-  define_macro("__has_feature(_)", "0");
-  define_macro("__has_attribute(_)", "0");
+  define_function_macro("__has_builtin(_)", has_macro_false);
+  define_function_macro("__has_include(_)", has_macro_false);
+  define_function_macro("__has_feature(_)", has_macro_false);
+  define_function_macro("__has_attribute(_)", has_macro_false);
 
 #if X64WIN
   define_macro("__SIZEOF_LONG__", "4");
@@ -1295,6 +1302,9 @@ IMPLSTATIC void init_macros(void) {
   define_macro("__ENVIRONMENT_OS_VERSION_MIN_REQUIRED__", "150000");
   define_function_macro("__asm(_)\n", NULL);
   define_function_macro("__asm__(_)\n", NULL);
+  // This is not great, but avoids needing to define __builtin_fabsf and many friends.
+  define_macro("__FINITE_MATH_ONLY__", "1");
+  define_macro("_Float16", "float");  // TODO!
 #else
   define_macro("__SIZEOF_LONG__", "8");
   define_macro("__SIZEOF_LONG_DOUBLE__", "16");
