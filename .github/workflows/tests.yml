@@ -11,7 +11,7 @@ jobs:
     strategy:
       matrix:
         style: [d, r, a]
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-15]
     runs-on: ${{ matrix.os }}
 
     steps:
