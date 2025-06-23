@@ -418,6 +418,10 @@ static MacroArg* read_macro_args(Token** rest, Token* tok, MacroParam* params, c
   Token* start = tok;
   tok = tok->next->next;
 
+  if (!tok) {
+    error_tok(start, "expecting macro args");
+  }
+
   MacroArg head = {0};
   MacroArg* cur = &head;
 
