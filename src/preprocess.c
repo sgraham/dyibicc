@@ -282,17 +282,48 @@ static long eval_const_expr(Token** rest, Token* tok) {
   if (expr->kind == TK_EOF)
     error_tok(start, "no expression");
 
+  Token head = {};
+  Token *cur = &head;
+
   // [https://www.sigbus.info/n1570#6.10.1p4] The standard requires
   // we replace remaining non-macro identifiers with "0" before
   // evaluating a constant expression. For example, `#if foo` is
   // equivalent to `#if 0` if foo is not defined.
-  for (Token* t = expr; t->kind != TK_EOF; t = t->next) {
-    if (t->kind == TK_IDENT) {
-      Token* next = t->next;
-      *t = *new_num_token(0, t);
-      t->next = next;
+  while (expr->kind != TK_EOF) {
+    if (expr->kind == TK_IDENT) {
+      if (expr->len != 7 || strncmp(expr->loc, "defined", 7)) {
+        Token* next = expr->next;
+        *expr = *new_num_token(0, expr);
+        cur = cur->next = expr;
+        expr = expr->next = next;
+        continue;
+      }
+
+      // Special handling for macro generated defined operator.
+      // It's actually undefined behaviour, but some compilers accept it and
+      // evaluate it as how defined operator works in a #if/#elif expression.
+      bool has_paren = consume(&expr, expr->next, "(");
+
+      if (expr->kind != TK_IDENT)
+        error_tok(expr, "'defined' requires an identifier");
+
+      Macro* m = find_macro(expr);
+      Token* next = expr->next;
+      *expr = *new_num_token(m ? 1 : 0, expr);
+      cur = cur->next = expr;
+      expr = next;
+
+      if (has_paren)
+        expr = skip(expr, ")");
+      continue;
     }
+
+    cur = cur->next = expr;
+    expr = expr->next;
   }
+
+  cur = cur->next = expr;
+  expr = head.next;
 
   // Convert pp-numbers to regular numbers
   convert_pp_tokens(expr);

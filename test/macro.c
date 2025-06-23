@@ -409,6 +409,27 @@ int main() {
 #define M31(x, y) (1, ##x y)
   ASSERT(3, M31(, 3));
 
+  // Macro generated `defined`
+#define M38_1() 0
+#define M38(s) defined(s)
+
+#if M38(M38_1)
+#undef M38_1
+#define M38_1() 1
+#endif
+  ASSERT(1, M38_1());
+
+  // Double indirect macro generated `defined`
+#define M39_1() 0
+#define M39_2 defined
+#define M39(s) M39_2 s
+
+#if M39(M39_1)
+#undef M39_1
+#define M39_1() 1
+#endif
+  ASSERT(1, M39_1());
+
   printf("OK\n");
   return 0;
 }
