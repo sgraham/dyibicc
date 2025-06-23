@@ -1215,6 +1215,8 @@ static Token* container_map_setup(Macro* m, Token* tok) {
 }
 
 static Token* has_macro_false(Macro* m, Token* tok) {
+  (void)m;
+  (void)tok;
   char* buf = format(AL_Compile, "0\n");
   return tokenize(new_file("<built-in>", buf));
 }
