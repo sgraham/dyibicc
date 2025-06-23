@@ -334,7 +334,7 @@ static void* symbol_lookup(char* name) {
   }
   return (void*)GetProcAddress(GetModuleHandle(NULL), name);
 #else
-  return dlsym(NULL, name);
+  return dlsym(RTLD_DEFAULT, name);
 #endif
 }
 

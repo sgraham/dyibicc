@@ -86,13 +86,13 @@ CONFIGS = {
             'COMPILE': 'clang --target=x86_64-apple-darwin -std=c11 -MMD -MT $out -MF $out.d -g -O0 -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -D_DARWIN_C_SOURCE -DNDEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -I$root -I. -c $in -o $out',
             'LINK': 'clang --target=x86_64-apple-darwin -o $out $in -pthread -lm -ldl -g',
             'ML': 'clang -o $out $in -lm',
-            'TESTCEXE': 'clang -Iembed -Wall -Wextra -Werror -ldl -lm -o $out $in',
+            'TESTCEXE': 'clang --target=x86_64-apple-darwin -Iembed -Wall -Wextra -Werror -ldl -lm -o $out $in',
         },
         'r': {
             'COMPILE': 'clang --target=x86_64-apple-darwin -std=c11 -MMD -MT $out -MF $out.d -g -Oz -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -D_DARWIN_C_SOURCE -D_DEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -c -I$root -I. $in -o $out',
             'LINK': 'clang --target=x86_64-apple-darwin -o $out $in -pthread -lm -ldl -g',
             'ML': 'clang -o $out $in -lm',
-            'TESTCEXE': 'clang -Iembed -Wall -Wextra -Werror -ldl -lm -Oz -o $out $in',
+            'TESTCEXE': 'clang --target=x86_64-apple-darwin -Iembed -Wall -Wextra -Werror -ldl -lm -Oz -o $out $in',
         },
         '__': {
             'exe_ext': '',

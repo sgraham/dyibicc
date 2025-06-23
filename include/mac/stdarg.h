@@ -1,9 +1,6 @@
 #ifndef __STDARG_H
 #define __STDARG_H
 
-typedef char* __builtin_va_list;
-
-#if 0
 typedef struct {
   unsigned int gp_offset;
   unsigned int fp_offset;
@@ -12,6 +9,7 @@ typedef struct {
 } __va_elem;
 
 typedef __va_elem va_list[1];
+typedef va_list __builtin_va_list;
 
 #define va_start(ap, last)            \
   do {                                \
@@ -58,6 +56,5 @@ static void* __va_arg_fp(__va_elem* ap, int sz, int align) {
 
 #define __GNUC_VA_LIST 1
 typedef va_list __gnuc_va_list;
-#endif
 
 #endif
