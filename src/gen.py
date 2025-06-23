@@ -94,6 +94,12 @@ CONFIGS = {
             'ML': 'clang -o $out $in -lm',
             'TESTCEXE': 'clang --target=x86_64-apple-darwin -Iembed -Wall -Wextra -Werror -ldl -lm -Oz -o $out $in',
         },
+        'a': {
+            'COMPILE': 'clang --target=x86_64-apple-darwin -std=c11 -MMD -MT $out -MF $out.d -g -O0 -fsanitize=address -fcolor-diagnostics -fno-common -Wall -Werror -Wno-switch -D_DARWIN_C_SOURCE -D_DEBUG -DIMPLSTATIC= -DIMPLEXTERN=extern -pthread -c -I$root -I. $in -o $out',
+            'LINK': 'clang --target=x86_64-apple-darwin -fsanitize=address -o $out $in -pthread -lm -ldl -g',
+            'ML': 'clang -o $out $in -lm',
+            'TESTCEXE': 'clang --target=x86_64-apple-darwin -Iembed -Wall -Wextra -Werror -ldl -lm -fsanitize=address -o $out $in',
+        },
         '__': {
             'exe_ext': '',
             'obj_ext': '.o',
