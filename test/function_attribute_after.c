@@ -12,6 +12,10 @@ void printy(const char* __restrict fmt, ...)
 void multiple(const char* __restrict fmt, ...) __attribute__((__noreturn__))
 __attribute__((__cold__)) __attribute__((__pure__));
 
+#define __cold __attribute__((__cold__))
+#define __dead2 __attribute__((__noreturn__))
+void on_void_args(void) __cold __dead2;
+
 int main(void) {
   return 23;
 }

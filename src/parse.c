@@ -641,7 +641,8 @@ static Type* declspec(Token** rest, Token* tok, VarAttr* attr) {
 // param       = declspec declarator
 static Type* func_params(Token** rest, Token* tok, Type* ty) {
   if (equal(tok, "void") && equal(tok->next, ")")) {
-    *rest = tok->next->next;
+    bool skipped_func_attrib = skip_function_attributes(&tok, tok->next->next);
+    *rest = skipped_func_attrib ? tok : tok->next->next;
     return func_type(ty);
   }
 
