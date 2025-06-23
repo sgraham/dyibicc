@@ -6,7 +6,8 @@ generates machine code via [DynASM](https://luajit.org/dynasm.html).
 I renamed it from chibicc to dyibicc to avoid confusion between the two. But the
 code still overwhelmingly follows Rui's model and style.
 
-Currently only supports Linux and Windows, and x64 only.
+Currently supports Linux, Windows, and Mac, but x64 only (OK on Mac aarch64 via
+Rosetta).
 
 Build and test on Linux with:
 
