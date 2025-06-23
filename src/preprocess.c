@@ -1115,15 +1115,11 @@ static Token* base_file_macro(Macro* m, Token* tmpl) {
   return new_str_token(compiler_state.main__base_file, tmpl);
 }
 
-// __DATE__ is expanded to the current date, e.g. "May 17 2020".
-static char* format_date(struct tm* tm) {
-  (void)tm;
+static char* format_date(void) {
   return "\"May 02 1977\"";
 }
 
-// __TIME__ is expanded to the current time, e.g. "13:34:03".
-static char* format_time(struct tm* tm) {
-  (void)tm;
+static char* format_time(void) {
   return "\"01:23:45\"";
 }
 
@@ -1218,6 +1214,11 @@ static Token* container_map_setup(Macro* m, Token* tok) {
   return ret;
 }
 
+static Token* has_macro_false(Macro* m, Token* tok) {
+  char* buf = format(AL_Compile, "0\n");
+  return tokenize(new_file("<built-in>", buf));
+}
+
 IMPLSTATIC void init_macros(void) {
   // Define predefined macros
   define_macro("_LP64", "1");
@@ -1285,9 +1286,12 @@ IMPLSTATIC void init_macros(void) {
   define_macro("__SIZEOF_LONG__", "8");
   define_macro("__SIZEOF_LONG_DOUBLE__", "16");
   define_macro("__APPLE__", "1");
+  define_macro("__MACH__", "1");
   define_macro("__GNUC__", "4");
   define_macro("__GNUC_MINOR__", "2");
   define_macro("__GNUC_PATCHLEVEL__", "1");
+  define_macro("__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__", "150000");
+  define_macro("__ENVIRONMENT_OS_VERSION_MIN_REQUIRED__", "150000");
   define_function_macro("__asm(_)\n", NULL);
   define_function_macro("__asm__(_)\n", NULL);
 #else
@@ -1309,13 +1313,16 @@ IMPLSTATIC void init_macros(void) {
   add_builtin("__TIMESTAMP__", timestamp_macro);
   add_builtin("__BASE_FILE__", base_file_macro);
 
+  define_function_macro("_Pragma(_)\n", NULL);
   define_function_macro("$vec(T)", container_vec_setup);
   define_function_macro("$map(K,V)", container_map_setup);
+  define_function_macro("__has_builtin(x)", has_macro_false);
+  define_function_macro("__has_include(x)", has_macro_false);
+  define_function_macro("__has_feature(x)", has_macro_false);
+  define_function_macro("__has_attribute(x)", has_macro_false);
 
-  time_t now = time(NULL);
-  struct tm* tm = localtime(&now);
-  define_macro("__DATE__", format_date(tm));
-  define_macro("__TIME__", format_time(tm));
+  define_macro("__DATE__", format_date());
+  define_macro("__TIME__", format_time());
 }
 
 typedef enum {
