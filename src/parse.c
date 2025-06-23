@@ -3858,6 +3858,7 @@ static void declare_builtin_functions(void) {
   C(builtin_alloca)->is_definition = false;
 }
 
+#if defined(__APPLE__)
 static Token* append_tokens(Token* tok1, Token* tok2) {
   if (!tok1 || tok1->kind == TK_EOF)
     return tok2;
@@ -3868,6 +3869,7 @@ static Token* append_tokens(Token* tok1, Token* tok2) {
   t->next = tok2;
   return tok1;
 }
+#endif
 
 static Token* add_builtin_types(Token* base) {
 #if defined(__APPLE__)
