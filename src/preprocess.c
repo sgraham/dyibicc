@@ -53,7 +53,6 @@ struct Macro {
   char* va_args_name;
   Token* body;
   macro_handler_fn* handler;
-  bool handler_advances;
 };
 
 // `#if` can be nested, so we use a stack to manage nested `#if`s.
@@ -691,8 +690,14 @@ static bool expand_macro(Token** rest, Token* tok) {
   // Built-in dynamic macro application such as __LINE__
   if (m->handler) {
     *rest = m->handler(m, tok);
-    if (!m->handler_advances) {
+    (*rest)->at_bol = tok->at_bol;
+    (*rest)->has_space = tok->has_space;
+    if (m->is_objlike) {
       (*rest)->next = tok->next;
+    } else {
+      Token* after;
+      read_macro_args(&after, tok, m->params, m->va_args_name);
+      (*rest)->next = after->next;
     }
     return true;
   }
@@ -903,8 +908,9 @@ static Token* preprocess2(Token* tok) {
 
   while (tok->kind != TK_EOF) {
     // If it is a macro, expand it.
-    if (expand_macro(&tok, tok))
+    if (expand_macro(&tok, tok)) {
       continue;
+    }
 
     // Pass through if it is not a "#".
     if (!is_hash(tok)) {
@@ -1072,7 +1078,6 @@ IMPLSTATIC void define_function_macro(char* buf, macro_handler_fn* fn) {
   Token* rest = tok;
   Macro* m = read_macro_definition(&rest, tok);
   m->handler = fn;
-  m->handler_advances = true;
 }
 
 static Macro* add_builtin(char* name, macro_handler_fn* fn) {
@@ -1216,9 +1221,7 @@ static Token* container_map_setup(Macro* m, Token* tok) {
 
 static Token* has_macro_false(Macro* m, Token* tok) {
   (void)m;
-  (void)tok;
-  char* buf = format(AL_Compile, "0\n");
-  return tokenize(new_file("<built-in>", buf));
+  return new_num_token(0, tok);
 }
 
 IMPLSTATIC void init_macros(void) {

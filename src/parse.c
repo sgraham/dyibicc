@@ -2127,6 +2127,21 @@ IMPLSTATIC int64_t const_expr(Token** rest, Token* tok) {
   return eval(node);
 }
 
+#if 0
+IMPLSTATIC void dump_tokens(char* prefix, Token* tok) {
+  static const char* token_kind_names[] = {
+      [TK_IDENT] = "ident", [TK_PUNCT] = "punct",   [TK_KEYWORD] = "keyword", [TK_STR] = "str",
+      [TK_NUM] = "num",     [TK_PP_NUM] = "pp_num", [TK_EOF] = "eof",
+  };
+
+  printf("START %s\n", prefix);
+  for (Token* x = tok; x; x = x->next) {
+    printf("  kind: %s, str: %.*s\n", token_kind_names[x->kind], x->len, x->loc);
+  }
+  printf("END %s\n", prefix);
+}
+#endif
+
 IMPLSTATIC int64_t pp_const_expr(Token** rest, Token* tok) {
   C(evaluating_pp_const) = true;
   Node* node = conditional(rest, tok);
@@ -3859,6 +3874,7 @@ static void declare_builtin_functions(void) {
 }
 
 #if defined(__APPLE__)
+// TODO: probably use append() in preprocess.c.
 static Token* append_tokens(Token* tok1, Token* tok2) {
   if (!tok1 || tok1->kind == TK_EOF)
     return tok2;

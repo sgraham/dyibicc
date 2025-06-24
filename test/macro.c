@@ -430,6 +430,15 @@ int main() {
 #endif
   ASSERT(1, M39_1());
 
+  // Was skipping over internally defined function-like macros incorrectly.
+#define INDIRECT(x) __has_builtin(x)
+  int x =
+#if !(defined __cplusplus || INDIRECT(__builtin_nanf))
+      1
+#endif
+      ;
+  ASSERT(1, x);
+
   printf("OK\n");
   return 0;
 }
